@@ -26,7 +26,7 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │   PHASE 1    │    │   PHASE 2    │    │   PHASE 3    │    │   PHASE 4    │
 │   Scraper    │───▶│   Analyzer   │───▶│   Insights   │───▶│ Recommender  │
-│  TypeScript  │    │    Python    │    │    Python    │    │    Python    │
+│  TypeScript  │    │    Python    │    │    Python    │    │  Python/API  │
 └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
        │                   │                   │                   │
        ▼                   ▼                   ▼                   ▼
@@ -34,6 +34,12 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 │                         FIREBASE FIRESTORE                                │
 │  channels/ ─► videos/ ─► analysis/ ─► insights/                          │
 └──────────────────────────────────────────────────────────────────────────┘
+                                                                    │
+                                                                    ▼
+                                                        ┌──────────────────┐
+                                                        │ Firebase Function │
+                                                        │  REST API / SDK   │
+                                                        └──────────────────┘
 ```
 
 ### Phase Components
@@ -44,6 +50,7 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 | 2 | **Analyzer** | Python + Gemini AI | AI analysis of thumbnails, titles, tags |
 | 3 | **Insights** | Python + Pandas/SciPy | Statistical pattern discovery |
 | 4 | **Recommender** | Python + Gemini AI | Generate video recommendations |
+| API | **Functions** | TypeScript + Firebase | Serverless recommendation API |
 
 ## Quick Start
 
@@ -148,6 +155,14 @@ youtube_channel_analysis/
 │   ├── firebase_utils.py
 │   └── gemini_utils.py
 │
+├── functions/                   # Firebase Functions (Recommendation API)
+│   ├── README.md
+│   ├── package.json
+│   └── src/
+│       ├── index.ts             # Function definitions
+│       ├── engine.ts            # Recommendation engine
+│       └── templates.ts         # Fallback templates
+│
 └── docs/
     ├── TECHNICAL_DOCUMENTATION.md
     ├── API_REFERENCE.md
@@ -232,6 +247,61 @@ Edit `config/channels.json` to specify channels to analyze:
 - Tag recommendations with search volume estimates
 - Optimal posting time
 - Performance predictions
+
+### Recommendation API (Firebase Functions)
+- **REST API** for any client (web, mobile, scripts)
+- **Callable Function** for Firebase SDK integration
+- Automatic fallback to templates if AI fails
+- Real-time recommendations in 2-5 seconds
+
+## Recommendation API
+
+The system includes a serverless API deployed as Firebase Functions for real-time recommendations.
+
+### API Endpoint
+
+```bash
+POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend
+```
+
+### Example Request
+
+```bash
+curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "Hyderabadi Biryani",
+    "type": "recipe",
+    "angle": "Restaurant secret recipe",
+    "audience": "Telugu home cooks"
+  }'
+```
+
+### Using Firebase SDK
+
+```typescript
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const functions = getFunctions();
+const getRecommendation = httpsCallable(functions, 'getRecommendation');
+
+const result = await getRecommendation({
+  topic: 'Biryani',
+  type: 'recipe'
+});
+console.log(result.data);
+```
+
+### Deploy the API
+
+```bash
+cd functions
+npm install
+firebase functions:secrets:set GOOGLE_API_KEY
+npm run deploy
+```
+
+See [functions/README.md](functions/README.md) for complete API documentation.
 
 ## Data Schema
 

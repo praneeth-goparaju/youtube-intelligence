@@ -1,0 +1,31 @@
+{
+  "name": "youtube-intelligence-functions",
+  "version": "1.0.0",
+  "description": "Firebase Functions for YouTube Intelligence System - Recommendation API",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "shell": "npm run build && firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "test": "jest"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "firebase-functions-test": "^3.1.0",
+    "jest": "^29.7.0",
+    "typescript": "^5.3.3"
+  },
+  "private": true
+}
