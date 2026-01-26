@@ -37,28 +37,37 @@ export async function saveVideo(channelId: string, video: Video): Promise<void> 
     .set(video, { merge: true });
 }
 
+// Firestore batch size limit
+const MAX_BATCH_SIZE = 500;
+
 /**
  * Save multiple videos in a batch
+ * Automatically splits into multiple batches if exceeding Firestore's 500 operation limit
  */
 export async function saveVideosBatch(channelId: string, videos: Video[]): Promise<void> {
   if (videos.length === 0) return;
 
   const db = getDb();
-  const batch = db.batch();
 
-  for (const video of videos) {
-    const ref = db
-      .collection(CHANNELS_COLLECTION)
-      .doc(channelId)
-      .collection(VIDEOS_SUBCOLLECTION)
-      .doc(video.videoId);
-    batch.set(ref, video, { merge: true });
-  }
+  // Split into chunks of MAX_BATCH_SIZE to respect Firestore limits
+  for (let i = 0; i < videos.length; i += MAX_BATCH_SIZE) {
+    const chunk = videos.slice(i, i + MAX_BATCH_SIZE);
+    const batch = db.batch();
 
-  try {
-    await batch.commit();
-  } catch (error) {
-    throw new Error(`Failed to save video batch for channel ${channelId}: ${(error as Error).message}`);
+    for (const video of chunk) {
+      const ref = db
+        .collection(CHANNELS_COLLECTION)
+        .doc(channelId)
+        .collection(VIDEOS_SUBCOLLECTION)
+        .doc(video.videoId);
+      batch.set(ref, video, { merge: true });
+    }
+
+    try {
+      await batch.commit();
+    } catch (error) {
+      throw new Error(`Failed to save video batch for channel ${channelId} (chunk ${Math.floor(i / MAX_BATCH_SIZE) + 1}): ${(error as Error).message}`);
+    }
   }
 }
 

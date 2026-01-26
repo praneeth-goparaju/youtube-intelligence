@@ -11,8 +11,13 @@ import {
   containsNumber,
   containsEmoji,
   VIDEO_CATEGORIES,
+  retry,
 } from '../utils/helpers.js';
 import { config } from '../config.js';
+
+// Retry configuration for YouTube API calls
+const API_MAX_RETRIES = 3;
+const API_BASE_DELAY_MS = 1000;
 
 interface PlaylistPageResult {
   items: PlaylistItem[];
@@ -22,6 +27,7 @@ interface PlaylistPageResult {
 
 /**
  * Get videos from uploads playlist with pagination
+ * Includes retry logic for transient errors
  */
 export async function getPlaylistVideos(
   playlistId: string,
@@ -29,30 +35,34 @@ export async function getPlaylistVideos(
 ): Promise<PlaylistPageResult> {
   const youtube = getYoutubeClient();
 
-  try {
-    const response = await youtube.playlistItems.list({
-      part: ['snippet'],
-      playlistId,
-      maxResults: 50,
-      pageToken,
-    });
-    addQuotaUsage(1);
+  return retry(
+    async () => {
+      const response = await youtube.playlistItems.list({
+        part: ['snippet'],
+        playlistId,
+        maxResults: 50,
+        pageToken,
+      });
+      addQuotaUsage(1);
 
-    const items: PlaylistItem[] = (response.data.items || []).map((item) => ({
-      videoId: item.snippet?.resourceId?.videoId || '',
-      publishedAt: item.snippet?.publishedAt || '',
-      title: item.snippet?.title || '',
-      description: item.snippet?.description || '',
-    }));
+      const items: PlaylistItem[] = (response.data.items || []).map((item) => ({
+        videoId: item.snippet?.resourceId?.videoId || '',
+        publishedAt: item.snippet?.publishedAt || '',
+        title: item.snippet?.title || '',
+        description: item.snippet?.description || '',
+      }));
 
-    return {
-      items,
-      nextPageToken: response.data.nextPageToken || null,
-      totalResults: response.data.pageInfo?.totalResults || 0,
-    };
-  } catch (error) {
-    throw new Error(`Failed to fetch playlist ${playlistId}: ${(error as Error).message}`);
-  }
+      return {
+        items,
+        nextPageToken: response.data.nextPageToken || null,
+        totalResults: response.data.pageInfo?.totalResults || 0,
+      };
+    },
+    API_MAX_RETRIES,
+    API_BASE_DELAY_MS
+  ).catch((error) => {
+    throw new Error(`Failed to fetch playlist ${playlistId} after ${API_MAX_RETRIES} retries: ${(error as Error).message}`);
+  });
 }
 
 interface YouTubeVideoData {
@@ -94,6 +104,7 @@ interface YouTubeVideoData {
 
 /**
  * Get detailed video information for a batch of video IDs
+ * Includes retry logic for transient errors
  */
 export async function getVideoDetails(videoIds: string[]): Promise<YouTubeVideoData[]> {
   if (videoIds.length === 0) return [];
@@ -103,17 +114,21 @@ export async function getVideoDetails(videoIds: string[]): Promise<YouTubeVideoD
 
   const youtube = getYoutubeClient();
 
-  try {
-    const response = await youtube.videos.list({
-      part: ['snippet', 'contentDetails', 'statistics', 'topicDetails', 'status'],
-      id: videoIds,
-    });
-    addQuotaUsage(1);
+  return retry(
+    async () => {
+      const response = await youtube.videos.list({
+        part: ['snippet', 'contentDetails', 'statistics', 'topicDetails', 'status'],
+        id: videoIds,
+      });
+      addQuotaUsage(1);
 
-    return (response.data.items || []) as unknown as YouTubeVideoData[];
-  } catch (error) {
-    throw new Error(`Failed to fetch video details: ${(error as Error).message}`);
-  }
+      return (response.data.items || []) as unknown as YouTubeVideoData[];
+    },
+    API_MAX_RETRIES,
+    API_BASE_DELAY_MS
+  ).catch((error) => {
+    throw new Error(`Failed to fetch video details after ${API_MAX_RETRIES} retries: ${(error as Error).message}`);
+  });
 }
 
 /**

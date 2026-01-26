@@ -1,29 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Channels and videos - read-only for clients, write for admin SDK
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Channels and videos - authenticated read only, write for admin SDK
     match /channels/{channelId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if false;  // Only admin SDK can write
 
       match /videos/{videoId} {
-        allow read: if true;
+        allow read: if isAuthenticated();
         allow write: if false;
 
         match /analysis/{analysisType} {
-          allow read: if true;
+          allow read: if isAuthenticated();
           allow write: if false;
         }
       }
     }
 
-    // Insights - read-only for clients
+    // Insights - authenticated read only for clients
+    // Note: Firebase Functions using Admin SDK bypass these rules
     match /insights/{insightType} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if false;
     }
 
-    // Progress tracking - admin only
+    // Progress tracking - admin only (no client access)
     match /scrape_progress/{channelId} {
       allow read, write: if false;
     }

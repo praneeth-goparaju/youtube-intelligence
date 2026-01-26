@@ -40,6 +40,15 @@ def main():
 
     args = parser.parse_args()
 
+    # Validate channel ID format if provided
+    if args.channel:
+        # YouTube channel IDs start with UC and are 24 characters long
+        if not args.channel.startswith('UC') or len(args.channel) != 24:
+            print(f"\nError: Invalid channel ID format: {args.channel}")
+            print("Channel IDs should start with 'UC' and be 24 characters long.")
+            print("Example: UCxxxxxxxxxxxxxxxxxxxxxxx")
+            sys.exit(1)
+
     # Validate configuration
     print("\n" + "=" * 60)
     print("  YouTube Intelligence System - Phase 2: AI Analysis")
