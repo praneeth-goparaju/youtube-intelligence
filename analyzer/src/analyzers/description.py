@@ -6,7 +6,7 @@ from datetime import datetime
 from ..gemini_client import analyze_text
 from ..firebase_client import save_analysis, has_analysis
 from ..prompts import DESCRIPTION_ANALYSIS_PROMPT
-from ..config import config
+from ..config import config, logger
 
 
 class DescriptionAnalyzer:
@@ -53,5 +53,5 @@ class DescriptionAnalyzer:
             return result
 
         except Exception as e:
-            print(f"Error analyzing description for {video_id}: {e}")
+            logger.error(f"Error analyzing description for {video_id}: {e}")
             return None

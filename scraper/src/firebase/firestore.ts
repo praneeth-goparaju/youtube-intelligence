@@ -41,6 +41,8 @@ export async function saveVideo(channelId: string, video: Video): Promise<void> 
  * Save multiple videos in a batch
  */
 export async function saveVideosBatch(channelId: string, videos: Video[]): Promise<void> {
+  if (videos.length === 0) return;
+
   const db = getDb();
   const batch = db.batch();
 
@@ -53,7 +55,11 @@ export async function saveVideosBatch(channelId: string, videos: Video[]): Promi
     batch.set(ref, video, { merge: true });
   }
 
-  await batch.commit();
+  try {
+    await batch.commit();
+  } catch (error) {
+    throw new Error(`Failed to save video batch for channel ${channelId}: ${(error as Error).message}`);
+  }
 }
 
 /**

@@ -25,8 +25,19 @@ import { ChannelsConfig, ChannelInput, Channel, Video, ScrapeProgress } from '..
  * Load channels configuration from file
  */
 export function loadChannelsConfig(): ChannelsConfig {
-  const content = readFileSync(config.paths.channelsConfig, 'utf-8');
-  return JSON.parse(content) as ChannelsConfig;
+  try {
+    const content = readFileSync(config.paths.channelsConfig, 'utf-8');
+    return JSON.parse(content) as ChannelsConfig;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      throw new Error(`Channels configuration file not found: ${config.paths.channelsConfig}. Please create a channels.json file in the config directory.`);
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error(`Invalid JSON in channels configuration file: ${error.message}`);
+    }
+    throw new Error(`Failed to load channels configuration: ${err.message}`);
+  }
 }
 
 /**

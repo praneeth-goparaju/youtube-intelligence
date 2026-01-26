@@ -49,29 +49,57 @@ def get_db() -> firestore.Client:
 
 
 def get_all_channels() -> List[Dict[str, Any]]:
-    """Get all channels."""
+    """Get all channels.
+
+    Returns:
+        List of channel documents with 'id' field.
+
+    Raises:
+        RuntimeError: If fetching channels fails.
+    """
     try:
         db = get_db()
         docs = db.collection('channels').stream()
         return [{'id': doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
-        print(f"Error fetching channels: {e}")
-        return []
+        raise RuntimeError(f"Failed to fetch channels from Firestore: {e}") from e
 
 
 def get_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
-    """Get all videos for a channel."""
+    """Get all videos for a channel.
+
+    Args:
+        channel_id: The channel ID to fetch videos for.
+
+    Returns:
+        List of video documents with 'id' field.
+
+    Raises:
+        RuntimeError: If fetching videos fails.
+    """
     try:
         db = get_db()
         docs = db.collection('channels').document(channel_id).collection('videos').stream()
         return [{'id': doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
-        print(f"Error fetching videos for channel {channel_id}: {e}")
-        return []
+        raise RuntimeError(f"Failed to fetch videos for channel {channel_id}: {e}") from e
 
 
 def get_video_analysis(channel_id: str, video_id: str, analysis_type: str) -> Optional[Dict[str, Any]]:
-    """Get analysis for a video."""
+    """Get analysis for a video.
+
+    Args:
+        channel_id: The channel ID.
+        video_id: The video ID.
+        analysis_type: The type of analysis (thumbnail, title, etc.).
+
+    Returns:
+        Analysis document data or None if not found.
+
+    Note:
+        Returns None if analysis doesn't exist (not an error).
+        Raises RuntimeError for actual Firestore errors.
+    """
     try:
         db = get_db()
         doc = (db.collection('channels')
@@ -85,7 +113,8 @@ def get_video_analysis(channel_id: str, video_id: str, analysis_type: str) -> Op
             return doc.to_dict()
         return None
     except Exception as e:
-        print(f"Error fetching analysis for video {video_id}: {e}")
+        # Log but don't fail - analysis may not exist yet
+        print(f"Warning: Error fetching analysis for video {video_id}: {e}")
         return None
 
 
@@ -126,7 +155,17 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
 
 
 def get_insights(insight_type: str) -> Optional[Dict[str, Any]]:
-    """Get insights from Firestore."""
+    """Get insights from Firestore.
+
+    Args:
+        insight_type: The type of insights to fetch.
+
+    Returns:
+        Insights document data or None if not found.
+
+    Raises:
+        RuntimeError: If fetching insights fails due to Firestore error.
+    """
     try:
         db = get_db()
         doc = db.collection('insights').document(insight_type).get()
@@ -134,5 +173,4 @@ def get_insights(insight_type: str) -> Optional[Dict[str, Any]]:
             return doc.to_dict()
         return None
     except Exception as e:
-        print(f"Error fetching insights for {insight_type}: {e}")
-        return None
+        raise RuntimeError(f"Failed to fetch insights for {insight_type}: {e}") from e

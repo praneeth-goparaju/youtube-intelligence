@@ -5,6 +5,14 @@ from collections import Counter, defaultdict
 import numpy as np
 
 
+# Configuration constants for gap analysis
+MIN_VIDEOS_FOR_TOPIC = 3  # Minimum videos required to analyze a topic
+MIN_VIDEOS_FOR_KEYWORD = 2  # Minimum videos for keyword analysis
+SATURATION_THRESHOLD = 0.1  # Topics with >10% of videos are considered saturated
+UNDERPERFORMING_THRESHOLD = 0.8  # Topics with <80% of average views are underperforming
+KEYWORD_OPPORTUNITY_THRESHOLD = 0.1  # Keywords used in <10% of videos may be opportunities
+
+
 class GapAnalyzer:
     """Analyze content gaps and opportunities."""
 
@@ -39,7 +47,7 @@ class GapAnalyzer:
         total_videos = len(self.videos)
 
         for topic, views in topic_performance.items():
-            if len(views) < 3:
+            if len(views) < MIN_VIDEOS_FOR_TOPIC:
                 continue
 
             avg_views = np.mean(views)
@@ -66,7 +74,8 @@ class GapAnalyzer:
         avg_all_views = np.mean(all_views) if all_views else 0
         saturated = [
             opp for opp in opportunities
-            if opp['videoCount'] > len(self.videos) * 0.1 and opp['avgViews'] < avg_all_views * 0.8
+            if opp['videoCount'] > len(self.videos) * SATURATION_THRESHOLD
+            and opp['avgViews'] < avg_all_views * UNDERPERFORMING_THRESHOLD
         ]
 
         return {
@@ -102,7 +111,7 @@ class GapAnalyzer:
         avg_views = np.mean(all_views) if all_views else 0
 
         for keyword, views in keyword_performance.items():
-            if len(views) < 2:
+            if len(views) < MIN_VIDEOS_FOR_KEYWORD:
                 continue
 
             kw_avg = np.mean(views)
@@ -110,7 +119,7 @@ class GapAnalyzer:
             usage_rate = count / total_videos if total_videos > 0 else 0
 
             # High opportunity: high performance, low usage
-            if kw_avg > avg_views and usage_rate < 0.1:
+            if kw_avg > avg_views and usage_rate < KEYWORD_OPPORTUNITY_THRESHOLD:
                 opportunities.append({
                     'keyword': keyword,
                     'avgViews': int(kw_avg),

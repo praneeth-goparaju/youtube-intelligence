@@ -1,13 +1,23 @@
 """Batch processing for analysis jobs."""
 
+import sys
+import os
 import time
 from typing import Dict, Any, List, Optional, Callable
 from tqdm import tqdm
 
+# Add shared module to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+from shared.constants import ANALYSIS_TYPES
+
 from ..firebase_client import get_all_channels, get_channel_videos, get_unanalyzed_videos
 from ..analyzers import ThumbnailAnalyzer, TitleAnalyzer, DescriptionAnalyzer, TagsAnalyzer, ContentStructureAnalyzer
-from ..config import config
+from ..config import config, logger
 from .progress import ProgressTracker
+
+
+# Default limit when no limit specified (effectively unlimited for practical purposes)
+DEFAULT_VIDEO_LIMIT = 10000
 
 
 class BatchProcessor:
@@ -97,11 +107,10 @@ class BatchProcessor:
         Returns:
             Processing statistics
         """
-        # Get unanalyzed videos
-        videos = get_unanalyzed_videos(channel_id, self.analysis_type, limit or 10000)
-
-        if limit:
-            videos = videos[:limit]
+        # Get unanalyzed videos with the specified limit
+        # The limit is passed directly to get_unanalyzed_videos which handles the filtering
+        effective_limit = limit or DEFAULT_VIDEO_LIMIT
+        videos = get_unanalyzed_videos(channel_id, self.analysis_type, effective_limit)
 
         if not videos:
             print(f"  No unanalyzed videos found")
@@ -121,7 +130,7 @@ class BatchProcessor:
                     self.progress.record_success()
 
             except Exception as e:
-                print(f"    Error: {video_id} - {e}")
+                logger.error(f"Error processing {video_id}: {e}")
                 self.progress.record_failure()
 
             # Rate limiting
@@ -197,7 +206,7 @@ def run_all_analysis(limit_per_channel: Optional[int] = None) -> Dict[str, Any]:
     """
     results = {}
 
-    for analysis_type in ['thumbnail', 'title', 'description', 'tags', 'content_structure']:
+    for analysis_type in ANALYSIS_TYPES:
         print(f"\n\n{'#'*60}")
         print(f"  STARTING {analysis_type.upper()} ANALYSIS")
         print(f"{'#'*60}")

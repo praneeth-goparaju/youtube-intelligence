@@ -23,12 +23,14 @@ ANALYSIS_TYPE_THUMBNAIL = 'thumbnail'
 ANALYSIS_TYPE_TITLE = 'title'
 ANALYSIS_TYPE_DESCRIPTION = 'description'
 ANALYSIS_TYPE_TAGS = 'tags'
+ANALYSIS_TYPE_CONTENT_STRUCTURE = 'content_structure'
 
 ANALYSIS_TYPES = [
     ANALYSIS_TYPE_THUMBNAIL,
     ANALYSIS_TYPE_TITLE,
     ANALYSIS_TYPE_DESCRIPTION,
     ANALYSIS_TYPE_TAGS,
+    ANALYSIS_TYPE_CONTENT_STRUCTURE,
 ]
 
 # =============================================================================
