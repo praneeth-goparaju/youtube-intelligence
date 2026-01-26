@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Channels and videos - read-only for clients, write for admin SDK
+    match /channels/{channelId} {
+      allow read: if true;
+      allow write: if false;  // Only admin SDK can write
+
+      match /videos/{videoId} {
+        allow read: if true;
+        allow write: if false;
+
+        match /analysis/{analysisType} {
+          allow read: if true;
+          allow write: if false;
+        }
+      }
+    }
+
+    // Insights - read-only for clients
+    match /insights/{insightType} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Progress tracking - admin only
+    match /scrape_progress/{channelId} {
+      allow read, write: if false;
+    }
+
+    match /analysis_progress/{progressId} {
+      allow read, write: if false;
+    }
+  }
+}

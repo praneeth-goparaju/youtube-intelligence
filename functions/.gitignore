@@ -1,0 +1,27 @@
+# Compiled JavaScript
+lib/
+
+# Node modules
+node_modules/
+
+# Local environment
+.env
+.env.local
+
+# Firebase
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
