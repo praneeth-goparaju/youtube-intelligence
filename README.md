@@ -49,10 +49,7 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 | 1 | **Scraper** | TypeScript/Node.js | Collect video data from YouTube API |
 | 2 | **Analyzer** | Python + Gemini AI | AI analysis of thumbnails, titles, tags |
 | 3 | **Insights** | Python + Pandas/SciPy | Statistical pattern discovery |
-| 4 | **Recommender** | Python CLI | Generate video recommendations (local) |
-| 4 | **Functions** | TypeScript + Firebase | Generate recommendations (API) |
-
-> **Note**: Phase 4 has two implementations - use Python CLI for local/batch work, or Firebase Functions for web/mobile integration. Both produce identical recommendations.
+| 4 | **Recommender** | TypeScript | Generate video recommendations (CLI + API) |
 
 ## Quick Start
 
@@ -78,10 +75,12 @@ cp .env.example .env
 # Install Phase 1 (Scraper)
 cd scraper && npm install && cd ..
 
-# Install Phase 2-4 (Python modules)
+# Install Phase 2-3 (Python modules)
 cd analyzer && pip install -r requirements.txt && cd ..
 cd insights && pip install -r requirements.txt && cd ..
-cd recommender && pip install -r requirements.txt && cd ..
+
+# Install Phase 4 (Recommender)
+cd functions && npm install && cd ..
 ```
 
 ### Running the Pipeline
@@ -101,11 +100,11 @@ python src/main.py
 
 # Phase 4: Get recommendations (two options)
 
-# Option A: Python CLI (local)
-cd ../recommender
-python src/main.py --topic "Biryani Recipe" --type recipe
+# Option A: CLI (local)
+cd ../functions
+npm run recommend -- --topic "Biryani Recipe" --type recipe
 
-# Option B: Firebase Functions API (after deployment)
+# Option B: API (after deployment)
 curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
   -H "Content-Type: application/json" \
   -d '{"topic": "Biryani Recipe", "type": "recipe"}'
@@ -151,24 +150,17 @@ youtube_channel_analysis/
 │   │   └── gaps.py              # Content gap analysis
 │   └── outputs/
 │
-├── recommender/                 # Phase 4: Recommendation Engine
-│   ├── README.md
-│   ├── requirements.txt
-│   ├── src/
-│   │   ├── engine.py            # Recommendation logic
-│   │   └── templates.py         # Fallback templates
-│   └── examples/
-│
 ├── shared/                      # Shared utilities
 │   ├── constants.py
 │   ├── firebase_utils.py
 │   └── gemini_utils.py
 │
-├── functions/                   # Firebase Functions (Recommendation API)
+├── functions/                   # Phase 4: Recommendation Engine (CLI + API)
 │   ├── README.md
 │   ├── package.json
 │   └── src/
-│       ├── index.ts             # Function definitions
+│       ├── cli.ts               # CLI entry point
+│       ├── index.ts             # Firebase Function definitions
 │       ├── engine.ts            # Recommendation engine
 │       └── templates.ts         # Fallback templates
 │

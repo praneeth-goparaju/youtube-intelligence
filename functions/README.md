@@ -1,14 +1,59 @@
-# Firebase Functions - Recommendation API
+# Phase 4: Recommendation Engine
 
-Serverless API endpoints for the YouTube Intelligence System recommendation engine.
+The recommendation engine for the YouTube Intelligence System. Generates data-driven video recommendations based on discovered patterns and AI.
 
 ## Overview
 
-This module provides Firebase Cloud Functions that expose the recommendation engine as:
-- **HTTP REST API** - For any client (web, mobile, scripts)
-- **Callable Function** - For Firebase SDK integration
+This module provides the recommendation engine with two usage options:
 
-## Quick Start
+| Usage | Best For | Command |
+|-------|----------|---------|
+| **CLI** | Local development, scripts, batch processing | `npm run recommend -- --topic "Biryani"` |
+| **API** | Web apps, mobile apps, serverless | `POST /recommend` or `httpsCallable` |
+
+Both use the same engine and produce identical recommendations.
+
+## Quick Start (CLI)
+
+```bash
+cd functions
+npm install
+
+# Run a recommendation
+npm run recommend -- --topic "Biryani" --type recipe
+
+# With all options
+npm run recommend -- --topic "Biryani" --type recipe --angle "Secret recipe" --output result.json
+
+# Show help
+npm run recommend -- --help
+```
+
+### CLI Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--topic, -t` | Video topic (required) | - |
+| `--type` | Content type: recipe, vlog, tutorial, review, challenge | recipe |
+| `--angle, -a` | Unique positioning angle | - |
+| `--audience` | Target audience | Telugu audience |
+| `--output, -o` | Save to JSON file | stdout |
+
+### Environment Variables
+
+Create a `.env` file in the project root or `functions/` directory:
+
+```bash
+# Required for AI generation
+GOOGLE_API_KEY=your_gemini_api_key
+
+# Optional: For Firestore insights (improves recommendations)
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk@project.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+## Quick Start (API)
 
 ### Prerequisites
 
@@ -189,8 +234,9 @@ print(result.data);
 ```
 functions/
 ├── src/
-│   ├── index.ts         # Function definitions (HTTP, callable)
-│   ├── engine.ts        # Recommendation engine
+│   ├── cli.ts           # CLI entry point (local usage)
+│   ├── index.ts         # Firebase Function definitions (API)
+│   ├── engine.ts        # Recommendation engine (shared)
 │   ├── firebase.ts      # Firestore client for insights
 │   ├── gemini.ts        # Gemini AI client
 │   ├── templates.ts     # Fallback templates

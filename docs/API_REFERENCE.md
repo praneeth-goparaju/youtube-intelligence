@@ -7,7 +7,7 @@ Complete programmatic interface documentation for the YouTube Intelligence Syste
 1. [Scraper API (TypeScript)](#scraper-api-typescript)
 2. [Analyzer API (Python)](#analyzer-api-python)
 3. [Insights API (Python)](#insights-api-python)
-4. [Recommender API (Python)](#recommender-api-python)
+4. [Recommender API (TypeScript)](#recommender-api-typescript)
 5. [Firebase Data Structures](#firebase-data-structures)
 6. [Shared Utilities](#shared-utilities)
 
@@ -458,106 +458,148 @@ generator.save_content_gaps(gaps)
 
 ---
 
-## Recommender API (Python)
+## Recommender API (TypeScript)
 
-### Recommendation Engine
+The recommendation engine is implemented in TypeScript and can be used via CLI or as a Firebase Function API.
 
-#### `RecommendationEngine`
+### CLI Usage
 
-```python
-from src.engine import RecommendationEngine
+```bash
+cd functions
 
-engine = RecommendationEngine()
+# Basic usage
+npm run recommend -- --topic "Hyderabadi Biryani" --type recipe
 
-recommendation = engine.generate_recommendation(
-    topic="Hyderabadi Biryani",
-    content_type="recipe",
-    unique_angle="Restaurant secret recipe",
-    target_audience="Telugu home cooks"
-)
+# With all options
+npm run recommend -- \
+  --topic "Hyderabadi Biryani" \
+  --type recipe \
+  --angle "Restaurant secret recipe" \
+  --audience "Telugu home cooks" \
+  --output recommendation.json
 ```
 
-**Parameters:**
+### HTTP API
+
+```bash
+# POST request
+curl -X POST https://us-central1-PROJECT.cloudfunctions.net/recommend \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "Hyderabadi Biryani",
+    "type": "recipe",
+    "angle": "Restaurant secret recipe",
+    "audience": "Telugu home cooks"
+  }'
+```
+
+### Firebase SDK (Callable)
+
+```typescript
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const functions = getFunctions();
+const getRecommendation = httpsCallable(functions, 'getRecommendation');
+
+const result = await getRecommendation({
+  topic: 'Hyderabadi Biryani',
+  type: 'recipe',
+  angle: 'Restaurant secret recipe',
+  audience: 'Telugu home cooks'
+});
+```
+
+### Request Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `topic` | str | Yes | - | Video topic |
-| `content_type` | str | No | `'recipe'` | `'recipe'`, `'vlog'`, `'tutorial'`, `'review'`, `'challenge'` |
-| `unique_angle` | str | No | `None` | Unique positioning |
-| `target_audience` | str | No | `'telugu-audience'` | Target audience |
+| `topic` | string | Yes | - | Video topic |
+| `type` | string | No | `'recipe'` | `'recipe'`, `'vlog'`, `'tutorial'`, `'review'`, `'challenge'` |
+| `angle` | string | No | `undefined` | Unique positioning |
+| `audience` | string | No | `'Telugu audience'` | Target audience |
 
-**Returns:**
-```python
+### Response Structure
+
+```typescript
 {
-    'titles': {
-        'primary': {
-            'english': str,
-            'telugu': str,
-            'combined': str,
-            'predictedCTR': str,
-            'reasoning': str
-        },
-        'alternatives': [...]
+  titles: {
+    primary: {
+      english: string,
+      telugu: string,
+      combined: string,
+      predictedCTR: 'below-average' | 'average' | 'above-average' | 'high',
+      reasoning: string
     },
-    'thumbnail': {
-        'layout': {...},
-        'elements': {...},
-        'colors': {...}
-    },
-    'tags': {
-        'primary': [...],
-        'secondary': [...],
-        'telugu': [...],
-        'longtail': [...]
-    },
-    'posting': {
-        'bestDay': str,
-        'bestTime': str,
-        'alternativeTimes': [...]
-    },
-    'prediction': {
-        'expectedViewRange': {'low': int, 'medium': int, 'high': int},
-        'positiveFactors': [...],
-        'riskFactors': [...]
-    }
+    alternatives: [...]
+  },
+  thumbnail: {
+    layout: {...},
+    elements: {...},
+    colors: {...}
+  },
+  tags: {
+    primary: string[],
+    secondary: string[],
+    telugu: string[],
+    longtail: string[],
+    fullTagString: string,
+    characterCount: number,
+    utilizationPercent: number
+  },
+  posting: {
+    bestDay: string,
+    bestTime: string,
+    alternativeTimes: string[],
+    reasoning: string
+  },
+  prediction: {
+    expectedViewRange: { low: number, medium: number, high: number },
+    confidence: 'low' | 'medium' | 'high',
+    positiveFactors: string[],
+    riskFactors: string[]
+  },
+  metadata: {
+    generatedAt: string,
+    modelUsed: string,
+    insightsVersion: string | null,
+    fallbackUsed: boolean
+  }
 }
 ```
 
-#### `_generate_from_templates(topic, content_type) -> Dict`
-Fallback method for template-based generation.
+### RecommendationEngine Class
 
-```python
-# Called automatically when AI fails
-result = engine._generate_from_templates("Biryani", "recipe")
+```typescript
+import { RecommendationEngine } from './engine';
+
+const engine = new RecommendationEngine();
+
+const recommendation = await engine.generateRecommendation({
+  topic: 'Biryani',
+  type: 'recipe',
+  angle: 'Secret recipe',
+  audience: 'Telugu home cooks'
+});
 ```
 
-### Templates
+### Templates (Fallback)
 
-#### Title Templates
+When Gemini AI is unavailable or fails, the engine falls back to template-based generation:
 
-```python
-from src.templates import TITLE_TEMPLATES
+```typescript
+import { TITLE_TEMPLATES, THUMBNAIL_SPECS, POWER_WORDS } from './templates';
 
-templates = TITLE_TEMPLATES['recipe']
-# ['{dish} Recipe | {dish_telugu} | {modifier}', ...]
-```
+// Title templates by content type
+const recipeTemplates = TITLE_TEMPLATES['recipe'];
+// ['{dish} Recipe | {dish_telugu} | {modifier}', ...]
 
-#### Thumbnail Specs
+// Thumbnail specifications
+const recipeSpec = THUMBNAIL_SPECS['recipe'];
+// { layout: {...}, elements: {...}, colors: {...} }
 
-```python
-from src.templates import THUMBNAIL_SPECS
-
-spec = THUMBNAIL_SPECS['recipe']
-# {'layout': 'split-composition', 'face': {...}, 'food': {...}}
-```
-
-#### Power Words
-
-```python
-from src.templates import POWER_WORDS
-
-telugu_words = POWER_WORDS['telugu']
-# ['రహస్యం', 'పర్ఫెక్ట్', 'అసలైన', ...]
+// Power words for titles
+const teluguWords = POWER_WORDS.telugu;
+// ['రహస్యం', 'పర్ఫెక్ట్', 'అసలైన', ...]
 ```
 
 ---

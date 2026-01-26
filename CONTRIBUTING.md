@@ -27,8 +27,8 @@ Thank you for your interest in contributing to the YouTube Intelligence System! 
 
 ### Prerequisites
 
-- Node.js 18+ (for scraper)
-- Python 3.11+ (for analyzer, insights, recommender)
+- Node.js 18+ (for scraper and recommender)
+- Python 3.11+ (for analyzer and insights)
 - Git
 - API keys (YouTube, Firebase, Gemini)
 
@@ -54,12 +54,13 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 pip install -r requirements-dev.txt  # Dev dependencies
 
-# Repeat for insights and recommender
+# Install insights
 cd ../insights
 pip install -r requirements.txt
 
-cd ../recommender
-pip install -r requirements.txt
+# Install recommender (TypeScript)
+cd ../functions
+npm install
 ```
 
 ### Verify Setup
@@ -135,7 +136,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 - `scraper`: Phase 1 changes
 - `analyzer`: Phase 2 changes
 - `insights`: Phase 3 changes
-- `recommender`: Phase 4 changes
+- `functions`: Phase 4 (recommender) changes
 - `shared`: Shared utilities
 - `config`: Configuration changes
 
@@ -145,7 +146,7 @@ feat(scraper): add support for YouTube Shorts filtering
 fix(analyzer): handle empty thumbnail responses from Gemini
 docs(readme): update installation instructions
 refactor(insights): improve correlation calculation performance
-test(recommender): add unit tests for template generation
+test(functions): add unit tests for recommendation engine
 ```
 
 ---
@@ -414,7 +415,9 @@ class TestThumbnailAnalyzer:
    # Python modules
    cd analyzer && pytest tests/
    cd insights && pytest tests/
-   cd recommender && pytest tests/
+
+   # Recommender (TypeScript)
+   cd functions && npm test
    ```
 
 3. **Format and lint code**
@@ -512,7 +515,7 @@ youtube_channel_analysis/
 │   ├── src/
 │   └── tests/
 │
-├── recommender/              # Phase 4: Python
+├── functions/                # Phase 4: TypeScript (CLI + API)
 │   ├── src/
 │   └── tests/
 │
@@ -534,7 +537,8 @@ youtube_channel_analysis/
 | `analyzer/src/main.py` | Analyzer entry point |
 | `analyzer/src/gemini_client.py` | Gemini API wrapper |
 | `insights/src/correlations.py` | Statistical analysis |
-| `recommender/src/engine.py` | Recommendation logic |
+| `functions/src/engine.ts` | Recommendation logic |
+| `functions/src/cli.ts` | CLI entry point |
 
 ---
 

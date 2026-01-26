@@ -13,7 +13,7 @@ Four-phase system with separate technology stacks:
 1. **Phase 1 - Scraper (TypeScript)**: YouTube Data API v3 integration, stores in Firebase Firestore/Storage
 2. **Phase 2 - Analyzer (Python)**: Gemini 2.0 Flash for thumbnail vision analysis, title/description/tag text analysis
 3. **Phase 3 - Insights (Python)**: Statistical correlation and pattern discovery
-4. **Phase 4 - Recommender (Python)**: AI-powered recommendation engine
+4. **Phase 4 - Recommender (TypeScript)**: AI-powered recommendation engine (CLI + Firebase Functions API)
 
 **Data Flow**: Scraper → Firestore → Analyzer → Firestore → Insights → Firestore → Recommender
 
@@ -52,15 +52,21 @@ pytest tests/
 
 ### Recommender (Phase 4)
 ```bash
-cd recommender
-pip install -r requirements.txt
-python src/main.py \
-  --topic "Hyderabadi Biryani" \
-  --type recipe \
-  --angle "Restaurant secret recipe" \
-  --audience "Telugu home cooks" \
-  --output recommendation.json
-pytest tests/
+cd functions
+npm install
+
+# CLI usage
+npm run recommend -- --topic "Hyderabadi Biryani" --type recipe
+npm run recommend -- --topic "Biryani" --angle "Restaurant secret" --output recommendation.json
+
+# API usage (local emulator)
+npm run serve
+curl -X POST http://localhost:5001/PROJECT/us-central1/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "Biryani", "type": "recipe"}'
+
+# Deploy to Firebase
+npm run deploy
 ```
 
 ## Environment Variables

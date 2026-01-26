@@ -88,9 +88,9 @@ pip install -r requirements.txt
 cd ../insights
 pip install -r requirements.txt
 
-# Recommender (Python)
-cd ../recommender
-pip install -r requirements.txt
+# Recommender (TypeScript)
+cd ../functions
+npm install
 ```
 
 ### 4. Validate Setup
@@ -121,8 +121,8 @@ cd ../insights
 python src/main.py
 
 # Phase 4: Get recommendations
-cd ../recommender
-python src/main.py --topic "Test Recipe"
+cd ../functions
+npm run recommend -- --topic "Test Recipe"
 ```
 
 ---
@@ -198,7 +198,7 @@ git clone https://github.com/your-org/youtube-intelligence.git .
 cd scraper && npm install --production
 cd ../analyzer && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 cd ../insights && pip install -r requirements.txt
-cd ../recommender && pip install -r requirements.txt
+cd ../functions && npm install --production
 ```
 
 #### 3. Environment Configuration
