@@ -17,12 +17,22 @@ Four-phase system with separate technology stacks:
 
 **Data Flow**: Scraper → Firestore → Analyzer → Firestore → Insights → Firestore → Recommender
 
+## Setup
+
+```bash
+# Python dependencies (analyzer + insights)
+pip install -r requirements.txt
+
+# TypeScript dependencies
+cd scraper && npm install
+cd ../functions && npm install
+```
+
 ## Commands
 
 ### Scraper (Phase 1)
 ```bash
 cd scraper
-npm install
 npm start                       # Run scraper
 npm test                        # Run vitest tests
 npx tsx scripts/validate.ts     # Test API connections
@@ -32,7 +42,6 @@ npx tsx scripts/reset-progress.ts  # Clear progress for re-run
 ### Analyzer (Phase 2)
 ```bash
 cd analyzer
-pip install -r requirements.txt
 python src/main.py                                    # Run all analysis types
 python src/main.py --type thumbnail                   # Single analysis type
 python src/main.py --type title --channel CHANNEL_ID  # Specific channel
@@ -45,7 +54,6 @@ pytest tests/                                         # Run tests
 ### Insights (Phase 3)
 ```bash
 cd insights
-pip install -r requirements.txt
 python src/main.py                    # Generate all insights
 python src/main.py --type thumbnails  # Specific insight type (thumbnails, titles, timing, gaps)
 pytest tests/
