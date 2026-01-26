@@ -49,8 +49,10 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 | 1 | **Scraper** | TypeScript/Node.js | Collect video data from YouTube API |
 | 2 | **Analyzer** | Python + Gemini AI | AI analysis of thumbnails, titles, tags |
 | 3 | **Insights** | Python + Pandas/SciPy | Statistical pattern discovery |
-| 4 | **Recommender** | Python + Gemini AI | Generate video recommendations |
-| API | **Functions** | TypeScript + Firebase | Serverless recommendation API |
+| 4 | **Recommender** | Python CLI | Generate video recommendations (local) |
+| 4 | **Functions** | TypeScript + Firebase | Generate recommendations (API) |
+
+> **Note**: Phase 4 has two implementations - use Python CLI for local/batch work, or Firebase Functions for web/mobile integration. Both produce identical recommendations.
 
 ## Quick Start
 
@@ -97,9 +99,16 @@ python src/main.py
 cd ../insights
 python src/main.py
 
-# Phase 4: Get recommendations
+# Phase 4: Get recommendations (two options)
+
+# Option A: Python CLI (local)
 cd ../recommender
 python src/main.py --topic "Biryani Recipe" --type recipe
+
+# Option B: Firebase Functions API (after deployment)
+curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "Biryani Recipe", "type": "recipe"}'
 ```
 
 ## Project Structure

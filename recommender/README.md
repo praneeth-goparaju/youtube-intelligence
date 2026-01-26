@@ -1,6 +1,6 @@
 # Phase 4: Recommendation Engine
 
-A Python-based recommendation system that generates data-driven suggestions for new YouTube videos based on discovered patterns and AI generation.
+A recommendation system that generates data-driven suggestions for new YouTube videos based on discovered patterns and AI generation.
 
 ## Overview
 
@@ -14,7 +14,61 @@ The recommender generates actionable video recommendations:
 | **Posting Time** | Timing insights | Optimal day/hour with alternatives |
 | **Prediction** | Statistical model | Expected view range with factors |
 
-## Quick Start
+## Usage Options
+
+You have **two ways** to use the recommendation engine:
+
+| Option | Best For | Technology | Response Time |
+|--------|----------|------------|---------------|
+| **Python CLI** | Local scripts, batch processing, development | Python | 5-10 seconds |
+| **Firebase Functions API** | Web apps, mobile apps, REST API | TypeScript | 2-5 seconds |
+
+### Option 1: Python CLI
+
+Run recommendations locally from the command line:
+
+```bash
+cd recommender
+python src/main.py --topic "Biryani" --type recipe --output recommendation.json
+```
+
+**Advantages:**
+- Full control over execution
+- Easy debugging and development
+- Works offline (except for Gemini API calls)
+- Good for batch processing multiple topics
+
+### Option 2: Firebase Functions API
+
+Access recommendations via HTTP REST API or Firebase SDK:
+
+```bash
+# REST API
+curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "Biryani", "type": "recipe"}'
+```
+
+```typescript
+// Firebase SDK (JavaScript/TypeScript)
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const functions = getFunctions();
+const getRecommendation = httpsCallable(functions, 'getRecommendation');
+const result = await getRecommendation({ topic: 'Biryani', type: 'recipe' });
+```
+
+**Advantages:**
+- No local setup required (after deployment)
+- Easy integration with web/mobile apps
+- Scalable serverless architecture
+- Consistent API for any client
+
+See [functions/README.md](../functions/README.md) for complete API documentation.
+
+---
+
+## Quick Start (Python CLI)
 
 ```bash
 # Install dependencies
@@ -569,28 +623,30 @@ print(recommendation['posting']['bestDay'])
 print(recommendation['prediction']['expectedViewRange'])
 ```
 
-### API Integration (Optional)
+### Firebase Functions API
 
-The engine can be wrapped in a REST API:
+A production-ready API is available via Firebase Functions. See [functions/README.md](../functions/README.md) for:
 
-```python
-from flask import Flask, request, jsonify
-from src.engine import RecommendationEngine
+- **REST API**: `POST /recommend` endpoint for any HTTP client
+- **Callable Function**: `getRecommendation` for Firebase SDK integration
+- **Health Check**: `GET /health` endpoint for monitoring
 
-app = Flask(__name__)
-engine = RecommendationEngine()
+**Quick API Example:**
 
-@app.route('/recommend', methods=['POST'])
-def recommend():
-    data = request.json
-    result = engine.generate_recommendation(
-        topic=data['topic'],
-        content_type=data.get('type', 'recipe'),
-        unique_angle=data.get('angle'),
-        target_audience=data.get('audience', 'telugu-audience')
-    )
-    return jsonify(result)
+```bash
+# Deploy the API
+cd functions
+npm install
+firebase functions:secrets:set GOOGLE_API_KEY
+npm run deploy
+
+# Use the API
+curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "Biryani", "type": "recipe"}'
 ```
+
+The TypeScript Firebase Functions implementation mirrors the Python engine, providing identical recommendations with the same fallback behavior.
 
 ---
 
