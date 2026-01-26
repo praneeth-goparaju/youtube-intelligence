@@ -102,7 +102,7 @@ API Authentication:
 ## Key Technical Considerations
 
 - YouTube API quota is 10,000 units/day; scraper saves progress and resumes
-- Channel URLs resolve via: `@handle` (1 unit), `/channel/UCxxx` (direct), `/user/` (1 unit), `/c/` (100 units - avoid)
+- Channel URLs resolve via: `@handle` (1 unit), `/channel/UCxxx` (direct), `/user/` (1 unit), `/c/` (101 units - avoid)
 - Uploads playlist ID: replace `UC` prefix with `UU` in channel ID
 - Batch video details requests in groups of 50
 - Use `mqdefault` thumbnail quality for storage efficiency
@@ -121,7 +121,7 @@ API Authentication:
 ## Calculated Video Metrics
 
 The scraper calculates these metrics for each video:
-- `engagementRate`: (likes + comments) / views
+- `engagementRate`: ((likes + comments) / views) * 100
 - `viewsPerDay`: views / days since publish
 - `viewsPerSubscriber`: views / channel subscriber count
 
