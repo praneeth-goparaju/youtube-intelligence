@@ -4,7 +4,7 @@ A Python-based AI analysis system that processes YouTube video data using Google
 
 ## Overview
 
-The analyzer performs four types of AI analysis:
+The analyzer performs five types of AI analysis:
 
 | Type | Model | Input | Output |
 |------|-------|-------|--------|
@@ -12,6 +12,7 @@ The analyzer performs four types of AI analysis:
 | **Title** | Gemini 2.0 Flash | Text | Structure, language, hooks, keywords |
 | **Description** | Gemini 2.0 Flash | Text | Timestamps, recipe content, CTAs, SEO |
 | **Tags** | Gemini 2.0 Flash | Array | Categorization, strategy, search volume |
+| **Content Structure** | Gemini 2.0 Flash | Text | Video structure, segments, talking points (ToS-compliant transcript alternative) |
 
 ## Quick Start
 
@@ -48,7 +49,8 @@ analyzer/
 │   │   ├── thumbnail.py         # Vision analysis
 │   │   ├── title.py             # Title text analysis
 │   │   ├── description.py       # Description analysis
-│   │   └── tags.py              # Tag analysis
+│   │   ├── tags.py              # Tag analysis
+│   │   └── content_structure.py # Video structure inference
 │   │
 │   ├── processors/              # Batch processing
 │   │   ├── __init__.py
@@ -60,7 +62,8 @@ analyzer/
 │       ├── thumbnail_prompt.py  # 175-line detailed prompt
 │       ├── title_prompt.py
 │       ├── description_prompt.py
-│       └── tags_prompt.py
+│       ├── tags_prompt.py
+│       └── content_structure_prompt.py  # Video structure inference prompt
 │
 ├── scripts/
 │   ├── run_thumbnail_analysis.py
@@ -70,8 +73,7 @@ analyzer/
 │
 └── tests/
     ├── __init__.py
-    ├── conftest.py              # Pytest fixtures
-    └── test_analyzers.py
+    └── conftest.py              # Pytest fixtures
 ```
 
 ## Core Components
@@ -237,6 +239,7 @@ python src/main.py --type thumbnail
 python src/main.py --type title
 python src/main.py --type description
 python src/main.py --type tags
+python src/main.py --type content_structure
 
 # Process specific channel
 python src/main.py --type thumbnail --channel UCBSwcE0p0PMwhvE6FVjgITw
@@ -252,7 +255,7 @@ python src/main.py --validate
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--type` | Analysis type: `all`, `thumbnail`, `title`, `description`, `tags` | `all` |
+| `--type` | Analysis type: `all`, `thumbnail`, `title`, `description`, `tags`, `content_structure` | `all` |
 | `--channel` | Specific channel ID to process | All channels |
 | `--limit` | Max videos per channel | No limit |
 | `--validate` | Test connections only | False |
@@ -305,10 +308,11 @@ Analysis results are stored as Firestore subcollections:
 
 ```
 channels/{channelId}/videos/{videoId}/analysis/
-├── thumbnail    # Thumbnail analysis
-├── title        # Title analysis
-├── description  # Description analysis
-└── tags         # Tag analysis
+├── thumbnail         # Thumbnail analysis
+├── title             # Title analysis
+├── description       # Description analysis
+├── tags              # Tag analysis
+└── content_structure # Video structure inference
 ```
 
 ### Example Document
@@ -442,7 +446,6 @@ def mock_gemini():
 | `google-generativeai` | >=0.3.0 | Gemini API client |
 | `firebase-admin` | >=6.4.0 | Firebase Admin SDK |
 | `Pillow` | >=10.2.0 | Image processing |
-| `aiohttp` | >=3.9.3 | Async HTTP (optional) |
 | `tqdm` | >=4.66.2 | Progress bars |
 | `python-dotenv` | >=1.0.1 | Environment configuration |
 | `pytest` | >=8.0.0 | Testing |

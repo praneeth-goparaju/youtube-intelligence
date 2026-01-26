@@ -3,10 +3,12 @@
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+import requests
+
 from ..gemini_client import analyze_image
 from ..firebase_client import download_thumbnail, save_analysis, has_analysis
 from ..prompts import THUMBNAIL_ANALYSIS_PROMPT
-from ..config import config
+from ..config import config, logger
 
 
 class ThumbnailAnalyzer:
@@ -53,7 +55,7 @@ class ThumbnailAnalyzer:
             return result
 
         except Exception as e:
-            print(f"Error analyzing thumbnail {video_id}: {e}")
+            logger.error(f"Error analyzing thumbnail {video_id}: {e}")
             return None
 
     def analyze_from_url(self, channel_id: str, video_id: str,
@@ -70,8 +72,6 @@ class ThumbnailAnalyzer:
         Returns:
             Analysis results or None if failed
         """
-        import requests
-
         try:
             # Fetch image from URL using synchronous request
             response = requests.get(thumbnail_url, timeout=30)
@@ -92,5 +92,5 @@ class ThumbnailAnalyzer:
             return result
 
         except Exception as e:
-            print(f"Error analyzing thumbnail {video_id}: {e}")
+            logger.error(f"Error analyzing thumbnail from URL {video_id}: {e}")
             return None

@@ -74,8 +74,9 @@ function initFirebase(): admin.firestore.Firestore {
 
     if (!projectId || !clientEmail || !privateKey) {
       console.warn('Firebase credentials not found. Running without insights data.');
-      // Initialize with default config (will fail on actual Firestore calls)
-      admin.initializeApp({ projectId: 'demo-project' });
+      console.warn('Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in .env');
+      // Initialize without credentials - Firestore calls will be handled gracefully
+      admin.initializeApp({ projectId: projectId || 'offline-mode' });
     } else {
       admin.initializeApp({
         credential: admin.credential.cert({

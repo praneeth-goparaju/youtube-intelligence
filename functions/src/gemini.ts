@@ -18,7 +18,7 @@ function getModel(): GenerativeModel {
   if (!model) {
     const apiKey = geminiApiKey.value();
     if (!apiKey) {
-      throw new Error('GOOGLE_API_KEY not configured. Set it using: firebase functions:config:set google.api_key="YOUR_KEY"');
+      throw new Error('GOOGLE_API_KEY not configured. Set it using: firebase functions:secrets:set GOOGLE_API_KEY');
     }
     genAI = new GoogleGenerativeAI(apiKey);
     model = genAI.getGenerativeModel({

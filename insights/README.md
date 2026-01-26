@@ -46,14 +46,11 @@ insights/
 │   ├── gaps.py              # Content gap analysis
 │   └── reports.py           # Report generation & storage
 │
-├── outputs/                  # Generated reports (JSON/CSV)
-│   ├── thumbnail_insights.json
-│   ├── title_insights.json
-│   ├── timing_insights.json
-│   └── content_gaps.json
-│
-└── tests/
-    └── test_correlations.py
+└── outputs/                  # Generated reports (JSON/CSV)
+    ├── thumbnail_insights.json
+    ├── title_insights.json
+    ├── timing_insights.json
+    └── content_gaps.json
 ```
 
 ## Core Components
@@ -463,17 +460,6 @@ Results are saved to both Firestore and local files:
 | `scipy` | >=1.12.0 | Statistical analysis |
 | `firebase-admin` | >=6.4.0 | Firebase SDK |
 | `python-dotenv` | >=1.0.1 | Environment config |
-| `tqdm` | >=4.66.2 | Progress bars |
-
-## Testing
-
-```bash
-# Run tests
-pytest tests/
-
-# Run with coverage
-pytest tests/ --cov=src
-```
 
 ## Performance
 

@@ -5,13 +5,13 @@ providing transcript-like insights without needing actual transcripts.
 It's a ToS-compliant alternative to transcript analysis.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from ..gemini_client import analyze_text
 from ..firebase_client import save_analysis, has_analysis
 from ..prompts import CONTENT_STRUCTURE_ANALYSIS_PROMPT
-from ..config import config
+from ..config import config, logger
 
 
 def format_duration(seconds: int) -> str:
@@ -41,7 +41,7 @@ class ContentStructureAnalyzer:
         title: str,
         description: str,
         duration_seconds: int,
-        tags: list,
+        tags: List[str],
         force: bool = False
     ) -> Optional[Dict[str, Any]]:
         """
@@ -73,12 +73,21 @@ class ContentStructureAnalyzer:
 
         try:
             # Format the prompt with video metadata
-            formatted_prompt = CONTENT_STRUCTURE_ANALYSIS_PROMPT.format(
-                title=title or "No title",
-                duration_seconds=duration_seconds,
-                duration_formatted=format_duration(duration_seconds),
-                tags=", ".join(tags[:20]) if tags else "No tags",
-                description=description[:8000] if description else "No description"
+            # Use replace() instead of format() to avoid KeyError on curly braces in content
+            safe_title = (title or "No title").replace("{", "{{").replace("}", "}}")
+            safe_description = (description[:8000] if description else "No description").replace("{", "{{").replace("}", "}}")
+            safe_tags = ", ".join(tags[:20]) if tags else "No tags"
+
+            formatted_prompt = CONTENT_STRUCTURE_ANALYSIS_PROMPT.replace(
+                "{title}", safe_title
+            ).replace(
+                "{duration_seconds}", str(duration_seconds)
+            ).replace(
+                "{duration_formatted}", format_duration(duration_seconds)
+            ).replace(
+                "{tags}", safe_tags
+            ).replace(
+                "{description}", safe_description
             )
 
             # Analyze with Gemini
@@ -101,5 +110,5 @@ class ContentStructureAnalyzer:
             return result
 
         except Exception as e:
-            print(f"Error analyzing content structure for {video_id}: {e}")
+            logger.error(f"Error analyzing content structure for {video_id}: {e}")
             return None

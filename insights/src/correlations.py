@@ -6,6 +6,14 @@ import numpy as np
 from scipy import stats
 
 
+# Configuration constants for correlation analysis
+MIN_CORRELATION_STRENGTH = 0.1  # Minimum absolute correlation to consider significant
+SIGNIFICANCE_LEVEL = 0.05  # P-value threshold for statistical significance
+MIN_SAMPLE_SIZE = 3  # Minimum samples for correlation calculation
+MIN_CATEGORY_SAMPLE = 10  # Minimum samples for categorical analysis
+DEFAULT_MIN_SAMPLES = 50  # Default minimum samples for analysis
+
+
 def calculate_correlation(x: List[float], y: List[float]) -> Tuple[float, float]:
     """
     Calculate Pearson correlation coefficient.
@@ -17,7 +25,7 @@ def calculate_correlation(x: List[float], y: List[float]) -> Tuple[float, float]
     Returns:
         Tuple of (correlation coefficient, p-value)
     """
-    if len(x) < 3 or len(y) < 3:
+    if len(x) < MIN_SAMPLE_SIZE or len(y) < MIN_SAMPLE_SIZE:
         return 0.0, 1.0
 
     # Remove NaN values
@@ -25,7 +33,7 @@ def calculate_correlation(x: List[float], y: List[float]) -> Tuple[float, float]
     x_clean = np.array(x)[mask]
     y_clean = np.array(y)[mask]
 
-    if len(x_clean) < 3:
+    if len(x_clean) < MIN_SAMPLE_SIZE:
         return 0.0, 1.0
 
     try:
@@ -125,7 +133,7 @@ class CorrelationAnalyzer:
         return record
 
     def find_top_correlations(self, target: str = 'view_count',
-                             min_samples: int = 50) -> List[Dict[str, Any]]:
+                             min_samples: int = DEFAULT_MIN_SAMPLES) -> List[Dict[str, Any]]:
         """
         Find features with strongest correlation to target metric.
 
@@ -162,7 +170,8 @@ class CorrelationAnalyzer:
                 target_values.tolist()
             )
 
-            if abs(corr) > 0.1 and p_value < 0.05:  # Filter weak correlations
+            # Filter weak or non-significant correlations
+            if abs(corr) > MIN_CORRELATION_STRENGTH and p_value < SIGNIFICANCE_LEVEL:
                 correlations.append({
                     'feature': col,
                     'correlation': round(corr, 3),
@@ -201,7 +210,7 @@ class CorrelationAnalyzer:
             mask = self.df[category_col] == value
             group_views = self.df[mask][target].tolist()
 
-            if len(group_views) < 10:  # Need sufficient sample
+            if len(group_views) < MIN_CATEGORY_SAMPLE:
                 continue
 
             multiplier = calculate_view_multiplier(group_views, all_views)

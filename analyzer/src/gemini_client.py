@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from shared.gemini_utils import parse_json_response
 
-from .config import config
+from .config import config, logger
 
 
 # Initialize the Gemini client
@@ -152,5 +152,5 @@ def test_connection() -> bool:
         response = model.generate_content("Say 'OK' if you can hear me.")
         return 'ok' in response.text.lower()
     except Exception as e:
-        print(f"Gemini connection test failed: {e}")
+        logger.error(f"Gemini connection test failed: {e}")
         return False

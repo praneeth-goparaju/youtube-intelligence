@@ -2,6 +2,7 @@
 
 import os
 import sys
+import logging
 from pathlib import Path
 
 # Add shared module to path
@@ -9,6 +10,35 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from shared.config import load_env_file, get_env
 from shared.constants import GEMINI_MODEL
+
+
+def setup_logging(level: int = logging.INFO) -> logging.Logger:
+    """Set up logging for the analyzer module.
+
+    Args:
+        level: Logging level (default: INFO)
+
+    Returns:
+        Configured logger instance
+    """
+    logger = logging.getLogger('analyzer')
+
+    # Avoid adding handlers multiple times
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    logger.setLevel(level)
+    return logger
+
+
+# Initialize logger
+logger = setup_logging()
 
 # Load .env from project root
 PROJECT_ROOT = load_env_file(__file__)
@@ -50,9 +80,9 @@ def validate_config() -> bool:
     missing = [var for var in required if not os.getenv(var)]
 
     if missing:
-        print("Missing required environment variables:")
+        logger.error("Missing required environment variables:")
         for var in missing:
-            print(f"  - {var}")
+            logger.error(f"  - {var}")
         return False
 
     return True

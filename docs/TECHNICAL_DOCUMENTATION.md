@@ -160,17 +160,18 @@ youtube_channel_analysis/
 │   │   └── reports.py        # Report generation
 │   └── outputs/              # Generated reports
 │
-└── recommender/              # PHASE 4: Recommendation Engine
-    ├── requirements.txt
+└── functions/                # PHASE 4: Recommendation Engine (TypeScript)
+    ├── package.json
+    ├── tsconfig.json
     ├── src/
-    │   ├── __init__.py
-    │   ├── main.py
-    │   ├── config.py
-    │   ├── firebase_client.py
-    │   ├── engine.py         # Recommendation logic
-    │   └── templates.py      # Title/thumbnail templates
-    └── examples/
-        └── sample_queries.json
+    │   ├── index.ts          # Firebase Functions entry point
+    │   ├── cli.ts            # CLI interface
+    │   ├── engine.ts         # Recommendation logic
+    │   ├── firebase.ts       # Firebase client
+    │   ├── gemini.ts         # Gemini API client
+    │   ├── templates.ts      # Title/thumbnail templates
+    │   └── types.ts          # TypeScript interfaces
+    └── README.md
 ```
 
 ---
