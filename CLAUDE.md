@@ -4,26 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-YouTube Intelligence System - a multi-phase analytics platform that scrapes Telugu YouTube channel data, analyzes content with Claude AI, discovers performance patterns, and generates recommendations for new video creation.
+YouTube Intelligence System - a multi-phase analytics platform that scrapes Telugu YouTube channel data, analyzes content with Gemini AI, discovers performance patterns, and generates recommendations for new video creation.
 
 ## Architecture
 
 Four-phase system with separate technology stacks:
 
-1. **Phase 1 - Scraper (Node.js)**: YouTube Data API v3 integration, stores in Firebase Firestore/Storage
-2. **Phase 2 - Analyzer (Python)**: Claude API for thumbnail vision analysis, title/description/tag text analysis
+1. **Phase 1 - Scraper (TypeScript)**: YouTube Data API v3 integration, stores in Firebase Firestore/Storage
+2. **Phase 2 - Analyzer (Python)**: Gemini 2.0 Flash for thumbnail vision analysis, title/description/tag text analysis
 3. **Phase 3 - Insights (Python)**: Statistical correlation and pattern discovery
 4. **Phase 4 - Recommender (Python)**: AI-powered recommendation engine
 
-## Project Structure
-
-```
-scraper/          # Node.js - YouTube API scraping
-analyzer/         # Python - Claude AI analysis
-insights/         # Python - Pattern discovery
-recommender/      # Python - Recommendation generation
-config/           # channels.json input file
-```
+**Data Flow**: Scraper → Firestore → Analyzer → Firestore → Insights → Firestore → Recommender
 
 ## Commands
 
@@ -31,34 +23,44 @@ config/           # channels.json input file
 ```bash
 cd scraper
 npm install
-npm start                    # Run scraper
-node scripts/validate.js     # Test API connections
-node scripts/reset-progress.js  # Clear progress for re-run
+npm start                       # Run scraper
+npm test                        # Run vitest tests
+npx tsx scripts/validate.ts     # Test API connections
+npx tsx scripts/reset-progress.ts  # Clear progress for re-run
 ```
 
 ### Analyzer (Phase 2)
 ```bash
 cd analyzer
 pip install -r requirements.txt
-python src/main.py
-python scripts/run_thumbnail_analysis.py
-python scripts/run_title_analysis.py
-python scripts/run_description_analysis.py
-python scripts/run_tag_analysis.py
+python src/main.py                                    # Run all analysis types
+python src/main.py --type thumbnail                   # Single analysis type
+python src/main.py --type title --channel CHANNEL_ID  # Specific channel
+python src/main.py --limit 50                         # Limit videos per channel
+python src/main.py --validate                         # Test connections only
+pytest tests/                                         # Run tests
 ```
 
 ### Insights (Phase 3)
 ```bash
 cd insights
 pip install -r requirements.txt
-python src/main.py
+python src/main.py                    # Generate all insights
+python src/main.py --type thumbnails  # Specific insight type (thumbnails, titles, timing, gaps)
+pytest tests/
 ```
 
 ### Recommender (Phase 4)
 ```bash
 cd recommender
 pip install -r requirements.txt
-python src/main.py
+python src/main.py \
+  --topic "Hyderabadi Biryani" \
+  --type recipe \
+  --angle "Restaurant secret recipe" \
+  --audience "Telugu home cooks" \
+  --output recommendation.json
+pytest tests/
 ```
 
 ## Environment Variables
@@ -66,7 +68,7 @@ python src/main.py
 Required in `.env`:
 - `YOUTUBE_API_KEY` - YouTube Data API v3
 - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_STORAGE_BUCKET`
-- `ANTHROPIC_API_KEY` - Claude API for analysis
+- `GOOGLE_API_KEY` - Gemini API for analysis
 
 ## Key Technical Considerations
 
@@ -76,6 +78,8 @@ Required in `.env`:
 - Batch video details requests in groups of 50
 - Use `mqdefault` thumbnail quality for storage efficiency
 - Duration format is ISO 8601 (e.g., `PT15M33S`)
+- Both scraper and analyzer track progress in Firestore for resumable operations
+- Recommender falls back to template-based generation if Gemini fails
 
 ## Firebase Collections
 
@@ -85,9 +89,16 @@ Required in `.env`:
 - `scrape_progress/{channelId}` - Resume state for interrupted scrapes
 - `insights/{type}` - Aggregated patterns (thumbnails, titles, timing, contentGaps)
 
+## Calculated Video Metrics
+
+The scraper calculates these metrics for each video:
+- `engagementRate`: (likes + comments) / views
+- `viewsPerDay`: views / days since publish
+- `viewsPerSubscriber`: views / channel subscriber count
+
 ## AI Analysis Models
 
-All analysis uses Claude Opus 4.5 (`claude-opus-4-5-20250514`):
+All analysis uses Gemini 2.0 Flash (`gemini-2.0-flash`):
 - Thumbnail: Vision analysis for composition, colors, text, food, graphics, psychology
 - Title: Structure, language mix, hooks, keywords, Telugu-specific patterns
 - Description: Timestamps, recipe content, links, hashtags, CTAs, SEO

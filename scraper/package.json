@@ -1,0 +1,27 @@
+{
+  "name": "youtube-scraper",
+  "version": "1.0.0",
+  "description": "YouTube Intelligence System - Phase 1: Data Collection",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "validate": "tsx scripts/validate.ts",
+    "reset-progress": "tsx scripts/reset-progress.ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.1",
+    "firebase-admin": "^12.0.0",
+    "googleapis": "^131.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.2"
+  }
+}
