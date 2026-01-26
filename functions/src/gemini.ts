@@ -33,23 +33,62 @@ function getModel(): GenerativeModel {
   return model;
 }
 
+// Retry configuration
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
+
 /**
- * Generate recommendation using Gemini
+ * Delay helper
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Generate recommendation using Gemini with retry logic
  */
 export async function generateWithGemini(prompt: string): Promise<string> {
   const model = getModel();
+  let lastError: Error | undefined;
 
-  try {
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const result = await model.generateContent(prompt);
+      const response = result.response;
 
-    // Clean up the response (remove markdown code blocks if present)
-    return cleanJsonResponse(text);
-  } catch (error) {
-    console.error('Gemini generation failed:', error);
-    throw error;
+      // Validate response
+      if (!response) {
+        throw new Error('No response received from Gemini');
+      }
+
+      const text = response.text();
+      if (!text) {
+        throw new Error('Empty response text from Gemini');
+      }
+
+      // Clean up the response (remove markdown code blocks if present)
+      return cleanJsonResponse(text);
+    } catch (error) {
+      lastError = error as Error;
+      const errorMessage = lastError.message || String(error);
+
+      // Check if it's a rate limit error (429) - wait longer
+      const isRateLimit = errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit');
+
+      if (attempt < MAX_RETRIES - 1) {
+        const waitTime = isRateLimit
+          ? BASE_DELAY_MS * Math.pow(2, attempt) * 2  // Longer wait for rate limits
+          : BASE_DELAY_MS * Math.pow(2, attempt);
+
+        console.warn(`Gemini attempt ${attempt + 1} failed: ${errorMessage}. Retrying in ${waitTime}ms...`);
+        await delay(waitTime);
+      } else {
+        console.error(`Gemini generation failed after ${MAX_RETRIES} attempts:`, error);
+      }
+    }
   }
+
+  throw lastError || new Error('Gemini generation failed');
 }
 
 /**

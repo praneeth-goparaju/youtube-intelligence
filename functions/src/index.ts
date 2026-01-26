@@ -6,6 +6,7 @@
 
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
+import { defineString } from 'firebase-functions/params';
 import { RecommendationEngine } from './engine';
 import type { RecommendationRequest, RecommendationResponse, ContentType } from './types';
 
@@ -16,11 +17,109 @@ setGlobalOptions({
   timeoutSeconds: 60,
 });
 
+// API key for authentication (set via Firebase Console or CLI)
+const apiKeyParam = defineString('RECOMMEND_API_KEY', {
+  description: 'API key for authenticating recommendation requests',
+  default: '',
+});
+
+// Allowed origins for CORS (comma-separated list)
+const allowedOriginsParam = defineString('ALLOWED_ORIGINS', {
+  description: 'Comma-separated list of allowed origins for CORS',
+  default: '',
+});
+
+// Rate limiting: simple in-memory store (for production, use Redis or Firestore)
+const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_MAX = 100; // requests per window
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Check rate limit for a given key (IP or API key)
+ */
+function checkRateLimit(key: string): { allowed: boolean; remaining: number } {
+  const now = Date.now();
+  const record = rateLimitStore.get(key);
+
+  if (!record || now > record.resetTime) {
+    rateLimitStore.set(key, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 };
+  }
+
+  if (record.count >= RATE_LIMIT_MAX) {
+    return { allowed: false, remaining: 0 };
+  }
+
+  record.count++;
+  return { allowed: true, remaining: RATE_LIMIT_MAX - record.count };
+}
+
+/**
+ * Get allowed origins for CORS
+ */
+function getAllowedOrigins(): string[] | boolean {
+  const originsStr = allowedOriginsParam.value();
+  if (!originsStr) {
+    // If no origins configured, deny all cross-origin requests in production
+    // Return false to disable CORS entirely (same-origin only)
+    return false;
+  }
+  return originsStr.split(',').map((o) => o.trim()).filter((o) => o.length > 0);
+}
+
+/**
+ * Validate API key from request header
+ */
+function validateApiKey(authHeader: string | undefined): boolean {
+  const configuredKey = apiKeyParam.value();
+
+  // If no API key is configured, allow requests (for development)
+  // In production, ALWAYS configure RECOMMEND_API_KEY
+  if (!configuredKey) {
+    console.warn('WARNING: RECOMMEND_API_KEY not configured. API is unprotected!');
+    return true;
+  }
+
+  if (!authHeader) {
+    return false;
+  }
+
+  // Support both "Bearer <key>" and raw key formats
+  const key = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  return key === configuredKey;
+}
+
 // Validate content type
 const VALID_CONTENT_TYPES: ContentType[] = ['recipe', 'vlog', 'tutorial', 'review', 'challenge'];
 
 function isValidContentType(type: string): type is ContentType {
   return VALID_CONTENT_TYPES.includes(type as ContentType);
+}
+
+// Input length limits for security
+const MAX_TOPIC_LENGTH = 200;
+const MAX_ANGLE_LENGTH = 500;
+const MAX_AUDIENCE_LENGTH = 200;
+
+/**
+ * Sanitize user input to prevent prompt injection
+ * Removes control characters and limits length
+ */
+function sanitizeInput(input: string | undefined, maxLength: number): string {
+  if (!input) return '';
+
+  // Remove control characters and normalize whitespace
+  let sanitized = input
+    .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+    .replace(/\s+/g, ' ')            // Normalize whitespace
+    .trim();
+
+  // Truncate to max length
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.slice(0, maxLength);
+  }
+
+  return sanitized;
 }
 
 // ============================================
@@ -31,16 +130,18 @@ function isValidContentType(type: string): type is ContentType {
  * HTTP endpoint for generating recommendations
  *
  * POST /recommend
+ * Headers: Authorization: Bearer <API_KEY>
  * Body: { topic: string, type?: string, angle?: string, audience?: string }
  *
  * Example:
  * curl -X POST https://REGION-PROJECT.cloudfunctions.net/recommend \
  *   -H "Content-Type: application/json" \
+ *   -H "Authorization: Bearer YOUR_API_KEY" \
  *   -d '{"topic": "Biryani", "type": "recipe"}'
  */
 export const recommend = onRequest(
   {
-    cors: true,  // Enable CORS for web clients
+    cors: getAllowedOrigins(),  // Restricted CORS - configure ALLOWED_ORIGINS
   },
   async (req, res) => {
     // Only allow POST requests
@@ -49,11 +150,38 @@ export const recommend = onRequest(
       return;
     }
 
+    // Validate API key
+    if (!validateApiKey(req.headers.authorization)) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
+      });
+      return;
+    }
+
+    // Check rate limit (use IP or API key as identifier)
+    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimit = checkRateLimit(rateLimitKey);
+    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
+
+    if (!rateLimit.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: 'Too many requests. Please try again later.',
+      });
+      return;
+    }
+
     try {
       // Parse and validate request
       const { topic, type, angle, audience } = req.body as Partial<RecommendationRequest>;
 
-      if (!topic || typeof topic !== 'string' || topic.trim().length === 0) {
+      // Sanitize inputs to prevent prompt injection
+      const sanitizedTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
+      const sanitizedAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
+      const sanitizedAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
+
+      if (!sanitizedTopic || sanitizedTopic.length === 0) {
         res.status(400).json({
           error: 'Invalid request',
           message: 'Topic is required and must be a non-empty string',
@@ -69,13 +197,13 @@ export const recommend = onRequest(
         return;
       }
 
-      // Generate recommendation
+      // Generate recommendation with sanitized inputs
       const engine = new RecommendationEngine();
       const recommendation = await engine.generateRecommendation({
-        topic: topic.trim(),
+        topic: sanitizedTopic,
         type: type as ContentType || 'recipe',
-        angle: angle?.trim(),
-        audience: audience?.trim() || 'Telugu audience',
+        angle: sanitizedAngle || undefined,
+        audience: sanitizedAudience || 'Telugu audience',
       });
 
       res.status(200).json(recommendation);
@@ -83,7 +211,7 @@ export const recommend = onRequest(
       console.error('Recommendation error:', error);
       res.status(500).json({
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message: 'Failed to generate recommendation',  // Don't leak internal error details
       });
     }
   }
@@ -106,8 +234,24 @@ export const getRecommendation = onCall<RecommendationRequest, Promise<Recommend
   async (request) => {
     const { topic, type, angle, audience } = request.data;
 
+    // Check rate limit using auth UID or app check token
+    const rateLimitKey = request.auth?.uid || request.rawRequest.ip || 'anonymous';
+    const rateLimit = checkRateLimit(rateLimitKey);
+
+    if (!rateLimit.allowed) {
+      throw new HttpsError(
+        'resource-exhausted',
+        'Rate limit exceeded. Please try again later.'
+      );
+    }
+
+    // Sanitize inputs to prevent prompt injection
+    const sanitizedTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
+    const sanitizedAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
+    const sanitizedAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
+
     // Validate topic
-    if (!topic || typeof topic !== 'string' || topic.trim().length === 0) {
+    if (!sanitizedTopic || sanitizedTopic.length === 0) {
       throw new HttpsError(
         'invalid-argument',
         'Topic is required and must be a non-empty string'
@@ -125,16 +269,16 @@ export const getRecommendation = onCall<RecommendationRequest, Promise<Recommend
     try {
       const engine = new RecommendationEngine();
       return await engine.generateRecommendation({
-        topic: topic.trim(),
+        topic: sanitizedTopic,
         type: type || 'recipe',
-        angle: angle?.trim(),
-        audience: audience?.trim() || 'Telugu audience',
+        angle: sanitizedAngle || undefined,
+        audience: sanitizedAudience || 'Telugu audience',
       });
     } catch (error) {
       console.error('Recommendation error:', error);
       throw new HttpsError(
         'internal',
-        error instanceof Error ? error.message : 'Failed to generate recommendation'
+        'Failed to generate recommendation'  // Don't leak internal error details
       );
     }
   }

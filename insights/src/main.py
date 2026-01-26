@@ -131,8 +131,12 @@ def main():
         title_videos = []
 
     # Use any available analysis for timing and gaps
-    all_videos = thumbnail_videos or title_videos
-    if not all_videos:
+    # Fix: Check length explicitly since empty list is falsy but we want non-empty lists
+    if len(thumbnail_videos) > 0:
+        all_videos = thumbnail_videos
+    elif len(title_videos) > 0:
+        all_videos = title_videos
+    else:
         all_videos = get_all_videos_with_analysis(ANALYSIS_TYPE_DESCRIPTION)
 
     print(f"  Total videos for analysis: {len(all_videos)}")

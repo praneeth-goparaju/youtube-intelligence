@@ -9,7 +9,7 @@ import { saveChannel, saveVideosBatch, saveProgress, getProgress } from '../fire
 import { resolveChannelUrl } from '../youtube/resolver.js';
 import { getChannelDetails, transformChannelData, getUploadsPlaylistId } from '../youtube/channels.js';
 import { getPlaylistVideos, getVideoDetails, transformVideoData } from '../youtube/videos.js';
-import { getQuotaUsed, getQuotaRemaining, isQuotaLow } from '../youtube/client.js';
+import { getQuotaUsed, getQuotaRemaining, isQuotaLow, setQuotaUsed } from '../youtube/client.js';
 import {
   getOrCreateProgress,
   updateProgressStatus,
@@ -17,6 +17,7 @@ import {
   updateProgressPhase,
   updateProgressThumbnails,
   getProgressSummary,
+  loadSavedQuota,
 } from './progress.js';
 import { processThumbnailBatch, processChannelThumbnail } from './thumbnail.js';
 import { ChannelsConfig, ChannelInput, Channel, Video, ScrapeProgress } from '../types/index.js';
@@ -303,6 +304,12 @@ export async function runScraper(): Promise<void> {
     'Failed': progressSummary.failed,
     'Total Videos Scraped': formatNumber(progressSummary.totalVideos),
   });
+
+  // Load saved quota from previous session (if same day)
+  const savedQuota = await loadSavedQuota();
+  if (savedQuota > 0) {
+    logger.info(`Restored quota usage from earlier today: ${formatNumber(savedQuota)} units`);
+  }
 
   logger.divider();
   logger.info(`API Quota: ${formatNumber(getQuotaRemaining())} units available`);

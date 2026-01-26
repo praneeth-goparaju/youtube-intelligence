@@ -171,6 +171,18 @@ export class RecommendationEngine {
   }
 
   /**
+   * Escape user input to prevent prompt injection
+   */
+  private escapeForPrompt(input: string): string {
+    // Remove any instruction-like patterns that could hijack the prompt
+    return input
+      .replace(/```/g, '')           // Remove code block markers
+      .replace(/\n{3,}/g, '\n\n')    // Limit consecutive newlines
+      .replace(/[<>]/g, '')          // Remove angle brackets
+      .slice(0, 500);                // Hard limit on length
+  }
+
+  /**
    * Build the prompt for Gemini
    */
   private buildPrompt(
@@ -180,6 +192,11 @@ export class RecommendationEngine {
     audience: string,
     context: string
   ): string {
+    // Escape all user-provided inputs
+    const safeTopic = this.escapeForPrompt(topic);
+    const safeAngle = angle ? this.escapeForPrompt(angle) : 'Not specified';
+    const safeAudience = this.escapeForPrompt(audience);
+
     return `You are a YouTube video optimization expert specializing in Telugu content.
 
 Based on the following performance patterns discovered from analyzing 50,000+ successful Telugu videos:
@@ -187,10 +204,10 @@ Based on the following performance patterns discovered from analyzing 50,000+ su
 ${context}
 
 Generate a complete recommendation for a new video with these details:
-- Topic: ${topic}
+- Topic: ${safeTopic}
 - Content Type: ${type}
-- Unique Angle: ${angle || 'Not specified'}
-- Target Audience: ${audience}
+- Unique Angle: ${safeAngle}
+- Target Audience: ${safeAudience}
 
 Provide recommendations in the following JSON format:
 {
@@ -311,7 +328,13 @@ Respond ONLY with the JSON object, no additional text.`;
       posting: parsed.posting || template.posting,
       prediction: parsed.prediction || template.prediction,
       content: parsed.content || template.content,
-      metadata: template.metadata,
+      // Don't overwrite metadata - caller will set it with correct values
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        modelUsed: GEMINI_MODEL,
+        insightsVersion: this.insightsVersion,
+        fallbackUsed: false,  // AI generation succeeded if we're here
+      },
     };
   }
 

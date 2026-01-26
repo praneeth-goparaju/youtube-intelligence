@@ -177,6 +177,40 @@ async function generateWithGemini(prompt: string): Promise<string> {
 // Recommendation Engine (simplified for CLI)
 // ============================================
 
+// Input length limits
+const MAX_TOPIC_LENGTH = 200;
+const MAX_ANGLE_LENGTH = 500;
+const MAX_AUDIENCE_LENGTH = 200;
+
+/**
+ * Sanitize user input to prevent prompt injection
+ */
+function sanitizeInput(input: string | undefined, maxLength: number): string {
+  if (!input) return '';
+
+  let sanitized = input
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.slice(0, maxLength);
+  }
+
+  return sanitized;
+}
+
+/**
+ * Escape user input for prompt
+ */
+function escapeForPrompt(input: string): string {
+  return input
+    .replace(/```/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[<>]/g, '')
+    .slice(0, 500);
+}
+
 class CLIRecommendationEngine {
   private insights: Insights = {};
   private insightsVersion: string | null = null;
@@ -184,7 +218,16 @@ class CLIRecommendationEngine {
   async generateRecommendation(request: RecommendationRequest): Promise<RecommendationResponse> {
     const { topic, type = 'recipe', angle, audience = 'Telugu audience' } = request;
 
-    console.log(`\nGenerating recommendation for: "${topic}" (${type})`);
+    // Sanitize inputs
+    const safeTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
+    const safeAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
+    const safeAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
+
+    if (!safeTopic) {
+      throw new Error('Topic is required');
+    }
+
+    console.log(`\nGenerating recommendation for: "${safeTopic}" (${type})`);
 
     // Load insights
     console.log('Loading insights from Firestore...');
@@ -200,16 +243,16 @@ class CLIRecommendationEngine {
     try {
       if (hasInsightsData) {
         console.log('Generating with Gemini AI...');
-        recommendation = await this.generateWithAI(topic, type, angle, audience);
+        recommendation = await this.generateWithAI(safeTopic, type, safeAngle, safeAudience);
         console.log('✓ AI generation complete');
       } else {
         console.log('Using template-based generation...');
-        recommendation = this.generateFromTemplates(topic, type, angle, audience);
+        recommendation = this.generateFromTemplates(safeTopic, type, safeAngle, safeAudience);
         fallbackUsed = true;
       }
     } catch (error) {
       console.warn('AI generation failed, using templates:', error);
-      recommendation = this.generateFromTemplates(topic, type, angle, audience);
+      recommendation = this.generateFromTemplates(safeTopic, type, safeAngle, safeAudience);
       fallbackUsed = true;
     }
 
@@ -297,6 +340,11 @@ class CLIRecommendationEngine {
     audience: string,
     context: string
   ): string {
+    // Escape user inputs for safety
+    const safeTopic = escapeForPrompt(topic);
+    const safeAngle = angle ? escapeForPrompt(angle) : 'Not specified';
+    const safeAudience = escapeForPrompt(audience);
+
     return `You are a YouTube video optimization expert specializing in Telugu content.
 
 Based on the following performance patterns discovered from analyzing 50,000+ successful Telugu videos:
@@ -304,10 +352,10 @@ Based on the following performance patterns discovered from analyzing 50,000+ su
 ${context}
 
 Generate a complete recommendation for a new video with these details:
-- Topic: ${topic}
+- Topic: ${safeTopic}
 - Content Type: ${type}
-- Unique Angle: ${angle || 'Not specified'}
-- Target Audience: ${audience}
+- Unique Angle: ${safeAngle}
+- Target Audience: ${safeAudience}
 
 Provide recommendations in the following JSON format:
 {
@@ -368,7 +416,13 @@ Important: Use bilingual titles, include Telugu script (not transliteration). Re
       posting: parsed.posting || template.posting,
       prediction: parsed.prediction || template.prediction,
       content: parsed.content || template.content,
-      metadata: template.metadata,
+      // Don't overwrite metadata - caller sets correct values
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        modelUsed: 'gemini-2.0-flash',
+        insightsVersion: this.insightsVersion,
+        fallbackUsed: false,  // AI generation succeeded
+      },
     };
   }
 

@@ -22,6 +22,10 @@ export interface ScrapeProgress {
   lastProcessedVideoId: string | null;
   lastPlaylistPageToken: string | null;
 
+  // Quota Tracking (for resuming within same day)
+  quotaUsed?: number;
+  quotaDate?: string;  // ISO date string (YYYY-MM-DD) in Pacific Time
+
   // Timestamps
   startedAt: Timestamp;
   lastProcessedAt: Timestamp;

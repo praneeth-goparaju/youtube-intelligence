@@ -6,6 +6,56 @@ import {
   createInitialProgress,
 } from '../firebase/firestore.js';
 import { ScrapeProgress, ProgressStatus, ProgressPhase } from '../types/index.js';
+import { getQuotaUsed, setQuotaUsed } from '../youtube/client.js';
+
+/**
+ * Get today's date in Pacific Time (YouTube quota resets at midnight PT)
+ */
+function getPacificDate(): string {
+  const now = new Date();
+  // Convert to Pacific Time
+  const ptOptions: Intl.DateTimeFormatOptions = {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  };
+  const ptDate = new Intl.DateTimeFormat('en-CA', ptOptions).format(now);
+  return ptDate; // Returns YYYY-MM-DD format
+}
+
+/**
+ * Load saved quota usage if from the same day (quota resets daily at midnight Pacific)
+ * Returns the loaded quota value, or 0 if no valid saved quota
+ */
+export async function loadSavedQuota(): Promise<number> {
+  const allProgress = await getAllProgress();
+  const today = getPacificDate();
+
+  // Find the most recent progress with quota data from today
+  for (const progress of allProgress) {
+    if (progress.quotaDate === today && typeof progress.quotaUsed === 'number') {
+      setQuotaUsed(progress.quotaUsed);
+      return progress.quotaUsed;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Save current quota usage to a progress record
+ */
+export async function saveQuotaToProgress(channelId: string): Promise<void> {
+  const progress = await getProgress(channelId);
+  if (!progress) return;
+
+  progress.quotaUsed = getQuotaUsed();
+  progress.quotaDate = getPacificDate();
+  progress.lastProcessedAt = Timestamp.now();
+
+  await saveProgress(progress);
+}
 
 /**
  * Get or create progress for a channel
@@ -69,6 +119,10 @@ export async function updateProgressVideos(
   progress.lastProcessedVideoId = lastVideoId;
   progress.lastPlaylistPageToken = nextPageToken;
   progress.lastProcessedAt = Timestamp.now();
+
+  // Also save quota for resume capability
+  progress.quotaUsed = getQuotaUsed();
+  progress.quotaDate = getPacificDate();
 
   await saveProgress(progress);
 }
