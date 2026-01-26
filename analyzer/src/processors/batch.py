@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional, Callable
 from tqdm import tqdm
 
 from ..firebase_client import get_all_channels, get_channel_videos, get_unanalyzed_videos
-from ..analyzers import ThumbnailAnalyzer, TitleAnalyzer, DescriptionAnalyzer, TagsAnalyzer
+from ..analyzers import ThumbnailAnalyzer, TitleAnalyzer, DescriptionAnalyzer, TagsAnalyzer, ContentStructureAnalyzer
 from ..config import config
 from .progress import ProgressTracker
 
@@ -29,6 +29,7 @@ class BatchProcessor:
             'title': TitleAnalyzer(),
             'description': DescriptionAnalyzer(),
             'tags': TagsAnalyzer(),
+            'content_structure': ContentStructureAnalyzer(),
         }
 
         if analysis_type not in analyzers:
@@ -172,6 +173,15 @@ class BatchProcessor:
             tags = video.get('tags', [])
             return self.analyzer.analyze(channel_id, video_id, tags)
 
+        elif self.analysis_type == 'content_structure':
+            title = video.get('title', '')
+            description = video.get('description', '')
+            duration_seconds = video.get('durationSeconds', 0)
+            tags = video.get('tags', [])
+            return self.analyzer.analyze(
+                channel_id, video_id, title, description, duration_seconds, tags
+            )
+
         return None
 
 
@@ -187,7 +197,7 @@ def run_all_analysis(limit_per_channel: Optional[int] = None) -> Dict[str, Any]:
     """
     results = {}
 
-    for analysis_type in ['thumbnail', 'title', 'description', 'tags']:
+    for analysis_type in ['thumbnail', 'title', 'description', 'tags', 'content_structure']:
         print(f"\n\n{'#'*60}")
         print(f"  STARTING {analysis_type.upper()} ANALYSIS")
         print(f"{'#'*60}")

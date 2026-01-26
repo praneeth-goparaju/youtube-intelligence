@@ -36,6 +36,7 @@ pip install -r requirements.txt
 python src/main.py                                    # Run all analysis types
 python src/main.py --type thumbnail                   # Single analysis type
 python src/main.py --type title --channel CHANNEL_ID  # Specific channel
+python src/main.py --type content_structure           # Infer video structure (transcript alternative)
 python src/main.py --limit 50                         # Limit videos per channel
 python src/main.py --validate                         # Test connections only
 pytest tests/                                         # Run tests
@@ -85,7 +86,7 @@ Required in `.env`:
 
 - `channels/{channelId}` - Channel metadata and stats
 - `channels/{channelId}/videos/{videoId}` - Video data with calculated metrics
-- `channels/{channelId}/videos/{videoId}/analysis/{type}` - AI analysis results (thumbnail, title, description, tags)
+- `channels/{channelId}/videos/{videoId}/analysis/{type}` - AI analysis results (thumbnail, title, description, tags, content_structure)
 - `scrape_progress/{channelId}` - Resume state for interrupted scrapes
 - `insights/{type}` - Aggregated patterns (thumbnails, titles, timing, contentGaps)
 
@@ -103,3 +104,9 @@ All analysis uses Gemini 2.0 Flash (`gemini-2.0-flash`):
 - Title: Structure, language mix, hooks, keywords, Telugu-specific patterns
 - Description: Timestamps, recipe content, links, hashtags, CTAs, SEO
 - Tags: Categorization, strategy, search volume estimation
+- Content Structure: Infers video structure from metadata (transcript-like insights without actual transcripts)
+  - Video segments and pacing analysis from timestamps
+  - Talking points and content outline inference
+  - Recipe structure detection (steps, techniques, equipment)
+  - Engagement points and retention strategies
+  - Content classification and SEO insights
