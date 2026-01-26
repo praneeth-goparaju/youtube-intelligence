@@ -150,7 +150,8 @@ youtube-intelligence/
 │   │   │   ├── thumbnail.py        # Thumbnail analysis
 │   │   │   ├── title.py            # Title analysis
 │   │   │   ├── description.py      # Description analysis
-│   │   │   └── tags.py             # Tag analysis
+│   │   │   ├── tags.py             # Tag analysis
+│   │   │   └── content_structure.py # Video structure inference
 │   │   ├── processors/
 │   │   │   ├── __init__.py
 │   │   │   ├── batch.py            # Batch processing
@@ -652,10 +653,11 @@ After scraping completes, analyze all data using Claude API:
 
 | Analysis Type | Input | AI Model | Output |
 |---------------|-------|----------|--------|
-| Thumbnail | Image file | Claude Vision (Opus 4.5) | 50+ attributes |
-| Title | Text string | Claude Text | 40+ attributes |
-| Description | Text string | Claude Text | 30+ attributes |
-| Tags | Array of strings | Claude Text | 20+ attributes |
+| Thumbnail | Image file | Gemini Vision | 50+ attributes |
+| Title | Text string | Gemini Text | 40+ attributes |
+| Description | Text string | Gemini Text | 30+ attributes |
+| Tags | Array of strings | Gemini Text | 20+ attributes |
+| Content Structure | Title + Description + Duration + Tags | Gemini Text | 60+ attributes (transcript-like insights) |
 
 ---
 

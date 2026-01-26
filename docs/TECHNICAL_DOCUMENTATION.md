@@ -131,7 +131,8 @@ youtube_channel_analysis/
 │   │   │   ├── thumbnail.py  # Vision analysis
 │   │   │   ├── title.py      # Title analysis
 │   │   │   ├── description.py
-│   │   │   └── tags.py
+│   │   │   ├── tags.py
+│   │   │   └── content_structure.py  # Inferred video structure
 │   │   ├── processors/       # Batch processing
 │   │   │   ├── __init__.py
 │   │   │   ├── batch.py
@@ -141,7 +142,8 @@ youtube_channel_analysis/
 │   │       ├── thumbnail_prompt.py
 │   │       ├── title_prompt.py
 │   │       ├── description_prompt.py
-│   │       └── tags_prompt.py
+│   │       ├── tags_prompt.py
+│   │       └── content_structure_prompt.py  # Structure inference prompt
 │   ├── scripts/              # Individual analysis runners
 │   └── tests/
 │
@@ -350,6 +352,12 @@ The analyzer processes scraped data using Google Gemini 2.0 Flash:
 - **Title Analysis**: Text analysis of structure, language, hooks, keywords
 - **Description Analysis**: Content parsing for timestamps, links, CTAs
 - **Tag Analysis**: Keyword categorization and strategy evaluation
+- **Content Structure Analysis**: Infers video structure from metadata (ToS-compliant transcript alternative)
+  - Video segments and pacing from timestamps
+  - Talking points and content outline inference
+  - Recipe structure detection (steps, techniques, equipment)
+  - Engagement points and retention strategies
+  - Content classification and SEO insights
 
 ### Gemini Client
 
@@ -522,10 +530,11 @@ Analysis results are stored as subcollections:
 
 ```
 channels/{channelId}/videos/{videoId}/analysis/
-├── thumbnail    # Thumbnail analysis results
-├── title        # Title analysis results
-├── description  # Description analysis results
-└── tags         # Tag analysis results
+├── thumbnail          # Thumbnail analysis results
+├── title              # Title analysis results
+├── description        # Description analysis results
+├── tags               # Tag analysis results
+└── content_structure  # Inferred video structure (transcript alternative)
 ```
 
 ---
