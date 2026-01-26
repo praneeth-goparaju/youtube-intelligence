@@ -85,6 +85,20 @@ Required in `.env`:
 - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_STORAGE_BUCKET`
 - `GOOGLE_API_KEY` - Gemini API for analysis
 
+## Security Configuration
+
+For Firebase Functions deployment, set these secrets:
+```bash
+firebase functions:secrets:set GOOGLE_API_KEY        # Required: Gemini API key
+firebase functions:secrets:set RECOMMEND_API_KEY     # Required: API key for authentication
+firebase functions:secrets:set ALLOWED_ORIGINS       # Optional: Comma-separated allowed origins for CORS
+```
+
+API Authentication:
+- All `/recommend` endpoint calls require `Authorization: Bearer <API_KEY>` header
+- Rate limiting: 100 requests per hour per API key
+- Firestore rules require Firebase Authentication for client reads
+
 ## Key Technical Considerations
 
 - YouTube API quota is 10,000 units/day; scraper saves progress and resumes

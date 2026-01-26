@@ -270,6 +270,7 @@ POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend
 ```bash
 curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
     "topic": "Hyderabadi Biryani",
     "type": "recipe",
@@ -277,6 +278,8 @@ curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
     "audience": "Telugu home cooks"
   }'
 ```
+
+> **Note**: API authentication is required. Set your API key using Firebase secrets (see Deploy section).
 
 ### Using Firebase SDK
 
@@ -298,9 +301,24 @@ console.log(result.data);
 ```bash
 cd functions
 npm install
-firebase functions:secrets:set GOOGLE_API_KEY
+
+# Required secrets
+firebase functions:secrets:set GOOGLE_API_KEY      # Gemini API key for AI generation
+firebase functions:secrets:set RECOMMEND_API_KEY   # API key for authenticating requests
+
+# Optional: Restrict CORS origins (comma-separated)
+firebase functions:secrets:set ALLOWED_ORIGINS     # e.g., "https://yourdomain.com,https://app.yourdomain.com"
+
 npm run deploy
 ```
+
+### Security Features
+
+- **API Authentication**: All requests require `Authorization: Bearer <API_KEY>` header
+- **Rate Limiting**: 100 requests per hour per API key/IP
+- **CORS**: Configurable allowed origins (defaults to same-origin only)
+- **Input Sanitization**: All user inputs are sanitized to prevent prompt injection
+- **Firestore Rules**: Require Firebase Authentication for client reads
 
 See [functions/README.md](functions/README.md) for complete API documentation.
 
