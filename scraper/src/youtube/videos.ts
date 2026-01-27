@@ -1,7 +1,7 @@
 import { getYoutubeClient, addQuotaUsage } from './client.js';
 import { Timestamp } from 'firebase-admin/firestore';
 import { Video, PlaylistItem, CalculatedMetrics, VideoThumbnails } from '../types/index.js';
-import { parseDuration, isShortVideo } from '../utils/duration.js';
+import { parseDuration, isShortVideoDetailed } from '../utils/duration.js';
 import {
   daysBetween,
   getDayOfWeek,
@@ -133,6 +133,7 @@ export async function getVideoDetails(videoIds: string[]): Promise<YouTubeVideoD
 
 /**
  * Calculate derived metrics for a video
+ * @param subscriberCount - Channel subscriber count, or null if hidden
  */
 export function calculateVideoMetrics(
   video: {
@@ -144,7 +145,7 @@ export function calculateVideoMetrics(
     description: string;
     tags: string[];
   },
-  subscriberCount: number
+  subscriberCount: number | null
 ): CalculatedMetrics {
   const now = new Date();
   const daysSince = Math.max(1, daysBetween(video.publishedAt, now));
@@ -159,7 +160,8 @@ export function calculateVideoMetrics(
     commentRatio: video.viewCount > 0
       ? (video.commentCount / video.viewCount) * 100
       : 0,
-    viewsPerSubscriber: subscriberCount > 0
+    // viewsPerSubscriber is 0 if subscriber count is hidden (null) or zero
+    viewsPerSubscriber: (subscriberCount !== null && subscriberCount > 0)
       ? video.viewCount / subscriberCount
       : 0,
     daysSincePublish: daysSince,
@@ -178,11 +180,12 @@ export function calculateVideoMetrics(
 
 /**
  * Transform YouTube API video data to our Video schema
+ * @param subscriberCount - Channel subscriber count, or null if hidden
  */
 export function transformVideoData(
   data: YouTubeVideoData,
   channelId: string,
-  subscriberCount: number
+  subscriberCount: number | null
 ): Omit<Video, 'thumbnailStoragePath'> {
   const publishedAt = new Date(data.snippet.publishedAt);
   const durationSeconds = parseDuration(data.contentDetails.duration);
@@ -254,7 +257,7 @@ export function transformVideoData(
     topicCategories: data.topicDetails?.topicCategories || [],
 
     // Derived Fields
-    isShort: isShortVideo(durationSeconds),
+    isShort: isShortVideoDetailed(durationSeconds, data.snippet.title, data.snippet.description).isShort,
     videoUrl: `https://www.youtube.com/watch?v=${data.id}`,
 
     // Scraping Info

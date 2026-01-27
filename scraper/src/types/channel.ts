@@ -25,7 +25,7 @@ export interface Channel {
   customUrl: string;
 
   // Statistics
-  subscriberCount: number;
+  subscriberCount: number | null;  // null if channel hides subscriber count
   videoCount: number;
   viewCount: number;
 
