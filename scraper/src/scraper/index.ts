@@ -55,8 +55,8 @@ export async function processChannel(
   error?: string;
 }> {
   let channelId: string | undefined;
-  let videosProcessed = 0;
-  let thumbnailsDownloaded = 0;
+  let videosProcessed = 0;  // Will be set from resume state if resuming
+  let thumbnailsDownloaded = 0;  // Will be set from resume state if resuming
 
   try {
     // Step 1: Resolve channel URL to ID
@@ -69,11 +69,29 @@ export async function processChannel(
     const existingProgress = await getProgress(channelId);
     let resumeFromToken: string | null = null;
     let resumeFromVideoCount = 0;
+    let resumeFromThumbnailCount = 0;
 
-    if (existingProgress && existingProgress.status !== 'completed') {
+    if (existingProgress) {
+      // Skip if already completed
+      if (existingProgress.status === 'completed') {
+        logger.info(`Channel already completed, skipping: ${channelId}`);
+        return {
+          success: true,
+          channelId,
+          videosProcessed: existingProgress.videosProcessed,
+          thumbnailsDownloaded: existingProgress.thumbnailsDownloaded,
+        };
+      }
+
+      // Resume from previous progress
       logger.info(`Resuming from previous progress: ${existingProgress.videosProcessed} videos processed`);
       resumeFromToken = existingProgress.lastPlaylistPageToken;
       resumeFromVideoCount = existingProgress.videosProcessed;
+      resumeFromThumbnailCount = existingProgress.thumbnailsDownloaded;
+
+      // Initialize counts from resume state
+      videosProcessed = resumeFromVideoCount;
+      thumbnailsDownloaded = resumeFromThumbnailCount;
     }
 
     // Step 3: Fetch channel details
@@ -86,7 +104,7 @@ export async function processChannel(
     const channelInfo = transformChannelData(channelData, input);
     logger.success(`Channel: ${channelInfo.channelTitle}`);
     logger.stats({
-      'Subscribers': formatNumber(channelInfo.subscriberCount),
+      'Subscribers': channelInfo.subscriberCount !== null ? formatNumber(channelInfo.subscriberCount) : 'Hidden',
       'Total Videos': formatNumber(channelInfo.videoCount),
       'Total Views': formatNumber(channelInfo.viewCount),
     });
@@ -157,13 +175,14 @@ export async function processChannel(
     const videoChunks = chunk(allVideoIds, config.scraper.batchSize);
     const allVideos: Video[] = [];
 
-    let videosSeenInBatches = 0; // Track position in allVideoIds array (including filtered)
+    // Track how many video IDs we've attempted to fetch (for progress tracking)
+    let videoIdsAttempted = 0;
 
     for (let i = 0; i < videoChunks.length; i++) {
       if (isQuotaLow()) {
         logger.warn('Quota running low, saving progress...');
-        // Use the last video ID we've actually processed, or null if none processed yet
-        const lastProcessedId = videosSeenInBatches > 0 ? allVideoIds[videosSeenInBatches - 1] : null;
+        // Use the last video ID from completed batches
+        const lastProcessedId = videoIdsAttempted > 0 ? allVideoIds[videoIdsAttempted - 1] : null;
         await updateProgressVideos(channelId, videosProcessed, lastProcessedId, null);
         return {
           success: false,
@@ -177,10 +196,18 @@ export async function processChannel(
       const batchIds = videoChunks[i];
       const videoData = await getVideoDetails(batchIds);
 
+      // Track attempted video IDs (includes deleted/private videos that API didn't return)
+      videoIdsAttempted += batchIds.length;
+
+      // Log if some videos were not returned (deleted/private)
+      if (videoData.length < batchIds.length) {
+        const missing = batchIds.length - videoData.length;
+        logger.warn(`${missing} video(s) in batch were not returned (possibly deleted/private)`);
+      }
+
       // Transform and filter
       const videos: Video[] = [];
       for (const data of videoData) {
-        videosSeenInBatches++; // Track position even for filtered videos
         const video = transformVideoData(data, channelId, channel.subscriberCount);
 
         // Filter shorts if needed
@@ -200,7 +227,7 @@ export async function processChannel(
       // Save batch to Firestore
       await saveVideosBatch(channelId, videos);
 
-      logger.info(`Processed ${videosProcessed}/${allVideoIds.length} videos (${videosSeenInBatches} checked)`);
+      logger.info(`Processed ${videosProcessed}/${allVideoIds.length} videos (${videoIdsAttempted} IDs checked)`);
       const lastBatchVideoId = batchIds.length > 0 ? batchIds[batchIds.length - 1] : null;
       await updateProgressVideos(channelId, videosProcessed, lastBatchVideoId, null);
 

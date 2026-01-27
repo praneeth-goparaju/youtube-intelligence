@@ -17,7 +17,8 @@ interface YouTubeChannelData {
     publishedAt: string;
   };
   statistics: {
-    subscriberCount: string;
+    subscriberCount?: string;  // May be missing if channel hides subscriber count
+    hiddenSubscriberCount?: boolean;  // True if subscriber count is hidden
     videoCount: string;
     viewCount: string;
   };
@@ -26,6 +27,24 @@ interface YouTubeChannelData {
       bannerExternalUrl?: string;
     };
   };
+}
+
+/**
+ * Parse subscriber count, returning null if hidden
+ */
+function parseSubscriberCount(statistics: YouTubeChannelData['statistics']): number | null {
+  // Check if subscriber count is explicitly hidden
+  if (statistics.hiddenSubscriberCount) {
+    return null;
+  }
+
+  // Check if subscriberCount is missing or empty
+  if (!statistics.subscriberCount || statistics.subscriberCount === '') {
+    return null;
+  }
+
+  const count = parseInt(statistics.subscriberCount, 10);
+  return isNaN(count) ? null : count;
 }
 
 /**
@@ -71,7 +90,7 @@ export function transformChannelData(
     customUrl: data.snippet.customUrl || '',
 
     // Statistics
-    subscriberCount: parseInt(data.statistics.subscriberCount, 10) || 0,
+    subscriberCount: parseSubscriberCount(data.statistics),
     videoCount: parseInt(data.statistics.videoCount, 10) || 0,
     viewCount: parseInt(data.statistics.viewCount, 10) || 0,
 
