@@ -26,21 +26,26 @@ function getPacificDate(): string {
 
 /**
  * Load saved quota usage if from the same day (quota resets daily at midnight Pacific)
- * Returns the loaded quota value, or 0 if no valid saved quota
+ * Returns the highest quota value from today's progress records, or 0 if none found
  */
 export async function loadSavedQuota(): Promise<number> {
   const allProgress = await getAllProgress();
   const today = getPacificDate();
 
-  // Find the most recent progress with quota data from today
+  // Find the maximum quota usage from today across all progress records
+  // This ensures we don't undercount if multiple channels were processed
+  let maxQuota = 0;
   for (const progress of allProgress) {
     if (progress.quotaDate === today && typeof progress.quotaUsed === 'number') {
-      setQuotaUsed(progress.quotaUsed);
-      return progress.quotaUsed;
+      maxQuota = Math.max(maxQuota, progress.quotaUsed);
     }
   }
 
-  return 0;
+  if (maxQuota > 0) {
+    setQuotaUsed(maxQuota);
+  }
+
+  return maxQuota;
 }
 
 /**
