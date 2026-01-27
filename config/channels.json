@@ -6,9 +6,695 @@
       "priority": 1
     },
     {
+      "url": "https://www.youtube.com/@AmmaChethiVanta",
+      "category": "cooking",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@shravaniskitchen",
+      "category": "cooking",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@vahrehvah",
+      "category": "cooking",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@HyderabadiRuchulu",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@ManaChef",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@AttammaTV",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@HomeCookingTelugu",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@MynaStreetFood",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@MyCountryFoods",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@TastyTeja",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@sravanikitchen",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@gayathriskitchen",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SailawsKitchen",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@GrandpaKitchen",
+      "category": "cooking",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@Ruchulu",
+      "category": "cooking",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@SuneethaVlogs",
+      "category": "cooking",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@VijayaLifestyle",
+      "category": "cooking",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@AmmaGodavari",
+      "category": "cooking",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@ManjulasKitchen",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
       "url": "https://www.youtube.com/@MyVillageShow",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@prasadtechintelugu",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@Mahathalli",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@alekhyaharika",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@DeepthiSunaina",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@shanmukhjaswanth",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@Filmymoji",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@naaanveshana",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@sirihanmanth",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@UmaTeluguTraveller",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@RaviTeluguTraveller",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@PallaviPrashanth",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SwathiNaidu",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@HarshaSai",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@BangkokPilla",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@VithikaSheru",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@NiharikaKonidela",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@LasyaManjunath",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@AnchorRavi",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@Sreemukhi",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@VaasVlogs",
+      "category": "nri",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@AmericaloAmmakutti",
+      "category": "nri",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@RaajiVlogsFromJapan",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@VoiceofVasapitta",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@AustraliaTeluguVlogs",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@USARaja",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@AmericaKaburlu",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@TeluguNRITV",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@iDreamNRI",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@HimaSudheerTales",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@NaveenVlogs",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@FlyingtoUSA",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@CanadaTeluguVlogs",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@LondonloTeluguAbbayi",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@GermanyloTeluguAmmai",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SingaporeTeluguVlogs",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@DubaiTeluguVlogs",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@AmericaloOkaTeluguFamily",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@NRIHaasana",
+      "category": "nri",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@ismartgowthami",
+      "category": "nri",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@TeluguEuropeanVlogs",
+      "category": "europe_travel",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@RanjitinEurope",
+      "category": "europe_travel",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@PriyAnjiVlogs",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@ManasaTravelCafe",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@IrelandChowrasta",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@AstamAkhil",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@RamyaRaghav",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SagarTeluguTraveller",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@GeethuCollections",
+      "category": "europe_travel",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@ItalyloTeluguAbbai",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@HappyHarikaLondon",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@TeluguTravellerinEurope",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SwissTeluguVlogs",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@ParisloTeluguAbbayi",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@EuropeTeluguTraveller",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SwedenTeluguVlogs",
+      "category": "europe_travel",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@PolandTeluguVlogs",
+      "category": "europe_travel",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@NorwayTeluguVlogs",
+      "category": "europe_travel",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@DenmarkTeluguVlogs",
+      "category": "europe_travel",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@TravelwithThota",
+      "category": "europe_travel",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SrimanKotaru",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@BayyaSunnyYadav",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@MouliTalks",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@Thyview",
       "category": "entertainment",
       "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@Ragadi",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@Capdt",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@WarangalDiaries",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@FunBucket",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@InfinitumMedia",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@Wirally",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@ChaiBisket",
+      "category": "entertainment",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@GirlFormula",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@StreetByte",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@Guddu",
+      "category": "entertainment",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@NaniPrabhakar",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@Vangaveeti",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@DrManthenaSatyanarayanaRaju",
+      "category": "vlogging",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@MoneyPurse",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@MunnaBhaiGaming",
+      "category": "gaming",
+      "priority": 1,
+      "analysis_note": "Best for analyzing Live Stream thumbnail strategy and high-energy titles."
+    },
+    {
+      "url": "https://www.youtube.com/@sumantv",
+      "category": "interviews",
+      "priority": 1,
+      "analysis_note": "Masterclass in 'Curiosity Gap' titles and click-inducing thumbnails."
+    },
+    {
+      "url": "https://www.youtube.com/@mallemalatv",
+      "category": "entertainment",
+      "priority": 1,
+      "analysis_note": "Analyze for high-contrast, expression-heavy thumbnails (Jabardasth)."
+    },
+    {
+      "url": "https://www.youtube.com/@telugubadiofficial",
+      "category": "education",
+      "priority": 1,
+      "analysis_note": "Excellent 'Explained' style thumbnails using questions and comparison images."
+    },
+    {
+      "url": "https://www.youtube.com/@VRRajaFacts",
+      "category": "facts",
+      "priority": 1,
+      "analysis_note": "Uses 'Mystery/Shock' aesthetic in thumbnails effectively."
+    },
+    {
+      "url": "https://www.youtube.com/@RythuBadi",
+      "category": "agriculture",
+      "priority": 2,
+      "analysis_note": "Clean, information-heavy thumbnails that target a specific niche perfectly."
+    },
+    {
+      "url": "https://www.youtube.com/@SocialPostTV",
+      "category": "interviews",
+      "priority": 2,
+      "analysis_note": "Controversial titles and bold text overlays."
+    },
+    {
+      "url": "https://www.youtube.com/@madhupennadagaming",
+      "category": "gaming",
+      "priority": 2,
+      "analysis_note": "Consistent branding and face-cam integration in thumbnails."
+    },
+    {
+      "url": "https://www.youtube.com/@Bhakti",
+      "category": "devotional",
+      "priority": 2,
+      "analysis_note": "Traditional aesthetic that appeals to older demographics."
+    },
+    {
+      "url": "https://www.youtube.com/@301Diaries",
+      "category": "entertainment",
+      "priority": 2,
+      "analysis_note": "Relatable skit thumbnails, often using chaotic or funny frames."
+    },
+    {
+      "url": "https://www.youtube.com/@TV9TeluguLive",
+      "category": "news",
+      "priority": 1,
+      "analysis_note": "Sensationalism and urgency in titles (Red bold text)."
+    },
+    {
+      "url": "https://www.youtube.com/@V6NewsTelugu",
+      "category": "news",
+      "priority": 2,
+      "analysis_note": "Satirical/Folk style presentation (Teenmaar) unique to Telangana."
+    },
+    {
+      "url": "https://www.youtube.com/@GreatAndhra",
+      "category": "entertainment_news",
+      "priority": 2,
+      "analysis_note": "Movie politics and gossip; highly polarizing titles."
+    },
+    {
+      "url": "https://www.youtube.com/@TupakiTV",
+      "category": "entertainment_news",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@iDreamMedia",
+      "category": "interviews",
+      "priority": 2,
+      "analysis_note": "Long-form content packaging."
+    },
+    {
+      "url": "https://www.youtube.com/@Telugutechtuts",
+      "category": "tech",
+      "priority": 2,
+      "analysis_note": "Deep-dive tech tutorials with clear, problem-solving titles."
+    },
+    {
+      "url": "https://www.youtube.com/@PlanetLeaf",
+      "category": "health_facts",
+      "priority": 2,
+      "analysis_note": "Home remedy thumbnails that promise quick results."
+    },
+    {
+      "url": "https://www.youtube.com/@VikramAditya",
+      "category": "knowledge",
+      "priority": 1,
+      "analysis_note": "Storytelling style; uses historical imagery effectively."
+    },
+    {
+      "url": "https://www.youtube.com/@PulihoraRaja",
+      "category": "roasting",
+      "priority": 2,
+      "analysis_note": "Uses memes and pop-culture references heavily in thumbnails."
+    },
+    {
+      "url": "https://www.youtube.com/@Engilipisu",
+      "category": "roasting",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@Kalahaasti",
+      "category": "short_films",
+      "priority": 2,
+      "analysis_note": "High production value thumbnails (cinematic look)."
+    },
+    {
+      "url": "https://www.youtube.com/@RunwayReels",
+      "category": "short_films",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SarayuRoy",
+      "category": "vlogging",
+      "priority": 2,
+      "analysis_note": "Bold/Adult comedy themes."
+    },
+    {
+      "url": "https://www.youtube.com/@PremaTheJournalist",
+      "category": "interviews",
+      "priority": 2,
+      "analysis_note": "Emotional/Deep interview style titles."
+    },
+    {
+      "url": "https://www.youtube.com/@NamasteTelugu",
+      "category": "news_analysis",
+      "priority": 3
+    },
+    {
+      "url": "https://www.youtube.com/@TejaGouda",
+      "category": "travel_cinematic",
+      "priority": 1,
+      "analysis_note": "Excellent for analyzing cinematic editing and storytelling in travel vlogs."
+    },
+    {
+      "url": "https://www.youtube.com/@AadhanFood",
+      "category": "food_reviews",
+      "priority": 1,
+      "analysis_note": "Best for analyzing thumbnail text overlays and negative/positive review titles."
+    },
+    {
+      "url": "https://www.youtube.com/@KarakattaDaman",
+      "category": "raw_food",
+      "priority": 2,
+      "analysis_note": "Analyze for 'Raw/Rustic' eating appeal and mass audience connection."
+    },
+    {
+      "url": "https://www.youtube.com/@LadduBujji",
+      "category": "couple_vlogs",
+      "priority": 1,
+      "analysis_note": "High engagement couple/family dynamics; great for learning audience retention."
+    },
+    {
+      "url": "https://www.youtube.com/@ExploreWithPavan",
+      "category": "travel",
+      "priority": 2,
+      "analysis_note": "Budget travel tips and itinerary breakdown styles."
+    },
+    {
+      "url": "https://www.youtube.com/@NikhilVijayendraSimha",
+      "category": "lifestyle",
+      "priority": 2,
+      "analysis_note": "High production value and personal branding."
+    },
+    {
+      "url": "https://www.youtube.com/@CrazyFoodies",
+      "category": "street_food",
+      "priority": 2,
+      "analysis_note": "Focus on street food discovery and presentation."
+    },
+    {
+      "url": "https://www.youtube.com/@WanderWithSky",
+      "category": "travel",
+      "priority": 2,
+      "analysis_note": "Female solo travel perspective and aesthetic thumbnails."
+    },
+    {
+      "url": "https://www.youtube.com/@PalleVantalu",
+      "category": "cooking",
+      "priority": 2,
+      "analysis_note": "Village cooking setting; great for analyzing set design and atmosphere."
+    },
+    {
+      "url": "https://www.youtube.com/@FlyingPassport",
+      "category": "travel",
+      "priority": 2,
+      "analysis_note": "International travel documentation style."
     }
   ],
   "settings": {
