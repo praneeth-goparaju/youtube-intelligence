@@ -4,8 +4,8 @@ export interface VideoThumbnails {
   default: string;
   medium: string;
   high: string;
-  standard?: string;
-  maxres?: string;
+  standard: string | null;
+  maxres: string | null;
 }
 
 export interface CalculatedMetrics {
@@ -13,7 +13,6 @@ export interface CalculatedMetrics {
   likeRatio: number;
   commentRatio: number;
   viewsPerSubscriber: number;
-  daysSincePublish: number;
   viewsPerDay: number;
   performancePercentile?: number;
   publishDayOfWeek: string;

@@ -9,21 +9,6 @@
       "url": "https://www.youtube.com/@MyVillageShow",
       "category": "entertainment",
       "priority": 1
-    },
-    {
-      "url": "https://www.youtube.com/@UmaTeluguTraveller",
-      "category": "travel",
-      "priority": 1
-    },
-    {
-      "url": "https://www.youtube.com/@VahchefVahrehvahTelugu",
-      "category": "cooking",
-      "priority": 2
-    },
-    {
-      "url": "https://www.youtube.com/@AmericaloGunturAmmayi",
-      "category": "nri-lifestyle",
-      "priority": 1
     }
   ],
   "settings": {

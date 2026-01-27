@@ -162,7 +162,6 @@ export function calculateVideoMetrics(
     viewsPerSubscriber: subscriberCount > 0
       ? video.viewCount / subscriberCount
       : 0,
-    daysSincePublish: daysSince,
     viewsPerDay: video.viewCount / daysSince,
     publishDayOfWeek: getDayOfWeek(video.publishedAt),
     publishHourIST: getHourIST(video.publishedAt),
@@ -191,8 +190,8 @@ export function transformVideoData(
     default: data.snippet.thumbnails.default?.url || '',
     medium: data.snippet.thumbnails.medium?.url || '',
     high: data.snippet.thumbnails.high?.url || '',
-    standard: data.snippet.thumbnails.standard?.url,
-    maxres: data.snippet.thumbnails.maxres?.url,
+    standard: data.snippet.thumbnails.standard?.url || null,
+    maxres: data.snippet.thumbnails.maxres?.url || null,
   };
 
   const viewCount = parseInt(data.statistics.viewCount, 10) || 0;
