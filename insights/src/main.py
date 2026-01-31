@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.constants import (
     ANALYSIS_TYPE_THUMBNAIL,
     ANALYSIS_TYPE_TITLE_DESCRIPTION,
-    ANALYSIS_TYPE_TITLE,
     INSIGHT_TYPE_THUMBNAILS,
     INSIGHT_TYPE_TITLES,
     INSIGHT_TYPE_TIMING,
@@ -127,7 +126,7 @@ def main():
     if args.type in ['all', 'titles']:
         # Try title_description first, fall back to legacy title analysis
         title_videos = get_all_videos_with_analysis(
-            ANALYSIS_TYPE_TITLE_DESCRIPTION, fallback_type=ANALYSIS_TYPE_TITLE
+            ANALYSIS_TYPE_TITLE_DESCRIPTION, fallback_type='title'
         )
         print(f"  Title/description analysis: {len(title_videos)} videos")
     else:
@@ -140,7 +139,7 @@ def main():
         all_videos = title_videos
     else:
         all_videos = get_all_videos_with_analysis(
-            ANALYSIS_TYPE_TITLE_DESCRIPTION, fallback_type=ANALYSIS_TYPE_TITLE
+            ANALYSIS_TYPE_TITLE_DESCRIPTION, fallback_type='title'
         )
 
     print(f"  Total videos for analysis: {len(all_videos)}")
