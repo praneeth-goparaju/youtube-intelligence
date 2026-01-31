@@ -28,7 +28,7 @@ class BatchProcessor:
         Initialize batch processor.
 
         Args:
-            analysis_type: Type of analysis (thumbnail, title, description, tags)
+            analysis_type: Type of analysis (thumbnail, title_description)
         """
         self.analysis_type = analysis_type
         self.progress = ProgressTracker(analysis_type)

@@ -71,7 +71,7 @@ class GapAnalyzer:
 
         opportunities.sort(key=lambda x: x['opportunityScore'], reverse=True)
 
-        all_vps = [self.get_vps(v) for v in self.videos if self.get_vps(v) > 0]
+        all_vps = [vps for v in self.videos if (vps := self.get_vps(v)) > 0]
         avg_all = float(np.mean(all_vps)) if all_vps else 0
 
         saturated = [
@@ -109,7 +109,7 @@ class GapAnalyzer:
 
         opportunities = []
         total_videos = len(self.videos)
-        all_vps = [self.get_vps(v) for v in self.videos if self.get_vps(v) > 0]
+        all_vps = [vps for v in self.videos if (vps := self.get_vps(v)) > 0]
         avg_vps = float(np.mean(all_vps)) if all_vps else 0
 
         for keyword, vps_list in keyword_performance.items():
@@ -165,7 +165,7 @@ class GapAnalyzer:
                     format_performance[format_name].append(vps)
 
         results = []
-        all_vps = [self.get_vps(v) for v in self.videos if self.get_vps(v) > 0]
+        all_vps = [vps for v in self.videos if (vps := self.get_vps(v)) > 0]
         avg_vps = float(np.mean(all_vps)) if all_vps else 0
         total_videos = len(self.videos)
 

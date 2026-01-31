@@ -1,1 +1,1 @@
-# YouTube Intelligence System - Phase 3: Pattern Discovery
+# YouTube Intelligence System - Phase 3: Insights (per-content-type profiling)
