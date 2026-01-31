@@ -12,7 +12,7 @@ Four-phase system with separate technology stacks:
 
 1. **Phase 1 - Scraper (TypeScript)**: YouTube Data API v3 integration, stores in Firebase Firestore/Storage
 2. **Phase 2 - Analyzer (Python)**: Gemini 2.0 Flash for thumbnail vision analysis and combined title+description text analysis (2 API calls per video)
-3. **Phase 3 - Insights (Python)**: Statistical correlation and pattern discovery
+3. **Phase 3 - Insights (Python)**: Per-content-type feature profiling (all vs top 10% by viewsPerSubscriber) and content gap analysis
 4. **Phase 4 - Recommender (TypeScript)**: AI-powered recommendation engine (CLI + Firebase Functions API)
 
 **Data Flow**: Scraper → Firestore → Analyzer → Firestore → Insights → Firestore → Recommender
@@ -54,8 +54,9 @@ pytest tests/                                                       # Run tests
 ### Insights (Phase 3)
 ```bash
 cd insights
-python src/main.py                    # Generate all insights
-python src/main.py --type thumbnails  # Specific insight type (thumbnails, titles, timing, gaps)
+python src/main.py                    # Generate all insights (profiles + gaps)
+python src/main.py --type profiles    # Per-content-type profiles only
+python src/main.py --type gaps        # Content gap analysis only
 pytest tests/
 ```
 
@@ -116,7 +117,9 @@ API Authentication:
 - `channels/{channelId}/videos/{videoId}` - Video data with calculated metrics
 - `channels/{channelId}/videos/{videoId}/analysis/{type}` - AI analysis results (thumbnail, title_description)
 - `scrape_progress/{channelId}` - Resume state for interrupted scrapes
-- `insights/{type}` - Aggregated patterns (thumbnails, titles, timing, contentGaps)
+- `insights/{contentType}` - Per-content-type profiles (thumbnail + title features, all vs top 10%)
+- `insights/contentGaps` - Content gap and keyword opportunity analysis
+- `insights/summary` - Overview of all content types and counts
 
 ## Calculated Video Metrics
 

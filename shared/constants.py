@@ -29,19 +29,11 @@ ANALYSIS_TYPES = [
 
 # =============================================================================
 # Insight Types (Phase 3 output)
+# Per-content-type profiles are stored as insights/{contentType}
 # =============================================================================
 
-INSIGHT_TYPE_THUMBNAILS = 'thumbnails'
-INSIGHT_TYPE_TITLES = 'titles'
-INSIGHT_TYPE_TIMING = 'timing'
 INSIGHT_TYPE_CONTENT_GAPS = 'contentGaps'
-
-INSIGHT_TYPES = [
-    INSIGHT_TYPE_THUMBNAILS,
-    INSIGHT_TYPE_TITLES,
-    INSIGHT_TYPE_TIMING,
-    INSIGHT_TYPE_CONTENT_GAPS,
-]
+INSIGHT_TYPE_SUMMARY = 'summary'
 
 # =============================================================================
 # AI Model Configuration
