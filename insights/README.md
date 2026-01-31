@@ -18,11 +18,11 @@ Output is raw statistical data — the recommender's LLM handles interpretation 
 pip install -r requirements.txt
 
 # Generate all insights
-python src/main.py
+python -m src.main
 
 # Generate specific insight type
-python src/main.py --type profiles
-python src/main.py --type gaps
+python -m src.main --type profiles
+python -m src.main --type gaps
 ```
 
 ## Architecture

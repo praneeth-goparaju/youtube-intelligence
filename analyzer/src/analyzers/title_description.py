@@ -11,7 +11,7 @@ from datetime import datetime
 
 from ..gemini_client import analyze_text
 from ..firebase_client import save_analysis, has_analysis
-from ..prompts import TITLE_DESCRIPTION_ANALYSIS_PROMPT
+from ..prompts import TITLE_DESCRIPTION_ANALYSIS_PROMPT, build_title_description_input
 from ..config import config, logger
 
 
@@ -19,9 +19,6 @@ class TitleDescriptionAnalyzer:
     """Combined analyzer for YouTube video titles and descriptions."""
 
     ANALYSIS_TYPE = 'title_description'
-
-    # Max description length to avoid token limits
-    MAX_DESCRIPTION_LENGTH = 10000
 
     def analyze(self, channel_id: str, video_id: str,
                 title: str, description: str,
@@ -47,8 +44,8 @@ class TitleDescriptionAnalyzer:
             return None
 
         try:
-            # Build combined input text
-            input_text = self._build_input_text(title, description)
+            # Build combined input text (shared with batch mode)
+            input_text = build_title_description_input(title, description)
 
             # Analyze with Gemini (single API call, uses response_schema when available)
             result = analyze_text(
@@ -71,23 +68,3 @@ class TitleDescriptionAnalyzer:
         except Exception as e:
             logger.error(f"Error analyzing title+description for {video_id}: {e}")
             return None
-
-    def _build_input_text(self, title: str, description: str) -> str:
-        """Build the combined input text for Gemini.
-
-        Args:
-            title: The video title
-            description: The video description
-
-        Returns:
-            Formatted combined text
-        """
-        # Truncate description if too long
-        desc = description or ''
-        if len(desc) > self.MAX_DESCRIPTION_LENGTH:
-            desc = desc[:self.MAX_DESCRIPTION_LENGTH]
-
-        if desc.strip():
-            return f"TITLE:\n{title}\n\nDESCRIPTION:\n{desc}"
-        else:
-            return f"TITLE:\n{title}\n\nDESCRIPTION:\n(no description provided)"

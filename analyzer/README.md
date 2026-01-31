@@ -16,21 +16,21 @@ Supports two processing modes:
 ## Quick Start
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (from project root)
+pip install -r requirements.txt   # run from project root, or ../requirements.txt from analyzer/
 
 # Validate connections
-python -m analyzer.src.main --validate
+python -m src.main --validate
 
 # Sync mode (default)
-python -m analyzer.src.main                                          # All analysis types
-python -m analyzer.src.main --type thumbnail                         # Thumbnail only
-python -m analyzer.src.main --type title_description --channel UCxxx --limit 50
+python -m src.main                                          # All analysis types
+python -m src.main --type thumbnail                         # Thumbnail only
+python -m src.main --type title_description --channel UCxxx --limit 50
 
 # Batch mode (50% cost savings)
-python -m analyzer.src.main --mode batch --type thumbnail            # Full pipeline
-python -m analyzer.src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Test batch
-python -m analyzer.src.main --mode batch --phase status              # Check job statuses
+python -m src.main --mode batch --type thumbnail            # Full pipeline
+python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Test batch
+python -m src.main --mode batch --phase status              # Check job statuses
 ```
 
 ## Architecture
@@ -87,8 +87,8 @@ Both sync and batch modes use:
 - **User prompts**: Shorter analysis instructions (no JSON template needed since schema enforces structure)
 
 ```bash
-python -m analyzer.src.main --type thumbnail
-python -m analyzer.src.main --type title_description --channel UCxxx --limit 50
+python -m src.main --type thumbnail
+python -m src.main --type title_description --channel UCxxx --limit 50
 ```
 
 ### Batch Mode (Gemini Batch API)
@@ -115,15 +115,15 @@ PREPARE → SUBMIT → POLL → IMPORT
 
 ```bash
 # Run all phases sequentially (blocks during poll)
-python -m analyzer.src.main --mode batch --type thumbnail
+python -m src.main --mode batch --type thumbnail
 
 # Or run phases individually (recommended for production)
-python -m analyzer.src.main --mode batch --phase prepare --type thumbnail
-python -m analyzer.src.main --mode batch --phase submit --type thumbnail
+python -m src.main --mode batch --phase prepare --type thumbnail
+python -m src.main --mode batch --phase submit --type thumbnail
 # ... go do something else, come back later ...
-python -m analyzer.src.main --mode batch --phase status
-python -m analyzer.src.main --mode batch --phase poll --type thumbnail
-python -m analyzer.src.main --mode batch --phase import --type thumbnail
+python -m src.main --mode batch --phase status
+python -m src.main --mode batch --phase poll --type thumbnail
+python -m src.main --mode batch --phase import --type thumbnail
 ```
 
 #### Batch API Limits
@@ -164,10 +164,11 @@ Analysis results are stored as Firestore subcollections:
 
 ```
 channels/{channelId}/videos/{videoId}/analysis/
-├── thumbnail           # Thumbnail vision analysis
-└── title_description   # Combined title+description text analysis
+├── thumbnail           # Thumbnail vision analysis (analysisVersion: "1.0")
+└── title_description   # Combined title+description text analysis (analysisVersion: "2.0")
 
-batch_jobs/{jobId}      # Batch job tracking (state, request count, import status)
+batch_jobs/{jobId}          # Batch job tracking (state, request count, import status)
+analysis_progress/{type}    # Sync mode progress tracking (saves every 10 records)
 ```
 
 Legacy analysis types (`title`, `description`, `tags`, `content_structure`) may exist in Firestore from previous runs but are no longer generated. The insights phase falls back to legacy `title` analysis when `title_description` is not available.

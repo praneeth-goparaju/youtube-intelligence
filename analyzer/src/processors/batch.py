@@ -5,7 +5,7 @@ import time
 from typing import Dict, Any, List, Optional, Callable
 from tqdm import tqdm
 
-from ..firebase_client import get_all_channels, get_channel_videos, get_unanalyzed_videos_paginated
+from ..firebase_client import get_all_channels, get_unanalyzed_videos_paginated
 from ..analyzers import ThumbnailAnalyzer, TitleDescriptionAnalyzer
 from ..gemini_client import GeminiAPIError, GeminiRateLimitError, GeminiResponseError
 from ..config import config, logger

@@ -121,8 +121,8 @@ firebase functions:secrets:set ALLOWED_ORIGINS       # CORS whitelist
 | Phase | Test Files | Coverage | Priority |
 |-------|------------|----------|----------|
 | Scraper | 3 | ~5% | Medium |
-| Analyzer | 0 | 0% | Medium |
-| Insights | 0 | 0% | Low |
+| Analyzer | 0 (conftest.py only) | 0% | Medium |
+| Insights | 3 | ~40% | Low |
 | Functions | 0 | 0% | Medium |
 
 ### Infrastructure (Nice to Have)

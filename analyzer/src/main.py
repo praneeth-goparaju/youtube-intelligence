@@ -14,15 +14,6 @@ def run_batch_mode(args):
 
     Handles the 3-phase workflow: prepare -> submit -> poll -> import.
     """
-    from .batch_api import (
-        prepare_batch_requests,
-        submit_batch,
-        poll_and_update,
-        import_batch_results,
-    )
-    from .batch_api.client import list_batch_jobs as list_api_jobs
-    from .firebase_client import list_all_batch_jobs
-
     phase = args.phase
     analysis_type = args.type
 
