@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from shared.constants import (
     ANALYSIS_TYPE_THUMBNAIL,
+    ANALYSIS_TYPE_TITLE_DESCRIPTION,
     ANALYSIS_TYPE_TITLE,
-    ANALYSIS_TYPE_DESCRIPTION,
     INSIGHT_TYPE_THUMBNAILS,
     INSIGHT_TYPE_TITLES,
     INSIGHT_TYPE_TIMING,
@@ -125,19 +125,23 @@ def main():
         thumbnail_videos = []
 
     if args.type in ['all', 'titles']:
-        title_videos = get_all_videos_with_analysis(ANALYSIS_TYPE_TITLE)
-        print(f"  Title analysis: {len(title_videos)} videos")
+        # Try title_description first, fall back to legacy title analysis
+        title_videos = get_all_videos_with_analysis(
+            ANALYSIS_TYPE_TITLE_DESCRIPTION, fallback_type=ANALYSIS_TYPE_TITLE
+        )
+        print(f"  Title/description analysis: {len(title_videos)} videos")
     else:
         title_videos = []
 
     # Use any available analysis for timing and gaps
-    # Fix: Check length explicitly since empty list is falsy but we want non-empty lists
     if len(thumbnail_videos) > 0:
         all_videos = thumbnail_videos
     elif len(title_videos) > 0:
         all_videos = title_videos
     else:
-        all_videos = get_all_videos_with_analysis(ANALYSIS_TYPE_DESCRIPTION)
+        all_videos = get_all_videos_with_analysis(
+            ANALYSIS_TYPE_TITLE_DESCRIPTION, fallback_type=ANALYSIS_TYPE_TITLE
+        )
 
     print(f"  Total videos for analysis: {len(all_videos)}")
 

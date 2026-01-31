@@ -11,7 +11,7 @@ YouTube Intelligence System - a multi-phase analytics platform that scrapes Telu
 Four-phase system with separate technology stacks:
 
 1. **Phase 1 - Scraper (TypeScript)**: YouTube Data API v3 integration, stores in Firebase Firestore/Storage
-2. **Phase 2 - Analyzer (Python)**: Gemini 2.0 Flash for thumbnail vision analysis, title/description/tag text analysis
+2. **Phase 2 - Analyzer (Python)**: Gemini 2.0 Flash for thumbnail vision analysis and combined title+description text analysis (2 API calls per video)
 3. **Phase 3 - Insights (Python)**: Statistical correlation and pattern discovery
 4. **Phase 4 - Recommender (TypeScript)**: AI-powered recommendation engine (CLI + Firebase Functions API)
 
@@ -42,13 +42,13 @@ npx tsx scripts/reset-progress.ts  # Clear progress for re-run
 ### Analyzer (Phase 2)
 ```bash
 cd analyzer
-python src/main.py                                    # Run all analysis types
-python src/main.py --type thumbnail                   # Single analysis type
-python src/main.py --type title --channel CHANNEL_ID  # Specific channel
-python src/main.py --type content_structure           # Infer video structure (transcript alternative)
-python src/main.py --limit 50                         # Limit videos per channel
-python src/main.py --validate                         # Test connections only
-pytest tests/                                         # Run tests
+python src/main.py                                                  # Run all analysis types (thumbnail + title_description)
+python src/main.py --type thumbnail                                 # Thumbnail vision analysis only
+python src/main.py --type title_description                         # Combined title+description text analysis only
+python src/main.py --type title_description --channel CHANNEL_ID    # Specific channel
+python src/main.py --limit 50                                       # Limit videos per channel
+python src/main.py --validate                                       # Test connections only
+pytest tests/                                                       # Run tests
 ```
 
 ### Insights (Phase 3)
@@ -114,7 +114,7 @@ API Authentication:
 
 - `channels/{channelId}` - Channel metadata and stats
 - `channels/{channelId}/videos/{videoId}` - Video data with calculated metrics
-- `channels/{channelId}/videos/{videoId}/analysis/{type}` - AI analysis results (thumbnail, title, description, tags, content_structure)
+- `channels/{channelId}/videos/{videoId}/analysis/{type}` - AI analysis results (thumbnail, title_description)
 - `scrape_progress/{channelId}` - Resume state for interrupted scrapes
 - `insights/{type}` - Aggregated patterns (thumbnails, titles, timing, contentGaps)
 
@@ -127,14 +127,12 @@ The scraper calculates these metrics for each video:
 
 ## AI Analysis Models
 
-All analysis uses Gemini 2.0 Flash (`gemini-2.0-flash`):
-- Thumbnail: Vision analysis for composition, colors, text, food, graphics, psychology
-- Title: Structure, language mix, hooks, keywords, Telugu-specific patterns
-- Description: Timestamps, recipe content, links, hashtags, CTAs, SEO
-- Tags: Categorization, strategy, search volume estimation
-- Content Structure: Infers video structure from metadata (transcript-like insights without actual transcripts)
-  - Video segments and pacing analysis from timestamps
-  - Talking points and content outline inference
-  - Recipe structure detection (steps, techniques, equipment)
-  - Engagement points and retention strategies
-  - Content classification and SEO insights
+All analysis uses Gemini 2.0 Flash (`gemini-2.0-flash`) with 2 API calls per video:
+
+1. **Thumbnail** (vision call): Composition, colors, text, food, graphics, psychology (~109 fields)
+2. **Title + Description** (combined text call): Single call analyzing both together
+   - Title: Structure, language mix, hooks, keywords, content signals, Telugu-specific patterns (~120 fields)
+   - Description (lean): Structure, timestamps, recipe content, hashtags, CTAs, SEO (~20 fields)
+   - Description context improves niche detection (e.g., ingredient list confirms isRecipe)
+
+Legacy analysis types (title, description, tags, content_structure) are no longer generated but may exist in Firestore from previous runs. The insights phase falls back to legacy `title` analysis when `title_description` is not available.

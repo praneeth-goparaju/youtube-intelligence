@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..
 from shared.constants import ANALYSIS_TYPES
 
 from ..firebase_client import get_all_channels, get_channel_videos, get_unanalyzed_videos
-from ..analyzers import ThumbnailAnalyzer, TitleAnalyzer, DescriptionAnalyzer, TagsAnalyzer, ContentStructureAnalyzer
+from ..analyzers import ThumbnailAnalyzer, TitleDescriptionAnalyzer
 from ..config import config, logger
 from .progress import ProgressTracker
 
@@ -36,10 +36,7 @@ class BatchProcessor:
         # Initialize appropriate analyzer
         analyzers = {
             'thumbnail': ThumbnailAnalyzer(),
-            'title': TitleAnalyzer(),
-            'description': DescriptionAnalyzer(),
-            'tags': TagsAnalyzer(),
-            'content_structure': ContentStructureAnalyzer(),
+            'title_description': TitleDescriptionAnalyzer(),
         }
 
         if analysis_type not in analyzers:
@@ -170,26 +167,10 @@ class BatchProcessor:
                 return None
             return self.analyzer.analyze(channel_id, video_id, thumbnail_path)
 
-        elif self.analysis_type == 'title':
-            title = video.get('title', '')
-            return self.analyzer.analyze(channel_id, video_id, title)
-
-        elif self.analysis_type == 'description':
-            description = video.get('description', '')
-            return self.analyzer.analyze(channel_id, video_id, description)
-
-        elif self.analysis_type == 'tags':
-            tags = video.get('tags', [])
-            return self.analyzer.analyze(channel_id, video_id, tags)
-
-        elif self.analysis_type == 'content_structure':
+        elif self.analysis_type == 'title_description':
             title = video.get('title', '')
             description = video.get('description', '')
-            duration_seconds = video.get('durationSeconds', 0)
-            tags = video.get('tags', [])
-            return self.analyzer.analyze(
-                channel_id, video_id, title, description, duration_seconds, tags
-            )
+            return self.analyzer.analyze(channel_id, video_id, title, description)
 
         return None
 

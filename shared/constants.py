@@ -20,17 +20,18 @@ COLLECTION_ANALYSIS_PROGRESS = 'analysis_progress'
 # =============================================================================
 
 ANALYSIS_TYPE_THUMBNAIL = 'thumbnail'
+ANALYSIS_TYPE_TITLE_DESCRIPTION = 'title_description'
+
+# Legacy analysis types (no longer generated, but may exist in Firestore)
 ANALYSIS_TYPE_TITLE = 'title'
 ANALYSIS_TYPE_DESCRIPTION = 'description'
 ANALYSIS_TYPE_TAGS = 'tags'
 ANALYSIS_TYPE_CONTENT_STRUCTURE = 'content_structure'
 
+# Active analysis types used by the pipeline
 ANALYSIS_TYPES = [
     ANALYSIS_TYPE_THUMBNAIL,
-    ANALYSIS_TYPE_TITLE,
-    ANALYSIS_TYPE_DESCRIPTION,
-    ANALYSIS_TYPE_TAGS,
-    ANALYSIS_TYPE_CONTENT_STRUCTURE,
+    ANALYSIS_TYPE_TITLE_DESCRIPTION,
 ]
 
 # =============================================================================

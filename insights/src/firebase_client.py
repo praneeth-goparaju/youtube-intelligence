@@ -118,8 +118,18 @@ def get_video_analysis(channel_id: str, video_id: str, analysis_type: str) -> Op
         return None
 
 
-def get_all_videos_with_analysis(analysis_type: str) -> List[Dict[str, Any]]:
-    """Get all videos with a specific analysis type."""
+def get_all_videos_with_analysis(analysis_type: str,
+                                  fallback_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get all videos with a specific analysis type.
+
+    Args:
+        analysis_type: Primary analysis type to look for.
+        fallback_type: Optional fallback type if primary not found for a video.
+            Useful for backward compatibility (e.g., title_description -> title).
+
+    Returns:
+        List of video dicts with channel, video, and analysis data.
+    """
     db = get_db()
     channels = get_all_channels()
 
@@ -131,6 +141,10 @@ def get_all_videos_with_analysis(analysis_type: str) -> List[Dict[str, Any]]:
         for video in videos:
             video_id = video['id']
             analysis = get_video_analysis(channel_id, video_id, analysis_type)
+
+            # Try fallback type if primary not found
+            if not analysis and fallback_type:
+                analysis = get_video_analysis(channel_id, video_id, fallback_type)
 
             if analysis:
                 all_videos.append({
