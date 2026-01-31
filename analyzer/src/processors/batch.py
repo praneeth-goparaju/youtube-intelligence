@@ -1,23 +1,22 @@
 """Batch processing for analysis jobs."""
 
-import sys
 import os
 import time
 from typing import Dict, Any, List, Optional, Callable
 from tqdm import tqdm
 
-# Add shared module to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
-from shared.constants import ANALYSIS_TYPES
-
-from ..firebase_client import get_all_channels, get_channel_videos, get_unanalyzed_videos
+from ..firebase_client import get_all_channels, get_channel_videos, get_unanalyzed_videos_paginated
 from ..analyzers import ThumbnailAnalyzer, TitleDescriptionAnalyzer
+from ..gemini_client import GeminiAPIError, GeminiRateLimitError, GeminiResponseError
 from ..config import config, logger
 from .progress import ProgressTracker
 
+# shared module path is set up by config.py (imported above)
+from shared.constants import ANALYSIS_TYPES
 
-# Default limit when no limit specified (effectively unlimited for practical purposes)
-DEFAULT_VIDEO_LIMIT = 10000
+
+# Default limit configurable via DEFAULT_VIDEO_LIMIT env var (default: 10000)
+DEFAULT_VIDEO_LIMIT = int(os.environ.get('DEFAULT_VIDEO_LIMIT', '10000'))
 
 
 class BatchProcessor:
@@ -97,6 +96,8 @@ class BatchProcessor:
         """
         Process all videos in a channel.
 
+        Uses paginated fetching to avoid loading all videos into memory at once.
+
         Args:
             channel_id: The channel ID to process
             limit: Maximum number of videos to process (None = all)
@@ -104,10 +105,9 @@ class BatchProcessor:
         Returns:
             Processing statistics
         """
-        # Get unanalyzed videos with the specified limit
-        # The limit is passed directly to get_unanalyzed_videos which handles the filtering
+        # Get unanalyzed videos using pagination to avoid memory issues (A1 fix)
         effective_limit = limit or DEFAULT_VIDEO_LIMIT
-        videos = get_unanalyzed_videos(channel_id, self.analysis_type, effective_limit)
+        videos = get_unanalyzed_videos_paginated(channel_id, self.analysis_type, effective_limit)
 
         if not videos:
             print(f"  No unanalyzed videos found")
@@ -126,8 +126,26 @@ class BatchProcessor:
                 else:
                     self.progress.record_success()
 
+            except GeminiRateLimitError as e:
+                logger.warning(f"Rate limit hit for {video_id}: {e}")
+                self.progress.record_failure()
+                # Extra delay on rate limit before continuing
+                time.sleep(config.REQUEST_DELAY * 4)
+
+            except GeminiResponseError as e:
+                logger.error(f"Invalid Gemini response for {video_id}: {e}")
+                self.progress.record_failure()
+
+            except GeminiAPIError as e:
+                logger.error(f"Gemini API error for {video_id}: {e}")
+                self.progress.record_failure()
+
+            except (ConnectionError, TimeoutError, OSError) as e:
+                logger.error(f"Network error processing {video_id}: {type(e).__name__}: {e}")
+                self.progress.record_failure()
+
             except Exception as e:
-                logger.error(f"Error processing {video_id}: {e}")
+                logger.error(f"Unexpected error processing {video_id}: {type(e).__name__}: {e}")
                 self.progress.record_failure()
 
             # Rate limiting

@@ -8,6 +8,7 @@ import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineString } from 'firebase-functions/params';
 import { RecommendationEngine } from './engine';
+import { checkRateLimit } from './rate-limiter';
 import type { RecommendationRequest, RecommendationResponse, ContentType } from './types';
 
 // Set global options for all functions
@@ -29,30 +30,9 @@ const allowedOriginsParam = defineString('ALLOWED_ORIGINS', {
   default: '',
 });
 
-// Rate limiting: simple in-memory store (for production, use Redis or Firestore)
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+// Rate limiting configuration (distributed via Firestore)
 const RATE_LIMIT_MAX = 100; // requests per window
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-
-/**
- * Check rate limit for a given key (IP or API key)
- */
-function checkRateLimit(key: string): { allowed: boolean; remaining: number } {
-  const now = Date.now();
-  const record = rateLimitStore.get(key);
-
-  if (!record || now > record.resetTime) {
-    rateLimitStore.set(key, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
-    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 };
-  }
-
-  if (record.count >= RATE_LIMIT_MAX) {
-    return { allowed: false, remaining: 0 };
-  }
-
-  record.count++;
-  return { allowed: true, remaining: RATE_LIMIT_MAX - record.count };
-}
 
 /**
  * Get allowed origins for CORS
@@ -159,9 +139,9 @@ export const recommend = onRequest(
       return;
     }
 
-    // Check rate limit (use IP or API key as identifier)
+    // Check rate limit (use IP or API key as identifier, distributed via Firestore)
     const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
-    const rateLimit = checkRateLimit(rateLimitKey);
+    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
 
     if (!rateLimit.allowed) {
@@ -234,9 +214,9 @@ export const getRecommendation = onCall<RecommendationRequest, Promise<Recommend
   async (request) => {
     const { topic, type, angle, audience } = request.data;
 
-    // Check rate limit using auth UID or app check token
+    // Check rate limit using auth UID or app check token (distributed via Firestore)
     const rateLimitKey = request.auth?.uid || request.rawRequest.ip || 'anonymous';
-    const rateLimit = checkRateLimit(rateLimitKey);
+    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
 
     if (!rateLimit.allowed) {
       throw new HttpsError(

@@ -6,12 +6,14 @@ let quotaUsed = 0;
 
 /**
  * Get or create YouTube API client
+ * Includes timeout configuration to prevent indefinite hangs
  */
 export function getYoutubeClient(): youtube_v3.Youtube {
   if (!youtubeClient) {
     youtubeClient = google.youtube({
       version: 'v3',
       auth: config.youtube.apiKey,
+      timeout: config.scraper.apiTimeoutMs,
     });
   }
   return youtubeClient;

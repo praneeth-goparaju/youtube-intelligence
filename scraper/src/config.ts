@@ -44,6 +44,7 @@ export const config = {
     batchSize: 50, // YouTube API limit for video details
     maxRetries: 3,
     retryDelayMs: 1000,
+    apiTimeoutMs: getEnvNumber('API_TIMEOUT_MS', 30000), // 30 second timeout for API requests
   },
 
   // Quota tracking

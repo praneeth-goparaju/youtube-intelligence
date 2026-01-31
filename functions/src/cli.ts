@@ -1,6 +1,10 @@
 #!/usr/bin/env npx tsx
 /**
- * CLI for running recommendations locally
+ * CLI for running recommendations locally.
+ *
+ * Uses shared logic from recommendation-core.ts (same as the Functions engine)
+ * with CLI-specific Firebase and Gemini initialization.
+ *
  * Usage: npx tsx src/cli.ts --topic "Biryani" --type recipe
  */
 
@@ -17,18 +21,20 @@ import type {
   TitleInsights,
   TimingInsights,
   ContentGapInsights,
-  TagRecommendations,
-  PostingRecommendation,
-  PerformancePrediction,
 } from './types';
 import {
-  TITLE_TEMPLATES,
-  POWER_WORDS,
-  THUMBNAIL_SPECS,
-  DEFAULT_TAGS,
-  DEFAULT_POSTING,
-  CONTENT_RECOMMENDATIONS,
-} from './templates';
+  sanitizeInput,
+  buildContext,
+  buildPrompt,
+  validateAndFillResponse,
+  generateFromTemplates,
+  getPostingRecommendation,
+  MAX_TOPIC_LENGTH,
+  MAX_ANGLE_LENGTH,
+  MAX_AUDIENCE_LENGTH,
+} from './recommendation-core';
+
+const GEMINI_MODEL = 'gemini-2.0-flash';
 
 // ============================================
 // Environment Setup
@@ -75,7 +81,6 @@ function initFirebase(): admin.firestore.Firestore {
     if (!projectId || !clientEmail || !privateKey) {
       console.warn('Firebase credentials not found. Running without insights data.');
       console.warn('Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in .env');
-      // Initialize without credentials - Firestore calls will be handled gracefully
       admin.initializeApp({ projectId: projectId || 'offline-mode' });
     } else {
       admin.initializeApp({
@@ -150,7 +155,7 @@ function getGeminiModel() {
   }
   const genAI = new GoogleGenerativeAI(apiKey);
   return genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: GEMINI_MODEL,
     generationConfig: {
       temperature: 0.7,
       topP: 0.95,
@@ -174,42 +179,9 @@ async function generateWithGemini(prompt: string): Promise<string> {
 }
 
 // ============================================
-// Recommendation Engine (simplified for CLI)
+// CLI Recommendation Engine
+// Uses shared logic from recommendation-core.ts
 // ============================================
-
-// Input length limits
-const MAX_TOPIC_LENGTH = 200;
-const MAX_ANGLE_LENGTH = 500;
-const MAX_AUDIENCE_LENGTH = 200;
-
-/**
- * Sanitize user input to prevent prompt injection
- */
-function sanitizeInput(input: string | undefined, maxLength: number): string {
-  if (!input) return '';
-
-  let sanitized = input
-    .replace(/[\x00-\x1F\x7F]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (sanitized.length > maxLength) {
-    sanitized = sanitized.slice(0, maxLength);
-  }
-
-  return sanitized;
-}
-
-/**
- * Escape user input for prompt
- */
-function escapeForPrompt(input: string): string {
-  return input
-    .replace(/```/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[<>]/g, '')
-    .slice(0, 500);
-}
 
 class CLIRecommendationEngine {
   private insights: Insights = {};
@@ -218,7 +190,7 @@ class CLIRecommendationEngine {
   async generateRecommendation(request: RecommendationRequest): Promise<RecommendationResponse> {
     const { topic, type = 'recipe', angle, audience = 'Telugu audience' } = request;
 
-    // Sanitize inputs
+    // Sanitize inputs (shared function)
     const safeTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
     const safeAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
     const safeAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
@@ -247,19 +219,19 @@ class CLIRecommendationEngine {
         console.log('✓ AI generation complete');
       } else {
         console.log('Using template-based generation...');
-        recommendation = this.generateFromTemplates(safeTopic, type, safeAngle, safeAudience);
+        recommendation = generateFromTemplates(safeTopic, type, safeAngle, safeAudience, this.insights, this.insightsVersion);
         fallbackUsed = true;
       }
     } catch (error) {
       console.warn('AI generation failed, using templates:', error);
-      recommendation = this.generateFromTemplates(safeTopic, type, safeAngle, safeAudience);
+      recommendation = generateFromTemplates(safeTopic, type, safeAngle, safeAudience, this.insights, this.insightsVersion);
       fallbackUsed = true;
     }
 
-    recommendation.posting = this.getPostingRecommendation();
+    recommendation.posting = getPostingRecommendation(this.insights);
     recommendation.metadata = {
       generatedAt: new Date().toISOString(),
-      modelUsed: fallbackUsed ? 'template' : 'gemini-2.0-flash',
+      modelUsed: fallbackUsed ? 'template' : GEMINI_MODEL,
       insightsVersion: this.insightsVersion,
       fallbackUsed,
     };
@@ -273,307 +245,17 @@ class CLIRecommendationEngine {
     angle: string | undefined,
     audience: string
   ): Promise<RecommendationResponse> {
-    const context = this.buildContext();
-    const prompt = this.buildPrompt(topic, type, angle, audience, context);
+    // Use shared context and prompt building
+    const context = buildContext(this.insights);
+    const prompt = buildPrompt(topic, type, angle, audience, context);
     const responseText = await generateWithGemini(prompt);
 
     try {
       const parsed = JSON.parse(responseText);
-      return this.validateAndFillResponse(parsed, topic, type);
+      return validateAndFillResponse(parsed, topic, type, this.insights, this.insightsVersion, GEMINI_MODEL);
     } catch {
       throw new Error('Invalid AI response format');
     }
-  }
-
-  private buildContext(): string {
-    const parts: string[] = [];
-
-    if (this.insights.thumbnails?.topPerformingElements) {
-      parts.push('TOP PERFORMING THUMBNAIL ELEMENTS:');
-      const elements = this.insights.thumbnails.topPerformingElements;
-      for (const [category, items] of Object.entries(elements)) {
-        if (items && items.length > 0) {
-          for (const item of items.slice(0, 3)) {
-            parts.push(`  - ${category}: ${item.element} (${item.lift.toFixed(1)}x performance)`);
-          }
-        }
-      }
-    }
-
-    if (this.insights.titles?.powerWords?.highImpact) {
-      parts.push('\nTOP POWER WORDS:');
-      for (const pw of this.insights.titles.powerWords.highImpact.slice(0, 5)) {
-        const telugu = pw.telugu ? ` / ${pw.telugu}` : '';
-        parts.push(`  - ${pw.word}${telugu} (${pw.multiplier.toFixed(1)}x)`);
-      }
-    }
-
-    if (this.insights.titles?.winningPatterns) {
-      parts.push('\nWINNING TITLE PATTERNS:');
-      for (const pattern of this.insights.titles.winningPatterns.slice(0, 3)) {
-        parts.push(`  - ${pattern.pattern}`);
-        if (pattern.examples.length > 0) {
-          parts.push(`    Example: "${pattern.examples[0]}"`);
-        }
-      }
-    }
-
-    if (this.insights.timing?.bestTimes?.optimal) {
-      const optimal = this.insights.timing.bestTimes.optimal;
-      parts.push(`\nOPTIMAL POSTING: ${optimal.day} at ${optimal.hourIST}:00 IST (${optimal.multiplier.toFixed(1)}x performance)`);
-    }
-
-    if (this.insights.contentGaps?.highOpportunity) {
-      parts.push('\nHIGH OPPORTUNITY TOPICS:');
-      for (const gap of this.insights.contentGaps.highOpportunity.slice(0, 3)) {
-        parts.push(`  - ${gap.topic} (opportunity score: ${gap.opportunityScore.toFixed(0)})`);
-      }
-    }
-
-    return parts.join('\n');
-  }
-
-  private buildPrompt(
-    topic: string,
-    type: ContentType,
-    angle: string | undefined,
-    audience: string,
-    context: string
-  ): string {
-    // Escape user inputs for safety
-    const safeTopic = escapeForPrompt(topic);
-    const safeAngle = angle ? escapeForPrompt(angle) : 'Not specified';
-    const safeAudience = escapeForPrompt(audience);
-
-    return `You are a YouTube video optimization expert specializing in Telugu content.
-
-Based on the following performance patterns discovered from analyzing 50,000+ successful Telugu videos:
-
-${context}
-
-Generate a complete recommendation for a new video with these details:
-- Topic: ${safeTopic}
-- Content Type: ${type}
-- Unique Angle: ${safeAngle}
-- Target Audience: ${safeAudience}
-
-Provide recommendations in the following JSON format:
-{
-  "titles": {
-    "primary": {
-      "english": "English title",
-      "telugu": "Telugu title",
-      "combined": "Combined bilingual title",
-      "predictedCTR": "below-average|average|above-average|high",
-      "reasoning": "Why this title works"
-    },
-    "alternatives": [{ "combined": "Alternative title", "predictedCTR": "rating", "reasoning": "Why" }]
-  },
-  "thumbnail": {
-    "layout": { "type": "layout type", "description": "Detailed layout description" },
-    "elements": {
-      "face": { "required": true/false, "expression": "type", "position": "pos", "size": "size", "eyeContact": true/false },
-      "mainVisual": { "type": "type", "position": "pos", "showSteam": true/false, "garnished": true/false },
-      "text": { "primary": { "content": "TEXT", "position": "pos", "color": "#HEX", "style": "style" } },
-      "graphics": { "addArrow": true/false, "addBorder": true/false }
-    },
-    "colors": { "background": "#HEX", "accent": "#HEX", "text": "#HEX" }
-  },
-  "tags": {
-    "primary": ["main", "keywords"],
-    "secondary": ["supporting", "keywords"],
-    "telugu": ["తెలుగు", "కీవర్డ్స్"],
-    "longtail": ["long tail keywords"],
-    "brand": []
-  },
-  "prediction": {
-    "expectedViewRange": { "low": number, "medium": number, "high": number },
-    "confidence": "low|medium|high",
-    "positiveFactors": ["factor 1"],
-    "riskFactors": ["risk 1"]
-  },
-  "content": {
-    "optimalDuration": "X-Y minutes",
-    "mustInclude": ["element 1"],
-    "hooks": ["hook 1"],
-    "description": { "template": "Description template", "mustInclude": ["element 1"] }
-  }
-}
-
-Important: Use bilingual titles, include Telugu script (not transliteration). Respond ONLY with JSON.`;
-  }
-
-  private validateAndFillResponse(
-    parsed: Partial<RecommendationResponse>,
-    topic: string,
-    type: ContentType
-  ): RecommendationResponse {
-    const template = this.generateFromTemplates(topic, type, undefined, 'Telugu audience');
-    return {
-      titles: parsed.titles || template.titles,
-      thumbnail: parsed.thumbnail || template.thumbnail,
-      tags: this.validateTags(parsed.tags, type),
-      posting: parsed.posting || template.posting,
-      prediction: parsed.prediction || template.prediction,
-      content: parsed.content || template.content,
-      // Don't overwrite metadata - caller sets correct values
-      metadata: {
-        generatedAt: new Date().toISOString(),
-        modelUsed: 'gemini-2.0-flash',
-        insightsVersion: this.insightsVersion,
-        fallbackUsed: false,  // AI generation succeeded
-      },
-    };
-  }
-
-  private validateTags(tags: Partial<TagRecommendations> | undefined, type: ContentType): TagRecommendations {
-    const defaults = DEFAULT_TAGS[type];
-    const primary = tags?.primary || defaults.primary || [];
-    const secondary = tags?.secondary || defaults.secondary || [];
-    const telugu = tags?.telugu || defaults.telugu || [];
-    const longtail = tags?.longtail || defaults.longtail || [];
-    const brand = tags?.brand || [];
-    const allTags = [...primary, ...secondary, ...telugu, ...longtail, ...brand];
-    const fullTagString = allTags.join(', ');
-
-    return {
-      primary,
-      secondary,
-      telugu,
-      longtail,
-      brand,
-      fullTagString,
-      characterCount: fullTagString.length,
-      utilizationPercent: Math.min(100, (fullTagString.length / 500) * 100),
-    };
-  }
-
-  generateFromTemplates(
-    topic: string,
-    type: ContentType,
-    angle: string | undefined,
-    _audience: string
-  ): RecommendationResponse {
-    const templates = TITLE_TEMPLATES[type];
-    const modifier = angle || POWER_WORDS.english[0];
-    const teluguWord = POWER_WORDS.telugu[0];
-
-    const fillTemplate = (template: string): string => {
-      return template
-        .replace('{dish}', topic)
-        .replace('{dish_telugu}', `${topic} (తెలుగు)`)
-        .replace('{topic}', topic)
-        .replace('{topic_telugu}', `${topic} తెలుగు`)
-        .replace('{modifier}', modifier)
-        .replace('{location}', topic)
-        .replace('{number}', '10');
-    };
-
-    const primary = fillTemplate(templates[0]);
-    const alternatives = templates.slice(1, 3).map((t) => ({
-      combined: fillTemplate(t),
-      predictedCTR: 'average' as const,
-      reasoning: 'Uses proven title pattern for Telugu content',
-    }));
-
-    const spec = { ...THUMBNAIL_SPECS[type] };
-    if (spec.elements.text.primary) {
-      spec.elements.text.primary = {
-        ...spec.elements.text.primary,
-        content: topic.toUpperCase().split(' ')[0],
-      };
-    }
-
-    const defaults = DEFAULT_TAGS[type];
-    const topicLower = topic.toLowerCase();
-    const tagPrimary = [topicLower, `${topicLower} ${type === 'recipe' ? 'recipe' : 'video'}`, ...(defaults.primary || [])];
-    const tagSecondary = [`${topicLower} telugu`, `how to ${topicLower}`, ...(defaults.secondary || [])];
-    const tagTelugu = defaults.telugu || [];
-    const tagLongtail = [`${topicLower} in telugu`, `${topicLower} for beginners`, ...(defaults.longtail || [])];
-    const allTags = [...tagPrimary, ...tagSecondary, ...tagTelugu, ...tagLongtail];
-    const fullTagString = allTags.join(', ');
-
-    return {
-      titles: {
-        primary: {
-          english: `${topic} | ${modifier}`,
-          telugu: `${topic} | ${teluguWord}`,
-          combined: primary,
-          predictedCTR: 'above-average',
-          reasoning: 'Combines high-search keyword with power word and bilingual format',
-        },
-        alternatives,
-      },
-      thumbnail: spec,
-      tags: {
-        primary: tagPrimary,
-        secondary: tagSecondary,
-        telugu: tagTelugu,
-        longtail: tagLongtail,
-        brand: [],
-        fullTagString,
-        characterCount: fullTagString.length,
-        utilizationPercent: Math.min(100, (fullTagString.length / 500) * 100),
-      },
-      posting: this.getPostingRecommendation(),
-      prediction: this.generatePrediction(topic, type),
-      content: CONTENT_RECOMMENDATIONS[type],
-      metadata: {
-        generatedAt: new Date().toISOString(),
-        modelUsed: 'template',
-        insightsVersion: null,
-        fallbackUsed: true,
-      },
-    };
-  }
-
-  private getPostingRecommendation(): PostingRecommendation {
-    if (this.insights.timing?.bestTimes?.optimal) {
-      const optimal = this.insights.timing.bestTimes.optimal;
-      const byDay = this.insights.timing.bestTimes.byDayOfWeek || [];
-      return {
-        bestDay: optimal.day,
-        bestTime: `${optimal.hourIST}:00 IST`,
-        alternativeTimes: byDay
-          .filter((d) => d.day !== optimal.day)
-          .slice(0, 2)
-          .map((d) => `${d.day} ${optimal.hourIST}:00 IST`),
-        reasoning: `Based on analysis of ${this.insights.timing?.basedOnVideos} videos`,
-      };
-    }
-    return DEFAULT_POSTING;
-  }
-
-  private generatePrediction(topic: string, type: ContentType): PerformancePrediction {
-    const basePredictions: Record<ContentType, { low: number; medium: number; high: number }> = {
-      recipe: { low: 10000, medium: 50000, high: 200000 },
-      vlog: { low: 5000, medium: 25000, high: 100000 },
-      tutorial: { low: 8000, medium: 40000, high: 150000 },
-      review: { low: 5000, medium: 30000, high: 120000 },
-      challenge: { low: 15000, medium: 75000, high: 300000 },
-    };
-
-    const isSaturated = this.insights.contentGaps?.saturatedTopics?.some(
-      (t) => topic.toLowerCase().includes(t.topic.toLowerCase())
-    );
-    const isHighOpportunity = this.insights.contentGaps?.highOpportunity?.some(
-      (t) => topic.toLowerCase().includes(t.topic.toLowerCase())
-    );
-
-    const positiveFactors: string[] = [];
-    const riskFactors: string[] = [];
-
-    if (isHighOpportunity) positiveFactors.push('Topic has high opportunity score');
-    if (isSaturated) riskFactors.push('Topic is saturated - need unique angle');
-    positiveFactors.push('Bilingual title format reaches wider audience');
-    positiveFactors.push('Thumbnail follows high-performing patterns');
-
-    return {
-      expectedViewRange: basePredictions[type],
-      confidence: this.insightsVersion ? 'medium' : 'low',
-      positiveFactors,
-      riskFactors,
-    };
   }
 }
 

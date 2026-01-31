@@ -1,21 +1,17 @@
 """Gemini API client wrapper."""
 
-import sys
 import time
 import json
-from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import google.generativeai as genai
 from google.api_core import exceptions as google_exceptions
 from PIL import Image
 import io
 
-# Add shared module to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from shared.gemini_utils import parse_json_response
-
 from .config import config, logger
+
+# shared module path is set up by config.py (imported above)
+from shared.gemini_utils import parse_json_response
 
 
 class GeminiAPIError(Exception):
