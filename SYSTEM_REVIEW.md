@@ -98,7 +98,8 @@ firebase functions:secrets:set ALLOWED_ORIGINS       # CORS whitelist
 
 **Improvements Made**:
 - ✅ Falsy list logic fixed with explicit length checks
-- ✅ Pearson correlation already had proper error handling
+
+**Note**: Phase 3 has since been rebuilt as a pure data summarizer with per-content-type profiling (replacing the previous correlations/patterns approach). See `insights/README.md` for current architecture.
 
 ### Phase 4: Recommender (TypeScript) ✅
 **Issues Fixed**: 5 of 5 critical/high

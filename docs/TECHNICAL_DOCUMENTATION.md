@@ -20,8 +20,8 @@
 The YouTube Intelligence System is a four-phase analytics platform designed to:
 
 1. **Collect** video data from 100+ Telugu YouTube channels
-2. **Analyze** thumbnails, titles, descriptions, and tags using AI
-3. **Discover** patterns that correlate with high performance
+2. **Analyze** thumbnails and title+description using Gemini AI (2 calls per video)
+3. **Profile** content types and compare top 10% performers to discover what works
 4. **Generate** data-driven recommendations for new video creation
 
 ### Technology Stack
@@ -31,9 +31,9 @@ The YouTube Intelligence System is a four-phase analytics platform designed to:
 | Scraper | TypeScript + Node.js | YouTube API integration |
 | Database | Firebase Firestore | Structured data storage |
 | File Storage | Firebase Storage | Thumbnail images |
-| AI Analysis | Google Gemini 2.0 Flash | Vision + text analysis |
-| Analytics | Python + Pandas/NumPy/SciPy | Statistical analysis |
-| Recommendations | Python + Gemini | AI-powered suggestions |
+| AI Analysis | Google Gemini 2.0 Flash | Vision + text analysis (2 calls/video) |
+| Analytics | Python + Pandas | Per-content-type profiling |
+| Recommendations | TypeScript + Gemini | AI-powered suggestions (CLI + API) |
 
 ### Data Flow
 
@@ -48,7 +48,7 @@ The YouTube Intelligence System is a four-phase analytics platform designed to:
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │   PHASE 1    │    │   PHASE 2    │    │   PHASE 3    │    │   PHASE 4    │
 │   Scraper    │───▶│   Analyzer   │───▶│   Insights   │───▶│ Recommender  │
-│  (TypeScript)│    │   (Python)   │    │   (Python)   │    │   (Python)   │
+│  (TypeScript)│    │   (Python)   │    │   (Python)   │    │ (TypeScript) │
 └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
        │                   │                   │                   │
        ▼                   ▼                   ▼                   ▼
@@ -129,10 +129,7 @@ youtube_channel_analysis/
 │   │   ├── analyzers/        # Analysis modules
 │   │   │   ├── __init__.py
 │   │   │   ├── thumbnail.py  # Vision analysis
-│   │   │   ├── title.py      # Title analysis
-│   │   │   ├── description.py
-│   │   │   ├── tags.py
-│   │   │   └── content_structure.py  # Inferred video structure
+│   │   │   └── title_description.py  # Combined title+description text analysis
 │   │   ├── processors/       # Batch processing
 │   │   │   ├── __init__.py
 │   │   │   ├── batch.py
@@ -140,25 +137,18 @@ youtube_channel_analysis/
 │   │   └── prompts/          # AI prompts
 │   │       ├── __init__.py
 │   │       ├── thumbnail_prompt.py
-│   │       ├── title_prompt.py
-│   │       ├── description_prompt.py
-│   │       ├── tags_prompt.py
-│   │       └── content_structure_prompt.py  # Structure inference prompt
-│   ├── scripts/              # Individual analysis runners
+│   │       └── title_description_prompt.py
 │   └── tests/
 │
-├── insights/                 # PHASE 3: Pattern Discovery
+├── insights/                 # PHASE 3: Per-Content-Type Profiling
 │   ├── requirements.txt
-│   ├── src/
-│   │   ├── __init__.py
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── firebase_client.py
-│   │   ├── correlations.py   # Statistical analysis
-│   │   ├── patterns.py       # Pattern extraction
-│   │   ├── gaps.py           # Content gap analysis
-│   │   └── reports.py        # Report generation
-│   └── outputs/              # Generated reports
+│   └── src/
+│       ├── __init__.py
+│       ├── main.py           # Entry point (--type profiles|gaps|all)
+│       ├── config.py
+│       ├── firebase_client.py
+│       ├── profiler.py       # Feature profiling (all vs top 10%)
+│       └── gaps.py           # Content gap analysis
 │
 └── functions/                # PHASE 4: Recommendation Engine (TypeScript)
     ├── package.json
@@ -347,18 +337,13 @@ Storage structure:
 
 ### Overview
 
-The analyzer processes scraped data using Google Gemini 2.0 Flash:
+The analyzer processes scraped data using Google Gemini 2.0 Flash with **2 API calls per video**:
 
-- **Thumbnail Analysis**: Vision-based analysis of image composition, colors, text, faces
-- **Title Analysis**: Text analysis of structure, language, hooks, keywords
-- **Description Analysis**: Content parsing for timestamps, links, CTAs
-- **Tag Analysis**: Keyword categorization and strategy evaluation
-- **Content Structure Analysis**: Infers video structure from metadata (ToS-compliant transcript alternative)
-  - Video segments and pacing from timestamps
-  - Talking points and content outline inference
-  - Recipe structure detection (steps, techniques, equipment)
-  - Engagement points and retention strategies
-  - Content classification and SEO insights
+- **Thumbnail Analysis** (vision call): Composition, colors, human presence, text, food, graphics, psychology (~109 fields)
+- **Title + Description Analysis** (combined text call): Single call analyzing both together
+  - Title: Structure, language mix, hooks, keywords, content signals, Telugu-specific patterns (~120 fields)
+  - Description (lean): Structure, timestamps, recipe content, hashtags, CTAs, SEO (~20 fields)
+  - Description context improves niche detection (e.g., ingredient list confirms isRecipe)
 
 ### Gemini Client
 
@@ -531,130 +516,64 @@ Analysis results are stored as subcollections:
 
 ```
 channels/{channelId}/videos/{videoId}/analysis/
-├── thumbnail          # Thumbnail analysis results
-├── title              # Title analysis results
-├── description        # Description analysis results
-├── tags               # Tag analysis results
-└── content_structure  # Inferred video structure (transcript alternative)
+├── thumbnail            # Thumbnail vision analysis results
+└── title_description    # Combined title+description text analysis results
 ```
+
+Note: Legacy analysis types (`title`, `description`, `tags`, `content_structure`) may exist in Firestore from previous runs but are no longer generated. The insights phase falls back to legacy `title` analysis when `title_description` is not available.
 
 ---
 
-## Phase 3: Pattern Discovery
+## Phase 3: Per-Content-Type Profiling
 
 ### Overview
 
-The insights phase performs statistical analysis to find:
+The insights phase is a pure data summarizer — no interpretation, no ML. It provides:
 
-1. **Correlations**: Features that correlate with view counts
-2. **Patterns**: Elements common in top-performing videos
-3. **Timing**: Optimal posting days and hours
-4. **Content Gaps**: Underserved topics with high potential
+1. **Per-Content-Type Profiles**: Group videos by `contentSignals.contentType`, compare all vs top 10% by `viewsPerSubscriber`
+2. **Content Gap Analysis**: Identify underserved topics and keyword opportunities
 
-### Correlation Analysis
+### Success Metric
 
-```python
-# src/correlations.py
+`viewsPerSubscriber` is the primary success metric (best proxy for CTR):
+- Normalizes across channels of different sizes
+- Top 10% threshold is calculated per content type
 
-class CorrelationAnalyzer:
-    def find_top_correlations(self, target='view_count'):
-        """Find features with strongest correlation to views."""
-        correlations = []
-
-        for column in self.df.columns:
-            if not is_numeric(column):
-                continue
-
-            corr, p_value = stats.pearsonr(
-                self.df[column].values,
-                self.df[target].values
-            )
-
-            if abs(corr) > 0.1 and p_value < 0.05:
-                correlations.append({
-                    'feature': column,
-                    'correlation': corr,
-                    'p_value': p_value,
-                    'direction': 'positive' if corr > 0 else 'negative'
-                })
-
-        return sorted(correlations, key=lambda x: abs(x['correlation']), reverse=True)
-```
-
-### Pattern Extraction
-
-Videos are categorized by performance tier:
+### Feature Profiling
 
 ```python
-# src/patterns.py
+# src/profiler.py
 
-class PatternExtractor:
-    def _categorize_by_performance(self):
-        views = [v['video']['viewCount'] for v in self.videos]
+class ContentTypeProfiler:
+    def profile_content_type(self, content_type, videos):
+        """Compare all videos vs top 10% for a content type."""
+        vps_values = [v['calculated']['viewsPerSubscriber'] for v in videos]
+        threshold = sorted(vps_values, reverse=True)[len(vps_values) // 10]
 
-        self.top_10_threshold = np.percentile(views, 90)
-        self.top_25_threshold = np.percentile(views, 75)
+        top_videos = [v for v in videos if v['calculated']['viewsPerSubscriber'] >= threshold]
 
-        for video in self.videos:
-            view_count = video['video']['viewCount']
-            if view_count >= self.top_10_threshold:
-                video['performance_tier'] = 'top_10'
-            elif view_count >= self.top_25_threshold:
-                video['performance_tier'] = 'top_25'
-            else:
-                video['performance_tier'] = 'normal'
+        # Profile each feature from thumbnail + title analysis
+        features = {}
+        for feature_name in self._get_all_features(videos):
+            feature_type = self._detect_type(feature_name, videos)  # boolean|numeric|categorical|list
+
+            all_profile = self._profile_feature(feature_name, feature_type, videos)
+            top_profile = self._profile_feature(feature_name, feature_type, top_videos)
+
+            features[feature_name] = {
+                'type': feature_type,
+                'all': all_profile,
+                'top10': top_profile,
+            }
+
+        return features
 ```
 
-Patterns are found by comparing top performers to average:
-
-```python
-def extract_thumbnail_patterns(self):
-    top_videos = self._get_tier_videos('top_10')
-    all_videos = self.videos
-
-    # Find elements overrepresented in top videos
-    for element in top_videos:
-        top_rate = count_in_top / len(top_videos)
-        all_rate = count_in_all / len(all_videos)
-
-        if top_rate > all_rate * 1.2:  # 20% more common
-            patterns.append({
-                'element': element,
-                'lift': top_rate / all_rate
-            })
-```
-
-### Timing Analysis
-
-```python
-# src/patterns.py
-
-def extract_timing_patterns(self):
-    day_performance = defaultdict(list)
-    hour_performance = defaultdict(list)
-
-    for video in self.videos:
-        day = video['video']['calculated']['publishDayOfWeek']
-        hour = video['video']['calculated']['publishHourIST']
-        views = video['video']['viewCount']
-
-        day_performance[day].append(views)
-        hour_performance[hour].append(views)
-
-    # Calculate multipliers vs average
-    total_avg = np.mean([v['video']['viewCount'] for v in self.videos])
-
-    return {
-        'byDayOfWeek': [
-            {'day': day, 'multiplier': np.mean(views) / total_avg}
-            for day, views in day_performance.items()
-        ],
-        'byHourIST': [
-            {'hour': hour, 'multiplier': np.mean(views) / total_avg}
-            for hour, views in hour_performance.items()
-        ]
-    }
-```
+Feature types are auto-detected:
+- **boolean**: `{true_pct, false_pct}` (e.g., `humanPresence.facePresent`)
+- **numeric**: `{mean, median, p25, p75}` (e.g., `scores.clickability`)
+- **categorical**: `{value_distribution}` (e.g., `composition.layoutType`)
+- **list**: `{top_items_by_frequency}` (e.g., `psychology.clickMotivation`)
 
 ### Content Gap Analysis
 
@@ -662,86 +581,79 @@ def extract_timing_patterns(self):
 # src/gaps.py
 
 class GapAnalyzer:
-    def find_content_gaps(self):
+    def analyze(self):
         """Find underserved topics with high potential."""
-        topic_performance = defaultdict(list)
+        content_type_stats = {}
+        keyword_stats = defaultdict(list)
 
         for video in self.videos:
-            niche = video['analysis']['keywords']['niche']
-            views = video['video']['viewCount']
-            topic_performance[niche].append(views)
+            content_type = video.get('contentType', 'unknown')
+            vps = video['calculated']['viewsPerSubscriber']
 
-        opportunities = []
-        for topic, views in topic_performance.items():
-            avg_views = np.mean(views)
-            video_count = len(views)
+            # Track content type performance
+            # Track keyword performance and frequency
 
-            # High opportunity = high views, low competition
-            opportunity_score = avg_views / (video_count + 1)
-
-            opportunities.append({
-                'topic': topic,
-                'avgViews': avg_views,
-                'videoCount': video_count,
-                'opportunityScore': opportunity_score
-            })
-
-        return sorted(opportunities, key=lambda x: x['opportunityScore'], reverse=True)
+        return {
+            'contentTypeBreakdown': content_type_stats,
+            'keywordOpportunities': self._find_keyword_opportunities(keyword_stats),
+        }
 ```
 
 ### Insights Output Schema
 
 ```python
-# Stored in Firestore: insights/thumbnails
+# Stored in Firestore: insights/{contentType} (e.g., insights/recipe)
 {
+    "contentType": "recipe",
+    "videoCount": 12500,
+    "topPercentileThreshold": 3.2,  # viewsPerSubscriber threshold for top 10%
     "generatedAt": "2024-01-25T10:30:00Z",
-    "basedOnVideos": 50000,
-    "topPerformingElements": [
-        {
-            "category": "humanPresence",
-            "element": "expression:surprised",
-            "lift": 2.6
-        }
-    ],
-    "topCorrelations": [
-        {
-            "feature": "psychology_curiosityGap",
-            "correlation": 0.42,
-            "p_value": 0.001
-        }
-    ]
-}
 
-# Stored in Firestore: insights/timing
-{
-    "bestTimes": {
-        "byDayOfWeek": [
-            {"day": "Saturday", "avgViews": 125000, "multiplier": 1.4}
-        ],
-        "byHourIST": [
-            {"hour": 18, "avgViews": 130000, "multiplier": 1.46}
-        ],
-        "optimal": {
-            "day": "Saturday",
-            "hourIST": 18,
-            "multiplier": 1.6
+    "thumbnail": {
+        "composition.layoutType": {
+            "type": "categorical",
+            "all": {"split-screen": 35, "single-focus": 40, "text-heavy": 15, "other": 10},
+            "top10": {"split-screen": 55, "single-focus": 30, "text-heavy": 5, "other": 10}
+        },
+        "humanPresence.facePresent": {
+            "type": "boolean",
+            "all": {"true_pct": 65, "false_pct": 35},
+            "top10": {"true_pct": 85, "false_pct": 15}
+        },
+        "scores.clickability": {
+            "type": "numeric",
+            "all": {"mean": 6.2, "median": 6.0, "p25": 5.0, "p75": 7.5},
+            "top10": {"mean": 8.1, "median": 8.0, "p25": 7.5, "p75": 9.0}
+        }
+    },
+
+    "title": {
+        "hooks.hookStrength": {
+            "type": "categorical",
+            "all": {"weak": 30, "moderate": 45, "strong": 20, "viral": 5},
+            "top10": {"weak": 5, "moderate": 25, "strong": 50, "viral": 20}
         }
     }
 }
 
 # Stored in Firestore: insights/contentGaps
 {
-    "highOpportunity": [
-        {
-            "topic": "cooking/indo-chinese",
-            "avgViews": 85000,
-            "videoCount": 45,
-            "opportunityScore": 1847
-        }
-    ],
-    "saturatedTopics": [
-        {"topic": "cooking/biryani", "competition": "extreme"}
+    "generatedAt": "2024-01-25T10:30:00Z",
+    "contentTypeBreakdown": {
+        "recipe": {"count": 12500, "avgVPS": 1.8, "topVPS": 5.2},
+        "vlog": {"count": 8000, "avgVPS": 1.2, "topVPS": 3.8}
+    },
+    "keywordOpportunities": [
+        {"keyword": "air fryer", "count": 15, "avgVPS": 4.5, "opportunity": "high"}
     ]
+}
+
+# Stored in Firestore: insights/summary
+{
+    "generatedAt": "2024-01-25T10:30:00Z",
+    "totalVideos": 50000,
+    "contentTypes": ["recipe", "vlog", "tutorial", "review"],
+    "contentTypeCounts": {"recipe": 12500, "vlog": 8000, "tutorial": 5000, "review": 3000}
 }
 ```
 
@@ -751,101 +663,72 @@ class GapAnalyzer:
 
 ### Overview
 
-The recommender generates actionable suggestions for new videos by:
+The recommender is a TypeScript module (CLI + Firebase Functions API) that generates actionable suggestions by:
 
-1. Loading insights from Firestore
-2. Building context from patterns
-3. Using Gemini to generate recommendations
+1. Loading per-content-type profiles from Firestore (`insights/{contentType}`)
+2. Building context from profiling data
+3. Using Gemini to generate creative recommendations
 4. Falling back to templates if AI fails
 
-### Recommendation Flow
+### Usage
 
-```python
-# src/engine.py
+```bash
+# CLI usage
+cd functions
+npm run recommend -- --topic "Biryani" --type recipe
 
-class RecommendationEngine:
-    def generate_recommendation(self, topic, content_type, unique_angle, target_audience):
-        # 1. Load insights
-        self.insights = get_all_insights()
-
-        # 2. Build context from insights
-        context = self._build_context()
-
-        # 3. Generate with Gemini
-        try:
-            prompt = self._build_prompt(topic, content_type, unique_angle, target_audience, context)
-            response = self.model.generate_content(prompt)
-            recommendation = json.loads(response.text)
-        except:
-            # 4. Fallback to templates
-            recommendation = self._generate_from_templates(topic, content_type)
-
-        # 5. Add posting recommendation
-        recommendation['posting'] = self._get_posting_recommendation()
-
-        return recommendation
+# API usage (Firebase Functions)
+npm run serve  # Start local emulator
+curl -X POST http://localhost:5001/PROJECT/us-central1/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "Biryani", "type": "recipe"}'
 ```
 
-### Context Building
+### Architecture
 
-```python
-def _build_context(self):
-    context_parts = []
+```typescript
+// src/engine.ts
 
-    # Add top thumbnail elements
-    if 'thumbnails' in self.insights:
-        top_elements = self.insights['thumbnails']['topPerformingElements'][:5]
-        context_parts.append("Top performing thumbnail elements:")
-        for elem in top_elements:
-            context_parts.append(f"  - {elem['element']} ({elem['lift']}x performance)")
+async function generateRecommendation(
+  topic: string,
+  contentType: string,
+  angle?: string,
+  audience?: string
+): Promise<Recommendation> {
+  // 1. Load insights from Firestore
+  const insights = await loadInsights(contentType);
 
-    # Add power words
-    if 'titles' in self.insights:
-        power_words = self.insights['titles']['topPowerWords'][:10]
-        context_parts.append("\nTop power words:")
-        for pw in power_words:
-            context_parts.append(f"  - {pw['word']}")
+  // 2. Build context from per-content-type profiles
+  const context = buildInsightsContext(insights);
 
-    # Add optimal timing
-    if 'timing' in self.insights:
-        optimal = self.insights['timing']['bestTimes']['optimal']
-        context_parts.append(f"\nOptimal posting: {optimal['day']} at {optimal['hourIST']}:00 IST")
-
-    return '\n'.join(context_parts)
+  // 3. Generate with Gemini
+  try {
+    const prompt = buildPrompt(topic, contentType, angle, audience, context);
+    const response = await model.generateContent(prompt);
+    return parseRecommendation(response);
+  } catch {
+    // 4. Fallback to templates
+    return generateFromTemplates(topic, contentType);
+  }
+}
 ```
 
 ### Template Fallback
 
 When AI generation fails, templates provide basic recommendations:
 
-```python
-# src/templates.py
+```typescript
+// src/templates.ts
 
-TITLE_TEMPLATES = {
-    'recipe': [
-        "{dish} Recipe | {dish_telugu} | {modifier}",
-        "{modifier} {dish} | {dish_telugu} | Restaurant Style",
-        "SECRET {dish} Recipe | {dish_telugu} రహస్యం",
-    ],
-    'vlog': [
-        "My {topic} Experience | {topic_telugu}",
-        "A Day in {location} | {topic_telugu}",
-    ],
-}
-
-THUMBNAIL_SPECS = {
-    'recipe': {
-        'layout': 'split-composition',
-        'face': {'position': 'right-third', 'expression': 'surprised'},
-        'food': {'position': 'left-center', 'style': 'close-up with steam'},
-        'colors': {'background': '#FF6B35', 'accent': '#FFFF00'}
-    }
-}
-
-POWER_WORDS = {
-    'telugu': ['రహస్యం', 'పర్ఫెక్ట్', 'అసలైన', 'హోటల్ స్టైల్'],
-    'english': ['SECRET', 'PERFECT', 'AUTHENTIC', 'Restaurant Style']
-}
+const TITLE_TEMPLATES: Record<string, string[]> = {
+  recipe: [
+    "{dish} Recipe | {dish_telugu} | {modifier}",
+    "SECRET {dish} Recipe | {dish_telugu} రహస్యం",
+  ],
+  vlog: [
+    "My {topic} Experience | {topic_telugu}",
+  ],
+};
 ```
 
 ### Recommendation Output
@@ -987,7 +870,7 @@ POWER_WORDS = {
 #### `channels/{channelId}/videos/{videoId}/analysis/{type}`
 
 ```javascript
-// type = "thumbnail"
+// type = "thumbnail" (vision analysis)
 {
   analyzedAt: "2024-01-25T10:30:00Z",
   modelUsed: "gemini-2.0-flash",
@@ -999,22 +882,39 @@ POWER_WORDS = {
   colors: { ... },
   food: { ... },
   graphics: { ... },
+  branding: { ... },
   psychology: { ... },
+  technicalQuality: { ... },
   scores: { ... }
 }
 
-// type = "title"
+// type = "title_description" (combined text analysis)
 {
   analyzedAt: "2024-01-25T10:30:00Z",
   modelUsed: "gemini-2.0-flash",
   analysisVersion: "1.0",
   rawTitle: "Original title text",
 
+  // Title analysis
   structure: { ... },
   language: { ... },
   hooks: { ... },
   keywords: { ... },
-  scores: { ... }
+  formatting: { ... },
+  contentSignals: { ... },      // includes contentType
+  teluguAnalysis: { ... },
+  competitive: { ... },
+  scores: { ... },
+
+  // Description analysis (lean)
+  descriptionAnalysis: {
+    structure: { ... },
+    timestamps: { ... },
+    recipeContent: { ... },
+    hashtags: { ... },
+    callToActions: { ... },
+    seo: { ... }
+  }
 }
 ```
 
@@ -1045,32 +945,46 @@ POWER_WORDS = {
 }
 ```
 
-#### `insights/{type}`
+#### `insights/{contentType}` (e.g., `insights/recipe`)
 
 ```javascript
-// type = "thumbnails"
 {
+  contentType: "recipe",
+  videoCount: 12500,
+  topPercentileThreshold: 3.2,  // viewsPerSubscriber for top 10%
   generatedAt: "2024-01-25T10:30:00Z",
-  basedOnVideos: 50000,
-  topPerformingElements: [...],
-  topCorrelations: [...]
-}
 
-// type = "timing"
-{
-  generatedAt: "2024-01-25T10:30:00Z",
-  bestTimes: {
-    byDayOfWeek: [...],
-    byHourIST: [...],
-    optimal: { day: "Saturday", hourIST: 18 }
+  thumbnail: {
+    // Per-feature profiles comparing all vs top 10%
+    "composition.layoutType": { type: "categorical", all: {...}, top10: {...} },
+    "humanPresence.facePresent": { type: "boolean", all: {...}, top10: {...} },
+    "scores.clickability": { type: "numeric", all: {...}, top10: {...} }
+  },
+  title: {
+    "hooks.hookStrength": { type: "categorical", all: {...}, top10: {...} },
+    // ... more features
   }
 }
+```
 
-// type = "contentGaps"
+#### `insights/contentGaps`
+
+```javascript
 {
   generatedAt: "2024-01-25T10:30:00Z",
-  highOpportunity: [...],
-  saturatedTopics: [...]
+  contentTypeBreakdown: { recipe: {...}, vlog: {...} },
+  keywordOpportunities: [...]
+}
+```
+
+#### `insights/summary`
+
+```javascript
+{
+  generatedAt: "2024-01-25T10:30:00Z",
+  totalVideos: 50000,
+  contentTypes: ["recipe", "vlog", "tutorial"],
+  contentTypeCounts: { recipe: 12500, vlog: 8000, tutorial: 5000 }
 }
 ```
 
@@ -1262,7 +1176,7 @@ except:
 | Phase | Volume | Estimated Time |
 |-------|--------|----------------|
 | Scraper | 100 channels, 500 videos each | 3-5 days (quota limited) |
-| Analyzer | 50,000 videos, 4 analysis types | 2-3 days |
+| Analyzer | 50,000 videos, 2 analysis types | 2-3 days |
 | Insights | Aggregation of all data | 10-30 minutes |
 | Recommender | Single query | 5-10 seconds |
 
@@ -1273,7 +1187,7 @@ except:
 | YouTube API | Free tier | $0 |
 | Firebase Firestore | ~200K documents | ~$5-10 |
 | Firebase Storage | ~3GB thumbnails | ~$1-2 |
-| Gemini API | 50K images + 150K text | ~$300-400 |
+| Gemini API | 50K images + 50K text (2 calls/video) | ~$200-300 |
 
 ---
 
@@ -1314,9 +1228,9 @@ pip install -r requirements.txt
 python -m src.main
 
 # Phase 4: Recommender
-cd ../recommender
-pip install -r requirements.txt
-python -m src.main --topic "Biryani" --type recipe
+cd ../functions
+npm install
+npm run recommend -- --topic "Biryani" --type recipe
 ```
 
 ### Monitoring Progress
@@ -1328,8 +1242,8 @@ python -m src.main --topic "Biryani" --type recipe
 # Analyzer: Check console with tqdm progress bars
 # Also check Firestore: analysis_progress/{type}
 
-# Insights: Output files in insights/outputs/
-# Also check Firestore: insights/{type}
+# Insights: Check console output and Firestore
+# Also check Firestore: insights/{contentType}, insights/contentGaps, insights/summary
 ```
 
 ### Troubleshooting

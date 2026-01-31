@@ -64,7 +64,7 @@ This code review covers the YouTube Intelligence System, a multi-phase analytics
 ### Strengths
 
 1. **Clean analyzer pattern** (`analyzer/src/analyzers/`)
-   - Each analyzer type (thumbnail, title, description, tags, content_structure) has its own module
+   - Each analyzer type (thumbnail, title_description) has its own module
    - Consistent interface across analyzers
 
 2. **Progress tracking** (`analyzer/src/processors/progress.py`)
@@ -114,46 +114,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..
 
 ### Strengths
 
-1. **Statistical rigor** (`insights/src/correlations.py`)
-   - Uses scipy for proper correlation calculations
-   - Configurable significance thresholds
-   - Handles edge cases (minimum sample sizes)
+1. **Pure data summarizer** (`insights/src/profiler.py`)
+   - Per-content-type profiling with auto-detected feature types (boolean, numeric, categorical, list)
+   - Compares all videos vs top 10% by viewsPerSubscriber
+   - No interpretation — raw percentages for the recommender's LLM to decide
 
 2. **Comprehensive gap analysis** (`insights/src/gaps.py`)
-   - Multiple analysis dimensions (content, keywords, formats)
-   - Good use of numpy for calculations
-
-3. **Clean report generation** (`insights/src/reports.py`)
-   - Uses timezone-aware datetime (Python 3.12+ compatible)
-   - Dual output (Firestore + local files)
+   - Content type breakdown and keyword opportunity analysis
+   - Uses viewsPerSubscriber as success metric
 
 ### Issues Found
 
-#### Issue I1: Potential Empty List Issues in Statistics (Low Severity)
-**File**: `insights/src/patterns.py:132-145`
-**Description**: While there are checks for empty lists, some edge cases might still cause issues with `np.mean()` on empty arrays.
-```python
-for day, views in day_performance.items():
-    if not views:  # Skip empty lists
-        continue
-    avg = np.mean(views)
-```
-**Status**: Already fixed with explicit checks - good.
-
-#### Issue I2: Missing Error Handling in Report Saving (Low Severity)
-**File**: `insights/src/reports.py:84-87`
-**Description**: `save_to_firestore` doesn't handle errors gracefully.
-```python
-def save_to_firestore(self, report_type: str, report: Dict[str, Any]) -> None:
-    save_insights(report_type, report)
-    print(f"Saved {report_type} insights to Firestore")
-```
-**Recommendation**: Add try-catch with appropriate error logging.
-
-#### Issue I3: File Output Directory Creation (Informational)
-**File**: `insights/src/config.py:36`
-**Description**: `OUTPUTS_DIR.mkdir(exist_ok=True)` runs at module import time.
-**Status**: This is acceptable but could be moved to explicit initialization.
+#### Issue I1: No Test Coverage (Low Severity)
+**Description**: The insights module has no test files.
+**Recommendation**: Add unit tests for profiler and gap analyzer.
 
 ---
 
@@ -309,7 +283,7 @@ allow read: if true;
    - Loads all videos into memory
    - Consider streaming/pagination
 
-2. **Firestore reads** (`insights/src/firebase_client.py:121-144`)
+2. **Firestore reads** (`insights/src/firebase_client.py`)
    - Fetches all channels, then all videos, then all analyses
    - Consider using collection group queries or denormalization
 
@@ -351,8 +325,8 @@ allow read: if true;
 | Severity | Count | Phase |
 |----------|-------|-------|
 | Medium | 3 | S2, A1, F1 |
-| Low | 9 | S1, S3, A2, A3, A4, I1, I2, F2, SH1 |
-| Informational | 3 | I3, F3, R1 |
+| Low | 7 | S1, S3, A2, A3, A4, I1, F2, SH1 |
+| Informational | 2 | F3, R1 |
 
 ### Priority Actions
 

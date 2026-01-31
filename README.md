@@ -4,13 +4,13 @@ A comprehensive multi-phase analytics platform that scrapes Telugu YouTube chann
 
 ## Overview
 
-This system answers the question: **"What title, thumbnail, tags, and posting time should I use for maximum views?"**
+This system answers the question: **"What title, thumbnail, and posting time should I use for maximum views?"**
 
 The platform processes 100+ Telugu YouTube channels to extract actionable insights:
 
 - **50,000+ videos** analyzed for patterns
-- **AI-powered analysis** of thumbnails, titles, descriptions, and tags
-- **Statistical correlation** between content elements and performance
+- **AI-powered analysis** of thumbnails and title+description (2 Gemini calls per video)
+- **Per-content-type profiling** comparing all videos vs top 10% performers
 - **Automated recommendations** based on proven patterns
 
 ## Architecture
@@ -26,7 +26,7 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │   PHASE 1    │    │   PHASE 2    │    │   PHASE 3    │    │   PHASE 4    │
 │   Scraper    │───▶│   Analyzer   │───▶│   Insights   │───▶│ Recommender  │
-│  TypeScript  │    │    Python    │    │    Python    │    │  Python/API  │
+│  TypeScript  │    │    Python    │    │    Python    │    │  TypeScript  │
 └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
        │                   │                   │                   │
        ▼                   ▼                   ▼                   ▼
@@ -47,8 +47,8 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 | Phase | Name | Technology | Purpose |
 |-------|------|------------|---------|
 | 1 | **Scraper** | TypeScript/Node.js | Collect video data from YouTube API |
-| 2 | **Analyzer** | Python + Gemini AI | AI analysis of thumbnails, titles, tags |
-| 3 | **Insights** | Python + Pandas/SciPy | Statistical pattern discovery |
+| 2 | **Analyzer** | Python + Gemini AI | AI analysis of thumbnails, title+description (2 calls/video) |
+| 3 | **Insights** | Python | Per-content-type profiling and content gap analysis |
 | 4 | **Recommender** | TypeScript | Generate video recommendations (CLI + API) |
 
 ## Quick Start
@@ -136,22 +136,21 @@ youtube_channel_analysis/
 │   ├── README.md
 │   ├── requirements.txt
 │   ├── src/
-│   │   ├── analyzers/           # Analysis modules
+│   │   ├── analyzers/           # Analysis modules (thumbnail, title_description)
 │   │   ├── processors/          # Batch processing
 │   │   └── prompts/             # AI prompts
 │   └── tests/
 │
-├── insights/                    # Phase 3: Pattern Discovery
+├── insights/                    # Phase 3: Per-Content-Type Profiling
 │   ├── README.md
 │   ├── requirements.txt
-│   ├── src/
-│   │   ├── correlations.py      # Statistical analysis
-│   │   ├── patterns.py          # Pattern extraction
-│   │   └── gaps.py              # Content gap analysis
-│   └── outputs/
+│   └── src/
+│       ├── profiler.py          # Feature profiling (all vs top 10%)
+│       └── gaps.py              # Content gap analysis
 │
 ├── shared/                      # Shared utilities
 │   ├── constants.py
+│   ├── config.py
 │   ├── firebase_utils.py
 │   └── gemini_utils.py
 │
@@ -230,17 +229,15 @@ Edit `config/channels.json` to specify channels to analyze:
 - Thumbnail downloading and storage
 - Calculated metrics (engagement rate, views per day, etc.)
 
-### Phase 2: AI Analysis
-- **Thumbnail Analysis**: Composition, colors, human presence, text, food presentation, psychological triggers
-- **Title Analysis**: Structure, language mix, hooks, keywords, Telugu-specific patterns
-- **Description Analysis**: Timestamps, recipe content, links, CTAs, SEO optimization
-- **Tag Analysis**: Categorization, search volume estimation, strategy evaluation
+### Phase 2: AI Analysis (2 Gemini calls per video)
+- **Thumbnail Analysis** (vision): Composition, colors, human presence, text, food presentation, psychological triggers (~109 fields)
+- **Title + Description Analysis** (combined text): Structure, language mix, hooks, keywords, Telugu-specific patterns, description structure, recipe content, CTAs, SEO (~140 fields)
 
-### Phase 3: Pattern Discovery
-- Pearson correlation between features and view counts
-- Top performer pattern extraction (top 10%, top 25%)
-- Optimal posting time analysis (day of week, hour)
-- Content gap identification
+### Phase 3: Per-Content-Type Profiling
+- Group videos by content type (recipe, vlog, tutorial, etc.)
+- Compare all videos vs top 10% performers (by viewsPerSubscriber)
+- Feature profiling with auto-detected types (boolean, numeric, categorical, list)
+- Content gap and keyword opportunity analysis
 
 ### Phase 4: Recommendations
 - AI-generated title suggestions
@@ -330,9 +327,11 @@ See [functions/README.md](functions/README.md) for complete API documentation.
 |------------|---------|
 | `channels/{channelId}` | Channel metadata and stats |
 | `channels/{channelId}/videos/{videoId}` | Video data with metrics |
-| `channels/{channelId}/videos/{videoId}/analysis/{type}` | AI analysis results |
+| `channels/{channelId}/videos/{videoId}/analysis/{type}` | AI analysis results (thumbnail, title_description) |
 | `scrape_progress/{channelId}` | Resume state for scraping |
-| `insights/{type}` | Aggregated patterns |
+| `insights/{contentType}` | Per-content-type profiles (all vs top 10%) |
+| `insights/contentGaps` | Content gap and keyword opportunity analysis |
+| `insights/summary` | Overview of all content types and counts |
 
 ### Calculated Metrics
 
@@ -369,10 +368,9 @@ The scraper:
 # Phase 1: TypeScript tests
 cd scraper && npm test
 
-# Phase 2-4: Python tests
+# Phase 2-3: Python tests
 cd analyzer && pytest tests/
 cd insights && pytest tests/
-cd recommender && pytest tests/
 
 # Validate API connections
 cd scraper && npx tsx scripts/validate.ts
@@ -429,7 +427,7 @@ cd scraper && npx tsx scripts/validate.ts
 | Database | Firebase Firestore | - |
 | File Storage | Firebase Storage | - |
 | AI Analysis | Google Gemini 2.0 Flash | - |
-| Analytics | Python + Pandas + SciPy | 3.11+ |
+| Analytics | Python + Pandas | 3.11+ |
 | Testing (TS) | Vitest | 1.2+ |
 | Testing (Python) | pytest | 8.0+ |
 

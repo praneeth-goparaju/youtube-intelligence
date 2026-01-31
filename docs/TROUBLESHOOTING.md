@@ -210,42 +210,21 @@ MemoryError: Unable to allocate array
 
 **Symptoms:**
 ```
-Warning: Not enough videos for meaningful correlation (need 50+)
+Warning: Not enough videos for meaningful profiling
 ```
 
-**Cause:** Phase 2 didn't complete enough videos.
+**Cause:** Phase 2 didn't complete enough videos, or a content type has too few videos.
 
 **Solution:**
-1. Check analysis progress:
-   ```bash
-   python -c "from src.firebase_client import count_analyzed_videos; print(count_analyzed_videos())"
-   ```
+1. Check analysis progress — both thumbnail and title_description analysis should be complete
 2. Complete more Phase 2 analysis
-3. Lower minimum threshold (not recommended):
-   ```bash
-   MIN_VIDEOS_FOR_CORRELATION=30
-   ```
-
-### Statistical Errors
-
-**Symptoms:**
-```
-ValueError: variance is zero
-RuntimeWarning: invalid value encountered in divide
-```
-
-**Cause:** Not enough variation in data for statistical analysis.
-
-**Solution:**
-1. Ensure diverse channel selection
-2. Need more videos with varying performance
-3. Check for data quality issues (all same values)
+3. Content types with very few videos will be skipped automatically
 
 ### Insights Not Generating
 
 **Symptoms:**
 - Empty insights documents
-- Missing insight types
+- Missing content type profiles
 
 **Cause:** Analysis data missing or in wrong format.
 
@@ -254,10 +233,16 @@ RuntimeWarning: invalid value encountered in divide
    ```bash
    # Check for analysis documents
    firebase firestore:get channels/UCxxx/videos/videoId/analysis/thumbnail
+   firebase firestore:get channels/UCxxx/videos/videoId/analysis/title_description
    ```
 2. Re-run insights with verbose mode:
    ```bash
    LOG_LEVEL=DEBUG python src/main.py
+   ```
+3. Run specific insight type:
+   ```bash
+   python src/main.py --type profiles  # Per-content-type profiles only
+   python src/main.py --type gaps      # Content gap analysis only
    ```
 
 ---
@@ -280,7 +265,7 @@ Warning: No insights found, using template-based generation
    ```
 2. Verify insights in Firestore:
    ```bash
-   firebase firestore:get insights/thumbnails
+   firebase firestore:get insights/summary
    ```
 
 ### AI Generation Failing
@@ -312,7 +297,7 @@ Warning: No insights found, using template-based generation
 2. Verify insights contain relevant patterns
 3. Provide more specific input:
    ```bash
-   python src/main.py \
+   npm run recommend -- \
      --topic "Hyderabadi Biryani" \
      --type recipe \
      --angle "Restaurant secret" \
