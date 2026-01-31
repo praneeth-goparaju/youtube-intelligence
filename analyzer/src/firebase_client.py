@@ -7,6 +7,9 @@ from google.cloud.firestore_v1 import FieldFilter
 
 from .config import config
 
+# shared module path is set up by config.py (imported above)
+from shared.constants import COLLECTION_BATCH_JOBS
+
 
 _app: Optional[firebase_admin.App] = None
 _db: Optional[firestore.Client] = None
@@ -234,3 +237,78 @@ def get_analysis_progress(analysis_type: str) -> Optional[Dict[str, Any]]:
     if doc.exists:
         return doc.to_dict()
     return None
+
+
+# ===== Batch Job Operations =====
+
+def save_batch_job(job_id: str, data: Dict[str, Any]) -> None:
+    """Save or update a batch job record."""
+    db = get_db()
+    db.collection(COLLECTION_BATCH_JOBS).document(job_id).set(data, merge=True)
+
+
+def get_batch_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """Get a batch job record by ID."""
+    db = get_db()
+    doc = db.collection(COLLECTION_BATCH_JOBS).document(job_id).get()
+    if doc.exists:
+        return {'id': doc.id, **doc.to_dict()}
+    return None
+
+
+def get_batch_jobs_by_state(state: str, analysis_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get batch jobs filtered by state and optionally analysis type."""
+    db = get_db()
+    query = db.collection(COLLECTION_BATCH_JOBS).where(
+        filter=FieldFilter('state', '==', state)
+    )
+    if analysis_type:
+        query = query.where(
+            filter=FieldFilter('analysisType', '==', analysis_type)
+        )
+    query = query.order_by('createdAt', direction=firestore.Query.DESCENDING)
+    docs = query.stream()
+    return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+
+
+def get_latest_batch_job(analysis_type: str, state: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Get the most recent batch job for an analysis type."""
+    db = get_db()
+    query = db.collection(COLLECTION_BATCH_JOBS).where(
+        filter=FieldFilter('analysisType', '==', analysis_type)
+    )
+    if state:
+        query = query.where(
+            filter=FieldFilter('state', '==', state)
+        )
+    query = query.order_by('createdAt', direction=firestore.Query.DESCENDING).limit(1)
+    docs = list(query.stream())
+    if docs:
+        return {'id': docs[0].id, **docs[0].to_dict()}
+    return None
+
+
+def list_all_batch_jobs(limit: int = 20) -> List[Dict[str, Any]]:
+    """List recent batch jobs."""
+    db = get_db()
+    query = (db.collection(COLLECTION_BATCH_JOBS)
+             .order_by('createdAt', direction=firestore.Query.DESCENDING)
+             .limit(limit))
+    docs = query.stream()
+    return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+
+
+def update_batch_job(job_id: str, updates: Dict[str, Any]) -> None:
+    """Update specific fields on a batch job record."""
+    db = get_db()
+    db.collection(COLLECTION_BATCH_JOBS).document(job_id).update(updates)
+
+
+def get_all_channel_videos_for_batch(channel_id: str) -> List[Dict[str, Any]]:
+    """Get all videos for a channel (used during batch prepare to check analysis status).
+
+    Returns minimal video data needed for batch preparation.
+    """
+    db = get_db()
+    docs = db.collection('channels').document(channel_id).collection('videos').stream()
+    return [{'id': doc.id, **doc.to_dict()} for doc in docs]

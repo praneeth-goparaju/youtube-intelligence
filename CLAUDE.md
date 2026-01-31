@@ -11,7 +11,7 @@ YouTube Intelligence System - a multi-phase analytics platform that scrapes Telu
 Four-phase system with separate technology stacks:
 
 1. **Phase 1 - Scraper (TypeScript)**: YouTube Data API v3 integration, stores in Firebase Firestore/Storage
-2. **Phase 2 - Analyzer (Python)**: Gemini 2.0 Flash for thumbnail vision analysis and combined title+description text analysis (2 API calls per video)
+2. **Phase 2 - Analyzer (Python)**: Gemini 2.5 Flash for thumbnail vision analysis and combined title+description text analysis (2 API calls per video)
 3. **Phase 3 - Insights (Python)**: Per-content-type feature profiling (all vs top 10% by viewsPerSubscriber) and content gap analysis
 4. **Phase 4 - Recommender (TypeScript)**: AI-powered recommendation engine (CLI + Firebase Functions API)
 
@@ -33,22 +33,40 @@ cd ../functions && npm install
 ### Scraper (Phase 1)
 ```bash
 cd scraper
-npm start                       # Run scraper
+npm start                       # Run scraper (full initial scrape)
+npm start -- --update           # Incremental update (fetch only new videos for completed channels)
+npm start -- --ignore-quota     # Ignore quota checks (use with caution)
 npm test                        # Run vitest tests
 npx tsx scripts/validate.ts     # Test API connections
-npx tsx scripts/reset-progress.ts  # Clear progress for re-run
+npx tsx scripts/reset-progress.ts          # Clear progress for re-run
+npx tsx scripts/check-status.ts            # Show scrape progress summary
+npx tsx scripts/delete-short-thumbnails.ts # Remove thumbnails for Shorts from Storage
+npx tsx scripts/migrate-unresolved.ts      # Retry unresolved channel URLs
 ```
 
 ### Analyzer (Phase 2)
 ```bash
 cd analyzer
-python src/main.py                                                  # Run all analysis types (thumbnail + title_description)
-python src/main.py --type thumbnail                                 # Thumbnail vision analysis only
-python src/main.py --type title_description                         # Combined title+description text analysis only
-python src/main.py --type title_description --channel CHANNEL_ID    # Specific channel
-python src/main.py --limit 50                                       # Limit videos per channel
-python src/main.py --validate                                       # Test connections only
-pytest tests/                                                       # Run tests
+
+# Sync mode (default — per-video API calls)
+python -m analyzer.src.main --type thumbnail                                 # Thumbnail vision analysis only
+python -m analyzer.src.main --type title_description                         # Combined title+description text analysis only
+python -m analyzer.src.main --type title_description --channel CHANNEL_ID    # Specific channel
+python -m analyzer.src.main --limit 50                                       # Limit videos per channel
+python -m analyzer.src.main --validate                                       # Test connections only
+
+# Batch mode (Gemini Batch API — 50% cost savings, requires Tier 2+)
+python -m analyzer.src.main --mode batch --type thumbnail                              # Full: prepare → submit → poll → import
+python -m analyzer.src.main --mode batch --type all                                    # Both analysis types
+python -m analyzer.src.main --mode batch --phase prepare --type thumbnail              # Only build JSONL file
+python -m analyzer.src.main --mode batch --phase submit --type thumbnail               # Submit prepared JSONL
+python -m analyzer.src.main --mode batch --phase poll --type thumbnail                 # Poll running job until done
+python -m analyzer.src.main --mode batch --phase import --type thumbnail               # Import completed results to Firestore
+python -m analyzer.src.main --mode batch --phase status                                # Show all batch job statuses
+python -m analyzer.src.main --mode batch --channel UCxxx --type thumbnail              # Single channel
+python -m analyzer.src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch
+
+pytest tests/                                                                          # Run tests
 ```
 
 ### Insights (Phase 3)
@@ -109,6 +127,9 @@ API Authentication:
 - Use `mqdefault` thumbnail quality for storage efficiency
 - Duration format is ISO 8601 (e.g., `PT15M33S`)
 - Both scraper and analyzer track progress in Firestore for resumable operations
+- Scraper supports `--update` mode for incremental fetching of new videos only
+- Scraper skips short thumbnails when `skipShortThumbnails: true` in channels.json settings
+- Unresolved channel URLs are tracked in Firestore for retry
 - Recommender falls back to template-based generation if Gemini fails
 
 ## Firebase Collections
@@ -116,7 +137,9 @@ API Authentication:
 - `channels/{channelId}` - Channel metadata and stats
 - `channels/{channelId}/videos/{videoId}` - Video data with calculated metrics
 - `channels/{channelId}/videos/{videoId}/analysis/{type}` - AI analysis results (thumbnail, title_description)
+- `batch_jobs/{jobId}` - Batch API job tracking (state, request count, import status)
 - `scrape_progress/{channelId}` - Resume state for interrupted scrapes
+- `unresolved_channels/{id}` - Channel URLs that failed resolution (for retry)
 - `insights/{contentType}` - Per-content-type profiles (thumbnail + title features, all vs top 10%)
 - `insights/contentGaps` - Content gap and keyword opportunity analysis
 - `insights/summary` - Overview of all content types and counts
@@ -130,12 +153,38 @@ The scraper calculates these metrics for each video:
 
 ## AI Analysis Models
 
-All analysis uses Gemini 2.0 Flash (`gemini-2.0-flash`) with 2 API calls per video:
+All analysis uses Gemini 2.5 Flash (`gemini-2.5-flash`) with 2 API calls per video:
 
 1. **Thumbnail** (vision call): Composition, colors, text, food, graphics, psychology (~109 fields)
 2. **Title + Description** (combined text call): Single call analyzing both together
    - Title: Structure, language mix, hooks, keywords, content signals, Telugu-specific patterns (~120 fields)
    - Description (lean): Structure, timestamps, recipe content, hashtags, CTAs, SEO (~20 fields)
    - Description context improves niche detection (e.g., ingredient list confirms isRecipe)
+
+### Two Processing Modes
+
+- **Sync mode** (default): Per-video API calls using `google-generativeai` SDK. Uses `response_schema` (Pydantic models) and `system_instruction` for structured JSON output.
+- **Batch mode**: Gemini Batch API using `google-genai` SDK. Builds JSONL request files, submits as batch jobs, polls for completion, imports results. 50% cost savings. Works on all tiers but batch size is constrained by enqueued token limits (Tier 1: ~680 requests/job, Tier 2: ~90K requests/job).
+
+### Batch Mode Workflow
+
+1. **Prepare**: Scans Firestore for unanalyzed videos, writes JSONL to `data/batch/`
+2. **Submit**: Uploads JSONL via Files API, creates batch job, tracks in Firestore `batch_jobs`
+3. **Poll**: Checks job status every 60s until terminal state (can be interrupted and resumed)
+4. **Import**: Downloads result JSONL, parses each line, saves to Firestore analysis subcollections
+
+Batch request key format: `{channelId}_{videoId}_{analysisType}` — parsed back using fixed-length channel IDs (24 chars starting with UC) and 11-char video IDs.
+
+Thumbnails use GCS URIs (`gs://{bucket}/thumbnails/UCxxx/videoId.jpg`) directly in batch requests since Firebase Storage is Google Cloud Storage.
+
+### Gemini API Tier Limits for Batch
+
+| Tier | Enqueued Token Limit | Max requests per job | Jobs for 208K videos × 2 types |
+|------|---------------------|---------------------|-------------------------------|
+| Tier 1 | 3M tokens | ~680 | ~612 sequential jobs |
+| Tier 2 | 400M tokens | ~50K (API max) | ~10 sequential jobs |
+| Tier 3 | 1B tokens | ~50K (API max) | ~10 jobs, multiple concurrent |
+
+Tier 2 requires: $250 cumulative Google Cloud spending + 30 days since first payment.
 
 Legacy analysis types (title, description, tags, content_structure) are no longer generated but may exist in Firestore from previous runs. The insights phase falls back to legacy `title` analysis when `title_description` is not available.

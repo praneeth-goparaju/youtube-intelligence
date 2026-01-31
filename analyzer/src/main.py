@@ -9,6 +9,153 @@ from .gemini_client import test_connection
 from .processors.batch import BatchProcessor, run_all_analysis
 
 
+def run_batch_mode(args):
+    """Run batch mode analysis (Gemini Batch API).
+
+    Handles the 3-phase workflow: prepare -> submit -> poll -> import.
+    """
+    from .batch_api import (
+        prepare_batch_requests,
+        submit_batch,
+        poll_and_update,
+        import_batch_results,
+    )
+    from .batch_api.client import list_batch_jobs as list_api_jobs
+    from .firebase_client import list_all_batch_jobs
+
+    phase = args.phase
+    analysis_type = args.type
+
+    # Handle 'status' phase (no analysis type needed)
+    if phase == 'status':
+        _show_batch_status()
+        return
+
+    # For 'all' analysis type, run both sequentially
+    if analysis_type == 'all':
+        for atype in ['thumbnail', 'title_description']:
+            print(f"\n{'#'*60}")
+            print(f"  BATCH: {atype.upper()}")
+            print(f"{'#'*60}")
+            _run_batch_phase(phase, atype, args)
+    else:
+        _run_batch_phase(phase, analysis_type, args)
+
+
+def _run_batch_phase(phase: str, analysis_type: str, args):
+    """Execute a specific batch phase for an analysis type."""
+    from .batch_api import (
+        prepare_batch_requests,
+        submit_batch,
+        poll_and_update,
+        import_batch_results,
+    )
+
+    if phase in ('all', 'prepare'):
+        jsonl_path, count = prepare_batch_requests(
+            analysis_type=analysis_type,
+            channel_id=args.channel,
+            batch_size=args.batch_size,
+        )
+        if phase == 'prepare' or count == 0:
+            if phase == 'all' and count == 0:
+                print("No requests to submit — skipping remaining phases.")
+            return
+
+    if phase in ('all', 'submit'):
+        if phase == 'submit':
+            # Need to find the most recent prepared JSONL
+            import os
+            import glob
+            batch_dir = os.path.join(config.PROJECT_ROOT, 'data', 'batch')
+            pattern = os.path.join(batch_dir, f"batch_{analysis_type}_*.jsonl")
+            files = sorted(glob.glob(pattern), reverse=True)
+            if not files:
+                print(f"No prepared JSONL file found for {analysis_type}")
+                return
+            jsonl_path = files[0]
+            # Count lines
+            with open(jsonl_path) as f:
+                count = sum(1 for _ in f)
+            print(f"Using prepared file: {jsonl_path} ({count} requests)")
+
+        job_record = submit_batch(
+            jsonl_path=jsonl_path,
+            analysis_type=analysis_type,
+            request_count=count,
+            job_name=args.job_name,
+        )
+        if phase == 'submit':
+            return
+
+    if phase in ('all', 'poll'):
+        result = poll_and_update(
+            analysis_type=analysis_type,
+            poll_interval=args.poll_interval,
+            job_name=args.job_name,
+        )
+        if not result:
+            return
+        state = result.get('state', '')
+        if state != 'JOB_STATE_SUCCEEDED':
+            print(f"Job did not succeed (state: {state}). Stopping.")
+            return
+        if phase == 'poll':
+            return
+
+    if phase in ('all', 'import'):
+        import_batch_results(
+            analysis_type=analysis_type,
+            job_name=args.job_name,
+        )
+
+
+def _show_batch_status():
+    """Show status of all batch jobs."""
+    from .firebase_client import list_all_batch_jobs
+    from .batch_api.client import list_batch_jobs as list_api_jobs
+
+    print("\n" + "=" * 70)
+    print("  BATCH JOB STATUS")
+    print("=" * 70)
+
+    # Show Firestore-tracked jobs
+    jobs = list_all_batch_jobs(limit=20)
+    if not jobs:
+        print("\n  No batch jobs found in Firestore.")
+    else:
+        print(f"\n  {'Job Name':<35} {'Type':<20} {'State':<25} {'Requests':<10}")
+        print(f"  {'-'*35} {'-'*20} {'-'*25} {'-'*10}")
+        for job in jobs:
+            name = job.get('jobName', job.get('id', '?'))
+            # Truncate long names
+            if len(name) > 33:
+                name = '...' + name[-30:]
+            atype = job.get('analysisType', '?')
+            state = job.get('state', '?')
+            count = job.get('requestCount', '?')
+            imported = 'Yes' if job.get('importedAt') else 'No'
+            print(f"  {name:<35} {atype:<20} {state:<25} {str(count):<10}")
+
+    # Also check the API for any jobs not tracked
+    print("\n  Checking Gemini API for active jobs...")
+    try:
+        api_jobs = list_api_jobs(limit=10)
+        active = [j for j in api_jobs if str(j.state) not in {
+            'JOB_STATE_SUCCEEDED', 'JOB_STATE_FAILED', 'JOB_STATE_CANCELLED'
+        }]
+        if active:
+            print(f"\n  {len(active)} active job(s) in Gemini API:")
+            for j in active:
+                print(f"    {j.name}: {j.state}")
+        else:
+            print("  No active jobs in Gemini API.")
+    except Exception as e:
+        print(f"  Could not check API: {e}")
+
+    print()
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -38,6 +185,38 @@ def main():
         help='Only validate configuration and connections'
     )
 
+    # Batch mode arguments
+    parser.add_argument(
+        '--mode', '-m',
+        choices=['sync', 'batch'],
+        default='sync',
+        help='Processing mode: sync (default, per-video) or batch (Gemini Batch API, 50%% cost savings)'
+    )
+    parser.add_argument(
+        '--phase',
+        choices=['all', 'prepare', 'submit', 'poll', 'import', 'status'],
+        default='all',
+        help='Batch phase to run (default: all phases sequentially)'
+    )
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=50000,
+        help='Maximum requests per batch job (default: 50000)'
+    )
+    parser.add_argument(
+        '--poll-interval',
+        type=int,
+        default=None,
+        help='Seconds between poll checks (default: from config/60s)'
+    )
+    parser.add_argument(
+        '--job-name',
+        type=str,
+        default=None,
+        help='Specific batch job name to poll/import'
+    )
+
     args = parser.parse_args()
 
     # Validate channel ID format if provided
@@ -65,12 +244,18 @@ def main():
     initialize_firebase()
     print("Firebase connected")
 
-    # Test Gemini connection
-    print("Testing Gemini API connection...")
-    if not test_connection():
-        print("\nGemini API connection failed. Please check your GOOGLE_API_KEY.")
-        sys.exit(1)
-    print(f"Gemini API connected (model: {config.GEMINI_MODEL})")
+    # For batch status, skip Gemini connection test
+    if args.mode == 'batch' and args.phase == 'status':
+        _show_batch_status()
+        return
+
+    # Test Gemini connection (skip for batch import phase — it just reads files)
+    if not (args.mode == 'batch' and args.phase == 'import'):
+        print("Testing Gemini API connection...")
+        if not test_connection():
+            print("\nGemini API connection failed. Please check your GOOGLE_API_KEY.")
+            sys.exit(1)
+        print(f"Gemini API connected (model: {config.GEMINI_MODEL})")
 
     if args.validate:
         print("\nValidation complete. All connections OK!")
@@ -79,26 +264,32 @@ def main():
     # Run analysis
     print("\n" + "-" * 60)
 
-    if args.channel:
-        # Process single channel
-        if args.type == 'all':
-            for analysis_type in ['thumbnail', 'title_description']:
-                print(f"\nProcessing {analysis_type} analysis for channel {args.channel}...")
-                processor = BatchProcessor(analysis_type)
+    if args.mode == 'batch':
+        print(f"Mode: BATCH (50% cost savings)")
+        run_batch_mode(args)
+    else:
+        # Sync mode (existing behavior)
+        print(f"Mode: SYNC (per-video)")
+        if args.channel:
+            # Process single channel
+            if args.type == 'all':
+                for analysis_type in ['thumbnail', 'title_description']:
+                    print(f"\nProcessing {analysis_type} analysis for channel {args.channel}...")
+                    processor = BatchProcessor(analysis_type)
+                    stats = processor.process_channel(args.channel, limit=args.limit)
+                    print(f"Completed: {stats['successful']} successful, {stats['failed']} failed")
+            else:
+                print(f"\nProcessing {args.type} analysis for channel {args.channel}...")
+                processor = BatchProcessor(args.type)
                 stats = processor.process_channel(args.channel, limit=args.limit)
                 print(f"Completed: {stats['successful']} successful, {stats['failed']} failed")
         else:
-            print(f"\nProcessing {args.type} analysis for channel {args.channel}...")
-            processor = BatchProcessor(args.type)
-            stats = processor.process_channel(args.channel, limit=args.limit)
-            print(f"Completed: {stats['successful']} successful, {stats['failed']} failed")
-    else:
-        # Process all channels
-        if args.type == 'all':
-            run_all_analysis(limit_per_channel=args.limit)
-        else:
-            processor = BatchProcessor(args.type)
-            processor.process_all_channels(limit=args.limit)
+            # Process all channels
+            if args.type == 'all':
+                run_all_analysis(limit_per_channel=args.limit)
+            else:
+                processor = BatchProcessor(args.type)
+                processor.process_all_channels(limit=args.limit)
 
     print("\n" + "=" * 60)
     print("  Analysis Complete!")

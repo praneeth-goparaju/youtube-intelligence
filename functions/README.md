@@ -166,7 +166,7 @@ Generate video recommendations.
   "content": {...},
   "metadata": {
     "generatedAt": "2024-01-25T10:30:00Z",
-    "modelUsed": "gemini-2.0-flash",
+    "modelUsed": "gemini-2.5-flash",
     "insightsVersion": "2024-01-20T00:00:00Z",
     "fallbackUsed": false
   }

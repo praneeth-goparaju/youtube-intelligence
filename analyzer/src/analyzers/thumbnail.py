@@ -41,8 +41,11 @@ class ThumbnailAnalyzer:
             # Download thumbnail from storage
             image_data = download_thumbnail(thumbnail_path)
 
-            # Analyze with Gemini Vision
-            result = analyze_image(THUMBNAIL_ANALYSIS_PROMPT, image_data)
+            # Analyze with Gemini Vision (uses response_schema when available)
+            result = analyze_image(
+                THUMBNAIL_ANALYSIS_PROMPT, image_data,
+                analysis_type=self.ANALYSIS_TYPE,
+            )
 
             # Add metadata
             result['analyzedAt'] = datetime.utcnow().isoformat()
@@ -78,8 +81,11 @@ class ThumbnailAnalyzer:
             response.raise_for_status()
             image_data = response.content
 
-            # Analyze with Gemini Vision
-            result = analyze_image(THUMBNAIL_ANALYSIS_PROMPT, image_data)
+            # Analyze with Gemini Vision (uses response_schema when available)
+            result = analyze_image(
+                THUMBNAIL_ANALYSIS_PROMPT, image_data,
+                analysis_type=self.ANALYSIS_TYPE,
+            )
 
             # Add metadata
             result['analyzedAt'] = datetime.utcnow().isoformat()

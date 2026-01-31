@@ -8,7 +8,7 @@ This system answers the question: **"What title, thumbnail, and posting time sho
 
 The platform processes 100+ Telugu YouTube channels to extract actionable insights:
 
-- **50,000+ videos** analyzed for patterns
+- **208,000+ non-short videos** scraped across 116 channels
 - **AI-powered analysis** of thumbnails and title+description (2 Gemini calls per video)
 - **Per-content-type profiling** comparing all videos vs top 10% performers
 - **Automated recommendations** based on proven patterns
@@ -88,7 +88,8 @@ cd functions && npm install && cd ..
 ```bash
 # Phase 1: Scrape YouTube data (may take multiple days due to API quota)
 cd scraper
-npm start
+npm start                                  # Full initial scrape
+npm start -- --update                      # Incremental update (new videos only)
 
 # Phase 2: Analyze with AI (after scraping completes)
 cd ../analyzer
@@ -215,7 +216,8 @@ Edit `config/channels.json` to specify channels to analyze:
   "settings": {
     "maxVideosPerChannel": null,
     "includeShorts": true,
-    "includePrivate": false
+    "includePrivate": false,
+    "skipShortThumbnails": true
   }
 }
 ```
@@ -226,7 +228,9 @@ Edit `config/channels.json` to specify channels to analyze:
 - Multi-format URL resolution (`@handle`, `/channel/`, `/user/`, `/c/`)
 - Automatic quota management (10,000 units/day limit)
 - Resumable scraping with progress tracking
-- Thumbnail downloading and storage
+- Incremental update mode (`--update`) for fetching only new videos
+- Thumbnail downloading and storage (skips Shorts when `skipShortThumbnails` enabled)
+- Unresolved channel URL tracking for retry
 - Calculated metrics (engagement rate, views per day, etc.)
 
 ### Phase 2: AI Analysis (2 Gemini calls per video)
@@ -329,6 +333,7 @@ See [functions/README.md](functions/README.md) for complete API documentation.
 | `channels/{channelId}/videos/{videoId}` | Video data with metrics |
 | `channels/{channelId}/videos/{videoId}/analysis/{type}` | AI analysis results (thumbnail, title_description) |
 | `scrape_progress/{channelId}` | Resume state for scraping |
+| `unresolved_channels/{id}` | Channel URLs that failed resolution |
 | `insights/{contentType}` | Per-content-type profiles (all vs top 10%) |
 | `insights/contentGaps` | Content gap and keyword opportunity analysis |
 | `insights/summary` | Overview of all content types and counts |
@@ -426,7 +431,7 @@ cd scraper && npx tsx scripts/validate.ts
 | YouTube Integration | googleapis | 131.0+ |
 | Database | Firebase Firestore | - |
 | File Storage | Firebase Storage | - |
-| AI Analysis | Google Gemini 2.0 Flash | - |
+| AI Analysis | Google Gemini (2.0 Flash / 3.0 Flash) | - |
 | Analytics | Python + Pandas | 3.11+ |
 | Testing (TS) | Vitest | 1.2+ |
 | Testing (Python) | pytest | 8.0+ |

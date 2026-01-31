@@ -1,11 +1,12 @@
 import { getDb } from './client.js';
-import { Channel, Video, ScrapeProgress } from '../types/index.js';
+import { Channel, Video, ScrapeProgress, UnresolvedChannel } from '../types/index.js';
 import { Timestamp } from 'firebase-admin/firestore';
 
 // Collection names
 const CHANNELS_COLLECTION = 'channels';
 const VIDEOS_SUBCOLLECTION = 'videos';
 const PROGRESS_COLLECTION = 'scrape_progress';
+const UNRESOLVED_COLLECTION = 'unresolved_channels';
 
 /**
  * Save or update channel data
@@ -204,6 +205,35 @@ export function createInitialProgress(
 }
 
 /**
+ * Check which video IDs already exist in Firestore for a channel.
+ * Uses getAll() for efficient batch reads (single RPC for up to 100 refs).
+ */
+export async function getExistingVideoIds(channelId: string, videoIds: string[]): Promise<Set<string>> {
+  if (videoIds.length === 0) return new Set();
+
+  const db = getDb();
+  const existing = new Set<string>();
+
+  // getAll() supports up to 100 refs per call
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < videoIds.length; i += BATCH_SIZE) {
+    const batch = videoIds.slice(i, i + BATCH_SIZE);
+    const refs = batch.map((id) =>
+      db.collection(CHANNELS_COLLECTION).doc(channelId).collection(VIDEOS_SUBCOLLECTION).doc(id)
+    );
+
+    const docs = await db.getAll(...refs);
+    for (const doc of docs) {
+      if (doc.exists) {
+        existing.add(doc.id);
+      }
+    }
+  }
+
+  return existing;
+}
+
+/**
  * Update channel stats after scraping
  */
 export async function updateChannelStats(
@@ -219,4 +249,40 @@ export async function updateChannelStats(
     ...stats,
     lastUpdatedAt: Timestamp.now(),
   });
+}
+
+// ===== Unresolved Channels =====
+
+/**
+ * Save or update an unresolved channel entry
+ */
+export async function saveUnresolvedChannel(entry: UnresolvedChannel): Promise<void> {
+  const db = getDb();
+  await db.collection(UNRESOLVED_COLLECTION).doc(entry.id).set(entry, { merge: true });
+}
+
+/**
+ * Get a single unresolved channel by ID
+ */
+export async function getUnresolvedChannel(id: string): Promise<UnresolvedChannel | null> {
+  const db = getDb();
+  const doc = await db.collection(UNRESOLVED_COLLECTION).doc(id).get();
+  return doc.exists ? (doc.data() as UnresolvedChannel) : null;
+}
+
+/**
+ * Get all unresolved channel entries
+ */
+export async function getAllUnresolvedChannels(): Promise<UnresolvedChannel[]> {
+  const db = getDb();
+  const snapshot = await db.collection(UNRESOLVED_COLLECTION).get();
+  return snapshot.docs.map((doc) => doc.data() as UnresolvedChannel);
+}
+
+/**
+ * Delete an unresolved channel entry
+ */
+export async function deleteUnresolvedChannel(id: string): Promise<void> {
+  const db = getDb();
+  await db.collection(UNRESOLVED_COLLECTION).doc(id).delete();
 }

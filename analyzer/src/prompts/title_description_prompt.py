@@ -5,6 +5,33 @@ Title analysis retains all fields. Description analysis is lean (~20 fields).
 The description context helps Gemini make better niche/content-type decisions.
 """
 
+# --- New structured prompts for response_schema mode (batch + improved sync) ---
+
+TITLE_DESC_SYSTEM_INSTRUCTION = (
+    "You are an expert YouTube title and description analyst specializing in Telugu content. "
+    "The description provides context that should inform title analysis "
+    "(e.g., ingredient lists confirm isRecipe, timestamps reveal structure). "
+    "Analyze both together in a single pass for accurate niche and content-type detection."
+)
+
+TITLE_DESC_USER_PROMPT = (
+    "Analyze this YouTube video title AND description together.\n\n"
+    "TITLE ANALYSIS:\n"
+    "1. STRUCTURE - Pattern, segments, separators, character/word counts by language\n"
+    "2. LANGUAGE - Telugu/English mix, code-switching style, transliteration, script detection\n"
+    "3. HOOKS & TRIGGERS - Power words, emotional triggers, question hooks, hook strength\n"
+    "4. KEYWORDS - Primary/secondary keywords, search intent, niche/sub-niche, SEO optimization\n"
+    "5. FORMATTING - Capitalization, emojis, brackets, special chars, hashtags\n"
+    "6. CONTENT SIGNALS - Content type (recipe/tutorial/review/etc), series detection, collaborations\n"
+    "7. TELUGU-SPECIFIC - Register, dialect hints, honorifics, food term accuracy\n"
+    "8. COMPETITIVE - Uniqueness score (1-10), niche pattern adherence, standout factors\n"
+    "9. SCORES - SEO, clickability, clarity, emotional, uniqueness, length, overall (all 1-10)\n\n"
+    "DESCRIPTION ANALYSIS (lean):\n"
+    "1. Structure, timestamps, recipe content, hashtags, CTAs, SEO keyword density"
+)
+
+# --- Original monolithic prompt (kept for backward compatibility with sync mode) ---
+
 TITLE_DESCRIPTION_ANALYSIS_PROMPT = '''Analyze this YouTube video title AND description together, and return a detailed JSON analysis.
 
 IMPORTANT: Return ONLY valid JSON, no markdown formatting or explanation text.

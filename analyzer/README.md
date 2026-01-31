@@ -1,13 +1,17 @@
 # Phase 2: AI Analyzer
 
-A Python-based AI analysis system that processes YouTube video data using Google Gemini 2.0 Flash. Performs 2 API calls per video: thumbnail vision analysis and combined title+description text analysis.
+A Python-based AI analysis system that processes YouTube video data using Google Gemini 2.5 Flash. Performs 2 API calls per video: thumbnail vision analysis and combined title+description text analysis.
+
+Supports two processing modes:
+- **Sync mode** (default): Per-video API calls with structured output via `response_schema`
+- **Batch mode**: Gemini Batch API for 50% cost savings (requires Tier 2+)
 
 ## Overview
 
 | Type | Model | Input | Output |
 |------|-------|-------|--------|
-| **Thumbnail** | Gemini 2.0 Flash (Vision) | Image | ~109 composition/color/food/psychology attributes |
-| **Title + Description** | Gemini 2.0 Flash (Text) | Title + Description text | ~140 structure/language/hooks/keywords/content signals + description SEO fields |
+| **Thumbnail** | Gemini 2.5 Flash (Vision) | Image | ~109 composition/color/food/psychology attributes |
+| **Title + Description** | Gemini 2.5 Flash (Text) | Title + Description text | ~140 structure/language/hooks/keywords/content signals + description SEO fields |
 
 ## Quick Start
 
@@ -16,43 +20,52 @@ A Python-based AI analysis system that processes YouTube video data using Google
 pip install -r requirements.txt
 
 # Validate connections
-python src/main.py --validate
+python -m analyzer.src.main --validate
 
-# Run all analysis types
-python src/main.py
+# Sync mode (default)
+python -m analyzer.src.main                                          # All analysis types
+python -m analyzer.src.main --type thumbnail                         # Thumbnail only
+python -m analyzer.src.main --type title_description --channel UCxxx --limit 50
 
-# Run specific analysis
-python src/main.py --type thumbnail
-python src/main.py --type title_description --channel UCxxx --limit 50
+# Batch mode (50% cost savings)
+python -m analyzer.src.main --mode batch --type thumbnail            # Full pipeline
+python -m analyzer.src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Test batch
+python -m analyzer.src.main --mode batch --phase status              # Check job statuses
 ```
 
 ## Architecture
 
 ```
 analyzer/
-├── requirements.txt
-│
 ├── src/
 │   ├── __init__.py
-│   ├── main.py                        # Entry point with CLI
+│   ├── main.py                        # Entry point with CLI (sync + batch routing)
 │   ├── config.py                      # Configuration management
-│   ├── firebase_client.py             # Firebase operations
-│   ├── gemini_client.py               # Gemini API wrapper
+│   ├── firebase_client.py             # Firebase operations + batch_jobs CRUD
+│   ├── gemini_client.py               # Gemini API wrapper (response_schema support)
 │   │
-│   ├── analyzers/                     # Analysis modules
+│   ├── analyzers/                     # Per-video analysis modules (sync mode)
 │   │   ├── __init__.py
 │   │   ├── thumbnail.py               # Vision analysis
 │   │   └── title_description.py       # Combined title+description text analysis
 │   │
-│   ├── processors/                    # Batch processing
+│   ├── batch_api/                     # Gemini Batch API integration
 │   │   ├── __init__.py
-│   │   ├── batch.py                   # Batch orchestration
+│   │   ├── schemas.py                 # Pydantic models for response_schema
+│   │   ├── client.py                  # google-genai SDK wrapper
+│   │   ├── prepare.py                 # Build JSONL request files
+│   │   ├── submit.py                  # Submit jobs + track in Firestore
+│   │   └── import_results.py          # Download results + save to Firestore
+│   │
+│   ├── processors/                    # Sync mode batch orchestration
+│   │   ├── __init__.py
+│   │   ├── batch.py                   # Channel/video iteration
 │   │   └── progress.py                # Progress tracking
 │   │
 │   └── prompts/                       # AI prompts
 │       ├── __init__.py
-│       ├── thumbnail_prompt.py        # Vision analysis prompt
-│       └── title_description_prompt.py # Combined text analysis prompt
+│       ├── thumbnail_prompt.py        # Vision analysis prompt + system instruction
+│       └── title_description_prompt.py # Text analysis prompt + system instruction
 │
 ├── scripts/
 │   └── run_thumbnail_analysis.py
@@ -62,80 +75,88 @@ analyzer/
     └── conftest.py                    # Pytest fixtures
 ```
 
-## Core Components
+## Processing Modes
 
-### 1. Gemini Client
+### Sync Mode (default)
 
-```python
-# src/gemini_client.py
-import google.generativeai as genai
+Per-video API calls using the `google-generativeai` SDK. Each video is processed sequentially with 0.5s delay between calls for rate limiting.
 
-model = genai.GenerativeModel(
-    model_name='gemini-2.0-flash',
-    generation_config={
-        'temperature': 0.1,      # Low for consistent JSON output
-        'top_p': 0.95,
-        'max_output_tokens': 8192,
-    }
-)
+Both sync and batch modes use:
+- **`response_schema`**: Pydantic models (`ThumbnailAnalysisSchema`, `TitleDescriptionAnalysisSchema`) guarantee valid JSON output
+- **`system_instruction`**: Concise role/domain context set on the model
+- **User prompts**: Shorter analysis instructions (no JSON template needed since schema enforces structure)
 
-# Vision analysis (thumbnails)
-def analyze_image(prompt: str, image_data: bytes) -> Dict[str, Any]:
-    image = Image.open(io.BytesIO(image_data))
-    response = model.generate_content([prompt, image])
-    return json.loads(response.text)
-
-# Text analysis (title + description)
-def analyze_text(prompt: str, text: str) -> Dict[str, Any]:
-    response = model.generate_content(f"{prompt}\n\nText:\n{text}")
-    return json.loads(response.text)
+```bash
+python -m analyzer.src.main --type thumbnail
+python -m analyzer.src.main --type title_description --channel UCxxx --limit 50
 ```
 
-### 2. Thumbnail Analyzer
+### Batch Mode (Gemini Batch API)
 
-Extracts **~109 attributes** using vision AI across categories:
+Submits all requests as a JSONL file to the Gemini Batch API. Google processes them asynchronously (hours). 50% cheaper than sync because Google schedules work during low-demand periods.
 
-- **Composition**: Layout type, grid structure, complexity, focal point
-- **Human Presence**: Face count, expression, eye contact, gestures
-- **Text Elements**: Content, languages, Telugu script, position, readability
-- **Colors**: Dominant colors with hex/percentage, palette, contrast
-- **Food**: Dish identification, steam, presentation, appetite appeal (for cooking channels)
-- **Graphics**: Arrows, badges, borders, effects
-- **Psychology**: Curiosity gap, social proof, primary emotion
-- **Scores**: Clickability, clarity, predicted CTR
+Works on all paid tiers. Tier 1 has a 3M enqueued token limit (~680 requests per job), so you process in smaller batches. Tier 2+ allows up to 50K requests per job.
 
-### 3. Title + Description Analyzer
+#### 4-Phase Workflow
 
-Single API call analyzing both title and description together. Description context improves niche detection (e.g., ingredient list confirms `isRecipe`).
-
-**Title fields (~120)**: Structure, language mix, hooks, power words, keywords, content signals, Telugu-specific patterns
-
-**Description fields (~20, lean)**: Structure, timestamps, recipe content, hashtags, CTAs, SEO signals
-
-### 4. Batch Processor
-
-```python
-class BatchProcessor:
-    def __init__(self, analysis_type: str):
-        self.analysis_type = analysis_type
-        self.analyzer = analyzers[analysis_type]
-        self.progress = ProgressTracker(analysis_type)
-
-    def process_channel(self, channel_id: str, limit: int = None):
-        videos = get_unanalyzed_videos(channel_id, self.analysis_type, limit)
-        for video in tqdm(videos):
-            result = self._analyze_video(channel_id, video)
-            time.sleep(config.REQUEST_DELAY)
 ```
+PREPARE → SUBMIT → POLL → IMPORT
+```
+
+| Phase | What it does | Duration |
+|-------|-------------|----------|
+| `prepare` | Scans Firestore for unanalyzed videos, writes JSONL to `data/batch/` | Minutes |
+| `submit` | Uploads JSONL to Gemini Files API, creates batch job, tracks in Firestore `batch_jobs` | Seconds |
+| `poll` | Checks job status every 60s until terminal state | Hours |
+| `import` | Downloads result JSONL, parses results, saves to Firestore | Minutes |
+| `status` | Shows all tracked batch jobs and states | Instant |
+
+#### Usage
+
+```bash
+# Run all phases sequentially (blocks during poll)
+python -m analyzer.src.main --mode batch --type thumbnail
+
+# Or run phases individually (recommended for production)
+python -m analyzer.src.main --mode batch --phase prepare --type thumbnail
+python -m analyzer.src.main --mode batch --phase submit --type thumbnail
+# ... go do something else, come back later ...
+python -m analyzer.src.main --mode batch --phase status
+python -m analyzer.src.main --mode batch --phase poll --type thumbnail
+python -m analyzer.src.main --mode batch --phase import --type thumbnail
+```
+
+#### Batch API Limits
+
+- 50,000 requests per job
+- 2GB input file size
+- 100 concurrent batch jobs
+
+Enqueued token limits by tier:
+
+| Tier | Limit | Max requests per job | Notes |
+|------|-------|---------------------|-------|
+| Tier 1 | 3M tokens | ~680 | Use `--batch-size 680`, more jobs needed |
+| Tier 2 | 400M tokens | ~50K (API max) | One 50K job at a time |
+| Tier 3 | 1B tokens | ~50K (API max) | Multiple concurrent jobs |
+
+#### Resume Support
+
+Job state is tracked in Firestore `batch_jobs` collection. If interrupted during polling, re-run `--phase poll` to find and resume monitoring the latest active job.
 
 ## Command Line Interface
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--type` | Analysis type: `all`, `thumbnail`, `title_description` | `all` |
-| `--channel` | Specific channel ID to process | All channels |
-| `--limit` | Max videos per channel | No limit |
+| `--type`, `-t` | Analysis type: `all`, `thumbnail`, `title_description` | `all` |
+| `--channel`, `-c` | Specific channel ID to process | All channels |
+| `--limit`, `-l` | Max videos per channel (sync mode) | No limit |
 | `--validate` | Test connections only | False |
+| `--mode`, `-m` | Processing mode: `sync`, `batch` | `sync` |
+| `--phase` | Batch phase: `all`, `prepare`, `submit`, `poll`, `import`, `status` | `all` |
+| `--batch-size` | Max requests per batch job | `50000` |
+| `--poll-interval` | Seconds between poll checks | `60` |
+| `--job-name` | Specific batch job name to poll/import | Auto-detect latest |
 
 ## Data Storage
 
@@ -145,6 +166,8 @@ Analysis results are stored as Firestore subcollections:
 channels/{channelId}/videos/{videoId}/analysis/
 ├── thumbnail           # Thumbnail vision analysis
 └── title_description   # Combined title+description text analysis
+
+batch_jobs/{jobId}      # Batch job tracking (state, request count, import status)
 ```
 
 Legacy analysis types (`title`, `description`, `tags`, `content_structure`) may exist in Firestore from previous runs but are no longer generated. The insights phase falls back to legacy `title` analysis when `title_description` is not available.
@@ -159,6 +182,10 @@ FIREBASE_PROJECT_ID=your-project-id
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk@your-project.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+
+# Optional
+BATCH_SIZE=10                    # Videos per sync processing batch (default: 10)
+BATCH_POLL_INTERVAL=60           # Seconds between batch job poll checks (default: 60)
 ```
 
 ## Testing
@@ -173,7 +200,9 @@ pytest tests/ --cov=src
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `google-generativeai` | >=0.3.0 | Gemini API client |
+| `google-generativeai` | >=0.3.0 | Gemini API client (sync mode) |
+| `google-genai` | >=1.0.0 | Gemini API client (batch mode) |
+| `pydantic` | >=2.0.0 | Response schema models |
 | `firebase-admin` | >=6.4.0 | Firebase Admin SDK |
 | `Pillow` | >=10.2.0 | Image processing |
 | `tqdm` | >=4.66.2 | Progress bars |

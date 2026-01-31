@@ -12,6 +12,7 @@ export interface ChannelsConfig {
     maxVideosPerChannel: number | null;
     includeShorts: boolean;
     includePrivate: boolean;
+    skipShortThumbnails: boolean;
   };
 }
 

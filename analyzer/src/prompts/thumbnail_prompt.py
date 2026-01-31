@@ -1,5 +1,31 @@
 """Thumbnail analysis prompt for Gemini Vision."""
 
+# --- New structured prompts for response_schema mode (batch + improved sync) ---
+
+THUMBNAIL_SYSTEM_INSTRUCTION = (
+    "You are an expert YouTube thumbnail analyst specializing in Telugu cooking and food channels. "
+    "Analyze thumbnails for composition, visual elements, food presentation, text overlays, "
+    "graphic elements, branding, psychological triggers, and technical quality. "
+    "Provide accurate, detailed analysis with specific observations."
+)
+
+THUMBNAIL_USER_PROMPT = (
+    "Analyze this YouTube video thumbnail image.\n\n"
+    "Evaluate:\n"
+    "1. COMPOSITION - Layout type, grid structure, visual balance, focal point, depth of field\n"
+    "2. HUMAN PRESENCE - Face detection, expressions, body language, eye contact, gestures\n"
+    "3. TEXT ELEMENTS - Text content, language/script, styling, purpose, coverage\n"
+    "4. COLORS - Dominant colors with hex codes, palette mood, contrast, saturation\n"
+    "5. FOOD - Dish identification, category, presentation style, appetite appeal (1-10)\n"
+    "6. GRAPHICS - Arrows, circles, borders, badges, split screens, visual effects\n"
+    "7. BRANDING - Channel logo, name visibility, style consistency\n"
+    "8. PSYCHOLOGY - Triggers (curiosity, social proof, urgency, etc.), emotional intensity\n"
+    "9. TECHNICAL QUALITY - Resolution, sharpness, lighting, framing\n"
+    "10. SCORES - Clickability, clarity, professionalism, uniqueness, emotional impact (all 1-10)"
+)
+
+# --- Original monolithic prompt (kept for backward compatibility with sync mode) ---
+
 THUMBNAIL_ANALYSIS_PROMPT = '''Analyze this YouTube video thumbnail image and return a detailed JSON analysis.
 
 IMPORTANT: Return ONLY valid JSON, no markdown formatting or explanation text.

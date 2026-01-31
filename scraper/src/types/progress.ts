@@ -26,6 +26,10 @@ export interface ScrapeProgress {
   quotaUsed?: number;
   quotaDate?: string;  // ISO date string (YYYY-MM-DD) in Pacific Time
 
+  // Incremental Update Tracking
+  lastUpdateAt?: Timestamp | null;
+  lastUpdateNewVideos?: number;
+
   // Timestamps
   startedAt: Timestamp;
   lastProcessedAt: Timestamp;
@@ -35,6 +39,15 @@ export interface ScrapeProgress {
   errorMessage: string | null;
   errorStack: string | null;
   retryCount: number;
+}
+
+export interface UnresolvedChannel {
+  id: string;              // URL-derived ID (from urlToProgressId)
+  sourceUrl: string;
+  errorMessage: string;
+  retryCount: number;
+  firstSeenAt: Timestamp;
+  lastAttemptAt: Timestamp;
 }
 
 export interface SessionStats {

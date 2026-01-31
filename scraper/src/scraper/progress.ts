@@ -220,6 +220,33 @@ export async function getChannelsToProcess(
 }
 
 /**
+ * Update progress after an incremental update of a completed channel.
+ * Increments videosProcessed, sets lastUpdateAt, and saves quota info.
+ * Keeps status as 'completed'.
+ */
+export async function updateProgressForUpdate(
+  channelId: string,
+  newVideosCount: number,
+  newTotalVideos?: number
+): Promise<void> {
+  const progress = await getProgress(channelId);
+  if (!progress) return;
+
+  progress.videosProcessed += newVideosCount;
+  progress.lastUpdateAt = Timestamp.now();
+  progress.lastUpdateNewVideos = newVideosCount;
+  progress.lastProcessedAt = Timestamp.now();
+  progress.quotaUsed = getQuotaUsed();
+  progress.quotaDate = getPacificDate();
+
+  if (newTotalVideos !== undefined) {
+    progress.totalVideos = newTotalVideos;
+  }
+
+  await saveProgress(progress);
+}
+
+/**
  * Check if a channel is already completed
  */
 export async function isChannelCompleted(channelId: string): Promise<boolean> {

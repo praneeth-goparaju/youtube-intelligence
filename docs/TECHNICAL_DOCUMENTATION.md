@@ -31,7 +31,7 @@ The YouTube Intelligence System is a four-phase analytics platform designed to:
 | Scraper | TypeScript + Node.js | YouTube API integration |
 | Database | Firebase Firestore | Structured data storage |
 | File Storage | Firebase Storage | Thumbnail images |
-| AI Analysis | Google Gemini 2.0 Flash | Vision + text analysis (2 calls/video) |
+| AI Analysis | Google Gemini 2.5 Flash | Vision + text analysis (2 calls/video) |
 | Analytics | Python + Pandas | Per-content-type profiling |
 | Recommendations | TypeScript + Gemini | AI-powered suggestions (CLI + API) |
 
@@ -337,7 +337,7 @@ Storage structure:
 
 ### Overview
 
-The analyzer processes scraped data using Google Gemini 2.0 Flash with **2 API calls per video**:
+The analyzer processes scraped data using Google Gemini 2.5 Flash with **2 API calls per video**:
 
 - **Thumbnail Analysis** (vision call): Composition, colors, human presence, text, food, graphics, psychology (~109 fields)
 - **Title + Description Analysis** (combined text call): Single call analyzing both together
@@ -355,7 +355,7 @@ import google.generativeai as genai
 genai.configure(api_key=config.GOOGLE_API_KEY)
 
 _model = genai.GenerativeModel(
-    model_name='gemini-2.0-flash',
+    model_name='gemini-2.5-flash',
     generation_config={
         'temperature': 0.1,      # Low for consistent structured output
         'top_p': 0.95,
@@ -873,7 +873,7 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
 // type = "thumbnail" (vision analysis)
 {
   analyzedAt: "2024-01-25T10:30:00Z",
-  modelUsed: "gemini-2.0-flash",
+  modelUsed: "gemini-2.5-flash",
   analysisVersion: "1.0",
 
   composition: { ... },
@@ -891,7 +891,7 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
 // type = "title_description" (combined text analysis)
 {
   analyzedAt: "2024-01-25T10:30:00Z",
-  modelUsed: "gemini-2.0-flash",
+  modelUsed: "gemini-2.5-flash",
   analysisVersion: "1.0",
   rawTitle: "Original title text",
 
@@ -1019,7 +1019,7 @@ const response = await youtube.videos.list({
 
 ### Google Gemini API
 
-**Model**: `gemini-2.0-flash`
+**Model**: `gemini-2.5-flash`
 
 **Authentication**: API Key via `google-generativeai` SDK
 

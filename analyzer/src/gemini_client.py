@@ -32,26 +32,73 @@ class GeminiResponseError(GeminiAPIError):
 # Initialize the Gemini client
 genai.configure(api_key=config.GOOGLE_API_KEY)
 
-# Model instance
-_model: Optional[genai.GenerativeModel] = None
+# Model instances: keyed by (analysis_type or 'default')
+_models: Dict[str, genai.GenerativeModel] = {}
 
 
-def get_model() -> genai.GenerativeModel:
-    """Get or create Gemini model instance."""
-    global _model
+def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
+    """Get or create Gemini model instance.
 
-    if _model is None:
-        _model = genai.GenerativeModel(
-            model_name=config.GEMINI_MODEL,
-            generation_config={
-                'temperature': 0.1,  # Low temperature for consistent structured output
-                'top_p': 0.95,
-                'top_k': 40,
-                'max_output_tokens': 8192,
-            }
-        )
+    When analysis_type is provided and response_schema models are available,
+    creates a model with system_instruction and response_schema for structured output.
+    Falls back to the default model configuration otherwise.
 
-    return _model
+    Args:
+        analysis_type: Optional analysis type ('thumbnail' or 'title_description')
+                       for schema-aware model creation.
+    """
+    cache_key = analysis_type or 'default'
+
+    if cache_key not in _models:
+        model_kwargs = {
+            'model_name': config.GEMINI_MODEL,
+        }
+        gen_config = {
+            'temperature': 0.1,
+            'top_p': 0.95,
+            'top_k': 40,
+            'max_output_tokens': 8192,
+        }
+
+        # Try to use structured output for specific analysis types
+        if analysis_type:
+            try:
+                system_instruction, response_schema = _get_schema_config(analysis_type)
+                if system_instruction:
+                    model_kwargs['system_instruction'] = system_instruction
+                if response_schema:
+                    gen_config['response_mime_type'] = 'application/json'
+                    gen_config['response_schema'] = response_schema
+            except ImportError:
+                # Pydantic not available — fall back to default
+                pass
+
+        model_kwargs['generation_config'] = gen_config
+        _models[cache_key] = genai.GenerativeModel(**model_kwargs)
+
+    return _models[cache_key]
+
+
+def _get_schema_config(analysis_type: str):
+    """Get system instruction and response schema for an analysis type.
+
+    Returns:
+        Tuple of (system_instruction_string, pydantic_model_class_or_None).
+    """
+    from .prompts import (
+        THUMBNAIL_SYSTEM_INSTRUCTION,
+        TITLE_DESC_SYSTEM_INSTRUCTION,
+    )
+    from .batch_api.schemas import (
+        ThumbnailAnalysisSchema,
+        TitleDescriptionAnalysisSchema,
+    )
+
+    if analysis_type == 'thumbnail':
+        return THUMBNAIL_SYSTEM_INSTRUCTION, ThumbnailAnalysisSchema
+    elif analysis_type == 'title_description':
+        return TITLE_DESC_SYSTEM_INSTRUCTION, TitleDescriptionAnalysisSchema
+    return None, None
 
 
 def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
@@ -130,7 +177,8 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
     raise last_error
 
 
-def analyze_text(prompt: str, text: str, retries: int = 3) -> Dict[str, Any]:
+def analyze_text(prompt: str, text: str, retries: int = 3,
+                 analysis_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Analyze text using Gemini.
 
@@ -138,12 +186,19 @@ def analyze_text(prompt: str, text: str, retries: int = 3) -> Dict[str, Any]:
         prompt: The analysis prompt with instructions
         text: The text to analyze
         retries: Number of retry attempts
+        analysis_type: Optional analysis type for schema-aware model
 
     Returns:
         Parsed JSON response from Gemini
     """
-    model = get_model()
-    full_prompt = f"{prompt}\n\nText to analyze:\n{text}"
+    model = get_model(analysis_type)
+
+    # When using response_schema, use the concise user prompt
+    if analysis_type:
+        from .prompts import TITLE_DESC_USER_PROMPT
+        full_prompt = f"{TITLE_DESC_USER_PROMPT}\n\nText to analyze:\n{text}"
+    else:
+        full_prompt = f"{prompt}\n\nText to analyze:\n{text}"
 
     return _execute_with_retry(
         lambda: model.generate_content(full_prompt),
@@ -151,7 +206,8 @@ def analyze_text(prompt: str, text: str, retries: int = 3) -> Dict[str, Any]:
     )
 
 
-def analyze_image(prompt: str, image_data: Union[bytes, Image.Image], retries: int = 3) -> Dict[str, Any]:
+def analyze_image(prompt: str, image_data: Union[bytes, Image.Image], retries: int = 3,
+                  analysis_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Analyze an image using Gemini Vision.
 
@@ -159,11 +215,12 @@ def analyze_image(prompt: str, image_data: Union[bytes, Image.Image], retries: i
         prompt: The analysis prompt with instructions
         image_data: Image as bytes or PIL Image
         retries: Number of retry attempts
+        analysis_type: Optional analysis type for schema-aware model
 
     Returns:
         Parsed JSON response from Gemini
     """
-    model = get_model()
+    model = get_model(analysis_type)
     image = None
     should_close = False
 
@@ -176,8 +233,15 @@ def analyze_image(prompt: str, image_data: Union[bytes, Image.Image], retries: i
             image = image_data
             should_close = False  # Caller owns this image
 
+        # When using response_schema, use the concise user prompt
+        if analysis_type:
+            from .prompts import THUMBNAIL_USER_PROMPT
+            effective_prompt = THUMBNAIL_USER_PROMPT
+        else:
+            effective_prompt = prompt
+
         return _execute_with_retry(
-            lambda: model.generate_content([prompt, image]),
+            lambda: model.generate_content([effective_prompt, image]),
             retries
         )
     finally:

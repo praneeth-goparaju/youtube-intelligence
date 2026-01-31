@@ -7,8 +7,12 @@ async function main(): Promise<void> {
     // Validate configuration
     validateConfig();
 
+    // Parse CLI flags
+    const updateMode = process.argv.includes('--update');
+    const ignoreQuota = process.argv.includes('--ignore-quota');
+
     // Run the scraper
-    await runScraper();
+    await runScraper({ updateMode, ignoreQuota });
   } catch (error) {
     logger.error(`Fatal error: ${(error as Error).message}`);
     process.exit(1);

@@ -14,6 +14,7 @@ COLLECTION_ANALYSIS = 'analysis'
 COLLECTION_INSIGHTS = 'insights'
 COLLECTION_SCRAPE_PROGRESS = 'scrape_progress'
 COLLECTION_ANALYSIS_PROGRESS = 'analysis_progress'
+COLLECTION_BATCH_JOBS = 'batch_jobs'
 
 # =============================================================================
 # Analysis Types (Phase 2 output)
@@ -39,7 +40,10 @@ INSIGHT_TYPE_SUMMARY = 'summary'
 # AI Model Configuration
 # =============================================================================
 
-GEMINI_MODEL = 'gemini-2.0-flash'
+GEMINI_MODEL = 'gemini-2.5-flash'
+
+# Batch API Analysis Version (tracks schema changes for batch mode)
+BATCH_ANALYSIS_VERSION = '2.0'
 
 # =============================================================================
 # Timestamp Configuration

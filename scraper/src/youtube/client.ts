@@ -3,6 +3,7 @@ import { config } from '../config.js';
 
 let youtubeClient: youtube_v3.Youtube | null = null;
 let quotaUsed = 0;
+let ignoreQuotaChecks = false;
 
 /**
  * Get or create YouTube API client
@@ -44,7 +45,15 @@ export function getQuotaRemaining(): number {
  * Check if quota is nearly exhausted
  */
 export function isQuotaLow(): boolean {
+  if (ignoreQuotaChecks) return false;
   return getQuotaRemaining() <= config.scraper.quotaWarningThreshold;
+}
+
+/**
+ * Set whether to ignore quota checks (for --ignore-quota flag)
+ */
+export function setIgnoreQuota(ignore: boolean): void {
+  ignoreQuotaChecks = ignore;
 }
 
 /**

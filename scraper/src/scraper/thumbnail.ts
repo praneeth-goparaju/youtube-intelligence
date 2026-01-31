@@ -18,34 +18,44 @@ export async function processThumbnailBatch(
   channelId: string,
   onProgress?: (processed: number, total: number) => void
 ): Promise<ThumbnailResult[]> {
+  const CONCURRENCY = 20;
   const results: ThumbnailResult[] = [];
+  let nextIndex = 0;
   let processed = 0;
 
-  for (const videoId of videoIds) {
-    try {
-      const storagePath = await downloadAndUploadThumbnail(videoId, channelId);
-      results.push({
-        videoId,
-        success: true,
-        storagePath,
-      });
-    } catch (error) {
-      results.push({
-        videoId,
-        success: false,
-        error: (error as Error).message,
-      });
-      logger.warn(`Failed to download thumbnail for ${videoId}: ${(error as Error).message}`);
-    }
+  async function worker(): Promise<void> {
+    while (nextIndex < videoIds.length) {
+      const idx = nextIndex++;
+      const videoId = videoIds[idx];
 
-    processed++;
-    if (onProgress) {
-      onProgress(processed, videoIds.length);
-    }
+      try {
+        const storagePath = await downloadAndUploadThumbnail(videoId, channelId);
+        results.push({
+          videoId,
+          success: true,
+          storagePath,
+        });
+      } catch (error) {
+        results.push({
+          videoId,
+          success: false,
+          error: (error as Error).message,
+        });
+        logger.warn(`Failed to download thumbnail for ${videoId}: ${(error as Error).message}`);
+      }
 
-    // Small delay to prevent overwhelming the server
-    await delay(50);
+      processed++;
+      if (onProgress) {
+        onProgress(processed, videoIds.length);
+      }
+    }
   }
+
+  const workers = Array.from(
+    { length: Math.min(CONCURRENCY, videoIds.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
 
   return results;
 }

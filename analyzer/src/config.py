@@ -63,6 +63,11 @@ class Config:
     RETRY_DELAY: float = 1.0
     REQUEST_DELAY: float = 0.5  # Delay between API requests
 
+    # Batch API settings
+    GCS_BUCKET_URI: str = f"gs://{get_env('FIREBASE_STORAGE_BUCKET')}"
+    BATCH_POLL_INTERVAL: int = int(get_env('BATCH_POLL_INTERVAL', False, '60'))
+    BATCH_MAX_REQUESTS: int = 50000  # Gemini Batch API limit per job
+
     # Paths
     PROJECT_ROOT: Path = PROJECT_ROOT
 

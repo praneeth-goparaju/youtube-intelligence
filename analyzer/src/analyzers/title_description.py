@@ -50,8 +50,11 @@ class TitleDescriptionAnalyzer:
             # Build combined input text
             input_text = self._build_input_text(title, description)
 
-            # Analyze with Gemini (single API call)
-            result = analyze_text(TITLE_DESCRIPTION_ANALYSIS_PROMPT, input_text)
+            # Analyze with Gemini (single API call, uses response_schema when available)
+            result = analyze_text(
+                TITLE_DESCRIPTION_ANALYSIS_PROMPT, input_text,
+                analysis_type=self.ANALYSIS_TYPE,
+            )
 
             # Add metadata
             result['analyzedAt'] = datetime.utcnow().isoformat()

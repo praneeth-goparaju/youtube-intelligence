@@ -71,8 +71,11 @@ scraper/
 │       └── logger.ts         # Console logging
 │
 ├── scripts/
-│   ├── validate.ts           # Test API connections
-│   └── reset-progress.ts     # Clear progress data
+│   ├── validate.ts                  # Test API connections
+│   ├── reset-progress.ts            # Clear progress data
+│   ├── check-status.ts              # Show scrape progress summary
+│   ├── delete-short-thumbnails.ts   # Remove thumbnails for Shorts from Storage
+│   └── migrate-unresolved.ts        # Retry unresolved channel URLs
 │
 └── tests/
     ├── utils/
@@ -160,6 +163,8 @@ interface ScrapeProgress {
   videosProcessed: number;
   lastProcessedVideoId: string | null;
   lastPlaylistPageToken: string | null;
+  lastUpdateAt: Timestamp | null;       // Last incremental update timestamp
+  lastUpdateNewVideos: number;           // Videos found in last update
   startedAt: Timestamp;
   lastProcessedAt: Timestamp;
 }
@@ -263,7 +268,9 @@ Quality setting: `mqdefault` (320x180) for storage efficiency.
 
 ### Run Scraper
 ```bash
-npm start
+npm start                          # Full initial scrape
+npm start -- --update              # Incremental update (new videos only for completed channels)
+npm start -- --ignore-quota        # Ignore quota checks
 ```
 
 ### Validate Connections
@@ -277,12 +284,33 @@ Tests:
 - Firebase Storage access
 - Channel URL resolution
 
+### Check Scrape Status
+```bash
+npx tsx scripts/check-status.ts
+```
+
+Shows progress summary: completed, in-progress, failed, and pending channels.
+
 ### Reset Progress
 ```bash
 npx tsx scripts/reset-progress.ts
 ```
 
 Clears all progress documents to re-scrape from scratch.
+
+### Delete Short Thumbnails
+```bash
+npx tsx scripts/delete-short-thumbnails.ts
+```
+
+Removes thumbnails for Shorts from Firebase Storage (saves storage space).
+
+### Migrate Unresolved Channels
+```bash
+npx tsx scripts/migrate-unresolved.ts
+```
+
+Retries channel URLs that previously failed resolution.
 
 ### Run Tests
 ```bash
@@ -328,7 +356,8 @@ Edit `config/channels.json`:
   "settings": {
     "maxVideosPerChannel": null,
     "includeShorts": true,
-    "includePrivate": false
+    "includePrivate": false,
+    "skipShortThumbnails": true
   }
 }
 ```

@@ -23,7 +23,7 @@ import {
   getPostingRecommendation,
 } from './recommendation-core';
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 /**
  * Main recommendation engine class
