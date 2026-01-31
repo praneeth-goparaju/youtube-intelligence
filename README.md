@@ -93,12 +93,12 @@ npm start -- --update                      # Incremental update (new videos only
 
 # Phase 2: Analyze with AI (after scraping completes)
 cd ../analyzer
-python -m analyzer.src.main                                   # Sync mode (per-video)
-python -m analyzer.src.main --mode batch --type thumbnail     # Batch mode (50% cheaper)
+python -m src.main                                   # Sync mode (per-video)
+python -m src.main --mode batch --type thumbnail     # Batch mode (50% cheaper)
 
 # Phase 3: Generate insights (after analysis completes)
 cd ../insights
-python src/main.py
+python -m src.main
 
 # Phase 4: Get recommendations (two options)
 

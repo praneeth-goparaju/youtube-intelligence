@@ -20,17 +20,17 @@ Supports two processing modes:
 pip install -r requirements.txt   # run from project root, or ../requirements.txt from analyzer/
 
 # Validate connections
-python -m analyzer.src.main --validate
+python -m src.main --validate
 
 # Sync mode (default)
-python -m analyzer.src.main                                          # All analysis types
-python -m analyzer.src.main --type thumbnail                         # Thumbnail only
-python -m analyzer.src.main --type title_description --channel UCxxx --limit 50
+python -m src.main                                          # All analysis types
+python -m src.main --type thumbnail                         # Thumbnail only
+python -m src.main --type title_description --channel UCxxx --limit 50
 
 # Batch mode (50% cost savings)
-python -m analyzer.src.main --mode batch --type thumbnail            # Full pipeline
-python -m analyzer.src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Test batch
-python -m analyzer.src.main --mode batch --phase status              # Check job statuses
+python -m src.main --mode batch --type thumbnail            # Full pipeline
+python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Test batch
+python -m src.main --mode batch --phase status              # Check job statuses
 ```
 
 ## Architecture
@@ -87,8 +87,8 @@ Both sync and batch modes use:
 - **User prompts**: Shorter analysis instructions (no JSON template needed since schema enforces structure)
 
 ```bash
-python -m analyzer.src.main --type thumbnail
-python -m analyzer.src.main --type title_description --channel UCxxx --limit 50
+python -m src.main --type thumbnail
+python -m src.main --type title_description --channel UCxxx --limit 50
 ```
 
 ### Batch Mode (Gemini Batch API)
@@ -115,15 +115,15 @@ PREPARE → SUBMIT → POLL → IMPORT
 
 ```bash
 # Run all phases sequentially (blocks during poll)
-python -m analyzer.src.main --mode batch --type thumbnail
+python -m src.main --mode batch --type thumbnail
 
 # Or run phases individually (recommended for production)
-python -m analyzer.src.main --mode batch --phase prepare --type thumbnail
-python -m analyzer.src.main --mode batch --phase submit --type thumbnail
+python -m src.main --mode batch --phase prepare --type thumbnail
+python -m src.main --mode batch --phase submit --type thumbnail
 # ... go do something else, come back later ...
-python -m analyzer.src.main --mode batch --phase status
-python -m analyzer.src.main --mode batch --phase poll --type thumbnail
-python -m analyzer.src.main --mode batch --phase import --type thumbnail
+python -m src.main --mode batch --phase status
+python -m src.main --mode batch --phase poll --type thumbnail
+python -m src.main --mode batch --phase import --type thumbnail
 ```
 
 #### Batch API Limits

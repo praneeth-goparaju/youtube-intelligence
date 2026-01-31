@@ -718,16 +718,16 @@ PREPARE → SUBMIT → POLL → IMPORT
 
 ```bash
 # Run all phases sequentially
-python -m analyzer.src.main --mode batch --type thumbnail
+python -m src.main --mode batch --type thumbnail
 
 # Or run phases individually
-python -m analyzer.src.main --mode batch --phase prepare --type thumbnail
-python -m analyzer.src.main --mode batch --phase submit --type thumbnail
-python -m analyzer.src.main --mode batch --phase poll --type thumbnail
-python -m analyzer.src.main --mode batch --phase import --type thumbnail
+python -m src.main --mode batch --phase prepare --type thumbnail
+python -m src.main --mode batch --phase submit --type thumbnail
+python -m src.main --mode batch --phase poll --type thumbnail
+python -m src.main --mode batch --phase import --type thumbnail
 
 # Check status of all jobs
-python -m analyzer.src.main --mode batch --phase status
+python -m src.main --mode batch --phase status
 ```
 
 #### Batch Request Key Format
@@ -1515,9 +1515,9 @@ npm start  # Run scraper
 # Phase 2: Analyzer (after scraping completes)
 cd ../analyzer
 pip install -r ../requirements.txt
-python -m analyzer.src.main --validate              # Test connections
-python -m analyzer.src.main                          # Sync mode (all types)
-python -m analyzer.src.main --mode batch --type all  # Batch mode (50% cheaper)
+python -m src.main --validate              # Test connections
+python -m src.main                          # Sync mode (all types)
+python -m src.main --mode batch --type all  # Batch mode (50% cheaper)
 
 # Phase 3: Insights (after analysis completes)
 cd ../insights

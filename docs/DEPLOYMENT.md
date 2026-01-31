@@ -100,8 +100,9 @@ npm install
 cd scraper
 npx tsx scripts/validate.ts
 
-# Test Gemini API (from project root)
-python -m analyzer.src.main --validate
+# Test Gemini API
+cd ../analyzer
+python -m src.main --validate
 ```
 
 ### 5. Run the Pipeline
@@ -111,11 +112,13 @@ python -m analyzer.src.main --validate
 cd scraper
 npm start
 
-# Phase 2: Analyze (after scraping, from project root)
-python -m analyzer.src.main
+# Phase 2: Analyze (after scraping)
+cd ../analyzer
+python -m src.main
 
-# Phase 3: Generate insights (from project root)
-python -m insights.src.main
+# Phase 3: Generate insights
+cd ../insights
+python -m src.main
 
 # Phase 4: Get recommendations
 cd ../functions
@@ -270,10 +273,10 @@ crontab -e
 0 1 * * * cd /opt/youtube-intelligence/scraper && npm start >> /var/log/yt-scraper.log 2>&1
 
 # Analyzer: Daily at 6 AM
-0 6 * * * cd /opt/youtube-intelligence && source venv/bin/activate && python -m analyzer.src.main >> /var/log/yt-analyzer.log 2>&1
+0 6 * * * cd /opt/youtube-intelligence/analyzer && source ../venv/bin/activate && python -m src.main >> /var/log/yt-analyzer.log 2>&1
 
 # Insights: Weekly on Sunday at noon
-0 12 * * 0 cd /opt/youtube-intelligence && source venv/bin/activate && python -m insights.src.main >> /var/log/yt-insights.log 2>&1
+0 12 * * 0 cd /opt/youtube-intelligence/insights && source ../venv/bin/activate && python -m src.main >> /var/log/yt-insights.log 2>&1
 ```
 
 ---
@@ -413,7 +416,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r analyzer/requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run analyzer
         env:
@@ -422,7 +425,7 @@ jobs:
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-        run: python -m analyzer.src.main
+        run: cd analyzer && python -m src.main
 
   insights:
     needs: analyzer
@@ -437,14 +440,14 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r insights/requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Generate insights
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-        run: python -m insights.src.main
+        run: cd insights && python -m src.main
 ```
 
 ---
@@ -634,7 +637,7 @@ firebase firestore:delete scrape_progress --recursive --project=YOUR_PROJECT
 
 ```bash
 # Re-run analyzer for a specific channel
-python -m analyzer.src.main --type thumbnail --channel CHANNEL_ID
+cd analyzer && python -m src.main --type thumbnail --channel CHANNEL_ID
 ```
 
 ---

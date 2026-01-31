@@ -49,22 +49,22 @@ npx tsx scripts/migrate-unresolved.ts      # Retry unresolved channel URLs
 cd analyzer
 
 # Sync mode (default — per-video API calls)
-python -m analyzer.src.main --type thumbnail                                 # Thumbnail vision analysis only
-python -m analyzer.src.main --type title_description                         # Combined title+description text analysis only
-python -m analyzer.src.main --type title_description --channel CHANNEL_ID    # Specific channel
-python -m analyzer.src.main --limit 50                                       # Limit videos per channel
-python -m analyzer.src.main --validate                                       # Test connections only
+python -m src.main --type thumbnail                                 # Thumbnail vision analysis only
+python -m src.main --type title_description                         # Combined title+description text analysis only
+python -m src.main --type title_description --channel CHANNEL_ID    # Specific channel
+python -m src.main --limit 50                                       # Limit videos per channel
+python -m src.main --validate                                       # Test connections only
 
 # Batch mode (Gemini Batch API — 50% cost savings, requires Tier 2+)
-python -m analyzer.src.main --mode batch --type thumbnail                              # Full: prepare → submit → poll → import
-python -m analyzer.src.main --mode batch --type all                                    # Both analysis types
-python -m analyzer.src.main --mode batch --phase prepare --type thumbnail              # Only build JSONL file
-python -m analyzer.src.main --mode batch --phase submit --type thumbnail               # Submit prepared JSONL
-python -m analyzer.src.main --mode batch --phase poll --type thumbnail                 # Poll running job until done
-python -m analyzer.src.main --mode batch --phase import --type thumbnail               # Import completed results to Firestore
-python -m analyzer.src.main --mode batch --phase status                                # Show all batch job statuses
-python -m analyzer.src.main --mode batch --channel UCxxx --type thumbnail              # Single channel
-python -m analyzer.src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch
+python -m src.main --mode batch --type thumbnail                              # Full: prepare → submit → poll → import
+python -m src.main --mode batch --type all                                    # Both analysis types
+python -m src.main --mode batch --phase prepare --type thumbnail              # Only build JSONL file
+python -m src.main --mode batch --phase submit --type thumbnail               # Submit prepared JSONL
+python -m src.main --mode batch --phase poll --type thumbnail                 # Poll running job until done
+python -m src.main --mode batch --phase import --type thumbnail               # Import completed results to Firestore
+python -m src.main --mode batch --phase status                                # Show all batch job statuses
+python -m src.main --mode batch --channel UCxxx --type thumbnail              # Single channel
+python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch
 
 pytest tests/                                                                          # Run tests
 ```
@@ -72,9 +72,9 @@ pytest tests/                                                                   
 ### Insights (Phase 3)
 ```bash
 cd insights
-python src/main.py                    # Generate all insights (profiles + gaps)
-python src/main.py --type profiles    # Per-content-type profiles only
-python src/main.py --type gaps        # Content gap analysis only
+python -m src.main                    # Generate all insights (profiles + gaps)
+python -m src.main --type profiles    # Per-content-type profiles only
+python -m src.main --type gaps        # Content gap analysis only
 pytest tests/
 ```
 
