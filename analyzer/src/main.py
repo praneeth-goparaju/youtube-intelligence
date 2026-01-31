@@ -16,9 +16,9 @@ def main():
     )
     parser.add_argument(
         '--type', '-t',
-        choices=['all', 'thumbnail', 'title', 'description', 'tags', 'content_structure'],
+        choices=['all', 'thumbnail', 'title_description'],
         default='all',
-        help='Type of analysis to run (content_structure infers video structure from metadata)'
+        help='Type of analysis to run (thumbnail=vision, title_description=combined text)'
     )
     parser.add_argument(
         '--limit', '-l',
@@ -82,7 +82,7 @@ def main():
     if args.channel:
         # Process single channel
         if args.type == 'all':
-            for analysis_type in ['thumbnail', 'title', 'description', 'tags', 'content_structure']:
+            for analysis_type in ['thumbnail', 'title_description']:
                 print(f"\nProcessing {analysis_type} analysis for channel {args.channel}...")
                 processor = BatchProcessor(analysis_type)
                 stats = processor.process_channel(args.channel, limit=args.limit)

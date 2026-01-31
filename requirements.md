@@ -1,5 +1,24 @@
 # YouTube Intelligence System - Complete Specification
 
+> **Implementation Notes (2026-01):** This is the original requirements document. The actual
+> implementation differs from this spec in several important ways:
+>
+> - **AI Model**: Uses **Gemini 2.0 Flash** (not Claude/Anthropic) for all AI analysis
+> - **Phase 2**: Reduced from 5 analysis types to **2 Gemini API calls per video**:
+>   - **Thumbnail** (vision call): ~109 fields
+>   - **Title + Description** (combined text call): ~140 fields
+>   - Tags and content_structure analyzers were removed (data was unused by Phase 3)
+> - **Phase 3**: Rebuilt as **per-content-type profiling** (not correlations/patterns):
+>   - Groups videos by `contentSignals.contentType` (recipe, vlog, etc.)
+>   - Compares all videos vs top 10% by `viewsPerSubscriber` (not raw viewCount)
+>   - Pure data summarizer — no interpretation, no ML
+>   - Output: `insights/{contentType}`, `insights/contentGaps`, `insights/summary`
+> - **Phase 4**: Implemented in **TypeScript** (not Python) as CLI + Firebase Functions API
+> - **Project structure**: See CLAUDE.md for current file layout
+> - **Analysis schemas**: Thumbnail schema below is accurate. Title + description are now
+>   combined in a single `title_description` analysis type. Tags and content_structure
+>   analysis types no longer exist. Description and tags schemas below are historical only.
+
 ## 🎯 Project Overview
 
 Build a comprehensive YouTube analytics system that:

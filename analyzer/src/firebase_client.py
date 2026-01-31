@@ -91,27 +91,69 @@ def get_video(channel_id: str, video_id: str) -> Optional[Dict[str, Any]]:
 
 
 def get_unanalyzed_videos(channel_id: str, analysis_type: str, limit: int = 100) -> List[Dict[str, Any]]:
-    """Get videos that haven't been analyzed yet for a specific analysis type."""
-    db = get_db()
+    """Get videos that haven't been analyzed yet for a specific analysis type.
 
-    # Get all videos
+    Note: For large channels, prefer get_unanalyzed_videos_paginated() which
+    uses Firestore cursors to avoid loading all videos into memory.
+    """
+    return get_unanalyzed_videos_paginated(channel_id, analysis_type, limit)
+
+
+def get_unanalyzed_videos_paginated(
+    channel_id: str,
+    analysis_type: str,
+    limit: int = 100,
+    page_size: int = 100,
+) -> List[Dict[str, Any]]:
+    """Get unanalyzed videos using paginated Firestore queries.
+
+    Fetches videos in pages to avoid loading all channel videos into memory
+    at once. This is important for channels with thousands of videos.
+
+    Args:
+        channel_id: The channel ID to fetch videos for.
+        analysis_type: The analysis type to check (thumbnail, title_description).
+        limit: Maximum number of unanalyzed videos to return.
+        page_size: Number of videos to fetch per Firestore query page.
+
+    Returns:
+        List of unanalyzed video dicts with 'id' field.
+    """
+    db = get_db()
     videos_ref = db.collection('channels').document(channel_id).collection('videos')
-    all_videos = list(videos_ref.limit(limit * 2).stream())  # Get more to account for already analyzed
 
     unanalyzed = []
-    for video_doc in all_videos:
-        if len(unanalyzed) >= limit:
+    last_doc = None
+
+    while len(unanalyzed) < limit:
+        # Build paginated query
+        query = videos_ref.order_by('__name__').limit(page_size)
+        if last_doc is not None:
+            query = query.start_after(last_doc)
+
+        docs = list(query.stream())
+        if not docs:
+            break  # No more videos
+
+        last_doc = docs[-1]
+
+        for video_doc in docs:
+            if len(unanalyzed) >= limit:
+                break
+
+            video_id = video_doc.id
+            # Check if analysis already exists
+            analysis_doc = (videos_ref.document(video_id)
+                           .collection('analysis')
+                           .document(analysis_type)
+                           .get())
+
+            if not analysis_doc.exists:
+                unanalyzed.append({'id': video_id, **video_doc.to_dict()})
+
+        # If we got fewer docs than page_size, we've reached the end
+        if len(docs) < page_size:
             break
-
-        video_id = video_doc.id
-        # Check if analysis exists
-        analysis_doc = (videos_ref.document(video_id)
-                       .collection('analysis')
-                       .document(analysis_type)
-                       .get())
-
-        if not analysis_doc.exists:
-            unanalyzed.append({'id': video_id, **video_doc.to_dict()})
 
     return unanalyzed
 

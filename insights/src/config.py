@@ -25,9 +25,6 @@ class Config:
     PROJECT_ROOT: Path = PROJECT_ROOT
     OUTPUTS_DIR: Path = Path(__file__).parent.parent / 'outputs'
 
-    # Analysis settings
-    MIN_VIDEOS_FOR_CORRELATION: int = 50
-    PERCENTILE_THRESHOLDS: list = [10, 25, 50, 75, 90, 95]
 
 
 config = Config()

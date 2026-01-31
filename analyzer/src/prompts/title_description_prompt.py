@@ -1,19 +1,37 @@
-"""Title analysis prompt for Gemini."""
+"""Combined title + description analysis prompt for Gemini.
 
-TITLE_ANALYSIS_PROMPT = '''Analyze this YouTube video title and return a detailed JSON analysis.
+Merges title and description analysis into a single API call.
+Title analysis retains all fields. Description analysis is lean (~20 fields).
+The description context helps Gemini make better niche/content-type decisions.
+"""
+
+TITLE_DESCRIPTION_ANALYSIS_PROMPT = '''Analyze this YouTube video title AND description together, and return a detailed JSON analysis.
 
 IMPORTANT: Return ONLY valid JSON, no markdown formatting or explanation text.
 
-This is for a Telugu YouTube channel. Analyze:
+This is for a Telugu YouTube channel. The description provides additional context that should inform your title analysis (e.g., ingredient lists confirm a recipe, timestamps reveal structure).
 
+## TITLE ANALYSIS
+
+Analyze the title for:
 1. STRUCTURE - Pattern, segments, separators, length
 2. LANGUAGE - Telugu/English mix, code-switching, scripts
 3. HOOKS & TRIGGERS - Power words, emotional triggers, question hooks
 4. KEYWORDS - Primary/secondary keywords, search intent, SEO
 5. FORMATTING - Capitalization, emojis, special characters
-6. CONTENT SIGNALS - Content type, format indicators
+6. CONTENT SIGNALS - Content type, format indicators (use description to confirm/enrich)
 7. TELUGU-SPECIFIC - Register, dialect, food terms
 8. COMPETITIVE - Uniqueness, differentiation
+
+## DESCRIPTION ANALYSIS
+
+Analyze the description for (lean analysis only):
+1. STRUCTURE - Length, organization, first line hook
+2. TIMESTAMPS - Chapter markers
+3. RECIPE CONTENT - Ingredients, instructions, cooking time (if applicable)
+4. HASHTAGS - Count and position
+5. CALL TO ACTIONS - Subscribe, like, comment prompts
+6. SEO - Keyword placement, density, internal linking
 
 Return this exact JSON structure:
 
@@ -178,5 +196,39 @@ Return this exact JSON structure:
     "overallScore": 1-10,
     "predictedPerformance": "below-average|average|above-average|exceptional",
     "suggestions": ["list of improvement suggestions"]
+  },
+  "descriptionAnalysis": {
+    "structure": {
+      "length": number,
+      "lineCount": number,
+      "wellOrganized": true/false,
+      "firstLineHook": true/false
+    },
+    "timestamps": {
+      "hasTimestamps": true/false,
+      "timestampCount": number
+    },
+    "recipeContent": {
+      "hasIngredients": true/false,
+      "ingredientCount": number,
+      "hasInstructions": true/false,
+      "instructionSteps": number,
+      "hasCookingTime": true/false
+    },
+    "hashtags": {
+      "count": number,
+      "position": "start|middle|end|throughout|none"
+    },
+    "ctas": {
+      "hasSubscribeCTA": true/false,
+      "hasLikeCTA": true/false,
+      "hasCommentCTA": true/false,
+      "commentQuestion": "question text or null"
+    },
+    "seo": {
+      "keywordInFirst100Chars": true/false,
+      "keywordDensity": decimal,
+      "internalLinking": "none|minimal|good|excellent"
+    }
   }
 }'''

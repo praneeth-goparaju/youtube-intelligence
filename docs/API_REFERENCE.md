@@ -236,37 +236,21 @@ result = analyzer.analyze(video_data)
 **Parameters:**
 - `video_data`: Dict with `thumbnailStoragePath`
 
-**Returns:** Dict with 50+ attributes (see Technical Documentation)
+**Returns:** Dict with ~109 attributes (composition, humanPresence, textElements, colors, food, graphics, branding, psychology, technicalQuality, scores)
 
-#### `TitleAnalyzer`
+#### `TitleDescriptionAnalyzer`
 
 ```python
-from src.analyzers.title import TitleAnalyzer
+from src.analyzers.title_description import TitleDescriptionAnalyzer
 
-analyzer = TitleAnalyzer()
+analyzer = TitleDescriptionAnalyzer()
 result = analyzer.analyze(video_data)
 ```
 
 **Parameters:**
-- `video_data`: Dict with `title`
+- `video_data`: Dict with `title` and `description`
 
-#### `DescriptionAnalyzer`
-
-```python
-from src.analyzers.description import DescriptionAnalyzer
-
-analyzer = DescriptionAnalyzer()
-result = analyzer.analyze(video_data)
-```
-
-#### `TagsAnalyzer`
-
-```python
-from src.analyzers.tags import TagsAnalyzer
-
-analyzer = TagsAnalyzer()
-result = analyzer.analyze(video_data)
-```
+**Returns:** Dict with ~140 attributes covering title analysis (structure, language, hooks, keywords, contentSignals, teluguAnalysis) and lean description analysis (structure, timestamps, recipeContent, hashtags, callToActions, seo)
 
 ### Batch Processor
 
@@ -285,7 +269,7 @@ processor.process_all_channels(limit=50)
 ```
 
 **Parameters:**
-- `analysis_type`: `'thumbnail'`, `'title'`, `'description'`, or `'tags'`
+- `analysis_type`: `'thumbnail'` or `'title_description'`
 
 ### Firebase Client
 
@@ -338,78 +322,51 @@ exists = has_analysis('UCxxx', 'videoId', 'thumbnail')
 
 ## Insights API (Python)
 
-### Correlation Analyzer
+### Content Type Profiler
 
-#### `CorrelationAnalyzer`
-
-```python
-from src.correlations import CorrelationAnalyzer
-
-analyzer = CorrelationAnalyzer(videos_with_analysis)
-correlations = analyzer.find_top_correlations(target='view_count')
-```
-
-**Returns:**
-```python
-[
-    {
-        'feature': 'psychology_curiosityGap',
-        'correlation': 0.42,
-        'p_value': 0.001,
-        'direction': 'positive'
-    },
-    ...
-]
-```
-
-### Pattern Extractor
-
-#### `PatternExtractor`
+#### `ContentTypeProfiler`
 
 ```python
-from src.patterns import PatternExtractor
+from src.profiler import ContentTypeProfiler
 
-extractor = PatternExtractor(videos_with_analysis)
-
-# Extract thumbnail patterns
-thumbnail_patterns = extractor.extract_thumbnail_patterns()
-
-# Extract title patterns
-title_patterns = extractor.extract_title_patterns()
-
-# Extract timing patterns
-timing_patterns = extractor.extract_timing_patterns()
+profiler = ContentTypeProfiler(videos_with_analyses)
+profiles = profiler.generate_all_profiles()
 ```
 
-**Thumbnail/Title Pattern Return:**
-```python
-[
-    {
-        'element': 'surprised-expression',
-        'top_rate': 0.65,
-        'all_rate': 0.25,
-        'lift': 2.6
-    },
-    ...
-]
-```
+Generates per-content-type profiles comparing all videos vs top 10% (by `viewsPerSubscriber`).
 
-**Timing Pattern Return:**
+**Returns:** Dict of content type profiles, each containing:
 ```python
 {
-    'byDayOfWeek': [
-        {'day': 'Saturday', 'avgViews': 125000, 'multiplier': 1.4}
-    ],
-    'byHourIST': [
-        {'hour': 18, 'avgViews': 130000, 'multiplier': 1.46}
-    ],
-    'optimal': {
-        'day': 'Saturday',
-        'hourIST': 18,
-        'multiplier': 1.6
+    "recipe": {
+        "contentType": "recipe",
+        "videoCount": 12500,
+        "topPercentileThreshold": 3.2,
+        "thumbnail": {
+            "composition.layoutType": {
+                "type": "categorical",
+                "all": {"split-screen": 35, "single-focus": 40, ...},
+                "top10": {"split-screen": 55, "single-focus": 30, ...}
+            },
+            "humanPresence.facePresent": {
+                "type": "boolean",
+                "all": {"true_pct": 65, "false_pct": 35},
+                "top10": {"true_pct": 85, "false_pct": 15}
+            },
+            # ... more features
+        },
+        "title": {
+            # ... title features
+        }
     }
 }
 ```
+
+Feature types are auto-detected:
+- **boolean**: `{true_pct, false_pct}`
+- **numeric**: `{mean, median, p25, p75}`
+- **categorical**: `{value: percentage, ...}`
+- **list**: `{item: frequency, ...}`
 
 ### Gap Analyzer
 
@@ -418,42 +375,21 @@ timing_patterns = extractor.extract_timing_patterns()
 ```python
 from src.gaps import GapAnalyzer
 
-analyzer = GapAnalyzer(videos_with_analysis)
-
-# Find content gaps
-gaps = analyzer.find_content_gaps()
-
-# Analyze keyword gaps
-keyword_gaps = analyzer.analyze_keyword_gaps()
+analyzer = GapAnalyzer(videos_with_analyses)
+gaps = analyzer.analyze()
 ```
 
 **Returns:**
 ```python
-[
-    {
-        'topic': 'cooking/indo-chinese',
-        'avgViews': 85000,
-        'videoCount': 45,
-        'opportunityScore': 1847
+{
+    "contentTypeBreakdown": {
+        "recipe": {"count": 12500, "avgVPS": 1.8, "topVPS": 5.2},
+        "vlog": {"count": 8000, "avgVPS": 1.2, "topVPS": 3.8}
     },
-    ...
-]
-```
-
-### Report Generator
-
-#### `ReportGenerator`
-
-```python
-from src.reports import ReportGenerator
-
-generator = ReportGenerator()
-
-# Save to Firestore and local file
-generator.save_thumbnail_insights(patterns, correlations)
-generator.save_title_insights(patterns, power_words)
-generator.save_timing_insights(timing_data)
-generator.save_content_gaps(gaps)
+    "keywordOpportunities": [
+        {"keyword": "air fryer", "count": 15, "avgVPS": 4.5, "opportunity": "high"}
+    ]
+}
 ```
 
 ---
@@ -682,7 +618,9 @@ const teluguWords = POWER_WORDS.telugu;
 
 #### `channels/{channelId}/videos/{videoId}/analysis/{type}`
 
-Types: `thumbnail`, `title`, `description`, `tags`
+Types: `thumbnail`, `title_description`
+
+Legacy types (`title`, `description`, `tags`, `content_structure`) may exist from previous runs but are no longer generated.
 
 See [Technical Documentation](TECHNICAL_DOCUMENTATION.md) for full schemas.
 
@@ -708,11 +646,19 @@ See [Technical Documentation](TECHNICAL_DOCUMENTATION.md) for full schemas.
 }
 ```
 
-#### `insights/{type}`
+#### `insights/{contentType}` (e.g., `insights/recipe`)
 
-Types: `thumbnails`, `titles`, `timing`, `contentGaps`
+Per-content-type profiles with feature comparisons (all vs top 10%).
 
-See output schemas in respective module documentation.
+#### `insights/contentGaps`
+
+Content gap and keyword opportunity analysis.
+
+#### `insights/summary`
+
+Overview of all content types and video counts.
+
+See [Technical Documentation](TECHNICAL_DOCUMENTATION.md) for full schemas.
 
 ### Storage Structure
 
@@ -739,11 +685,14 @@ COLLECTION_VIDEOS = 'videos'
 COLLECTION_ANALYSIS = 'analysis'
 COLLECTION_INSIGHTS = 'insights'
 COLLECTION_SCRAPE_PROGRESS = 'scrape_progress'
+COLLECTION_ANALYSIS_PROGRESS = 'analysis_progress'
 
 ANALYSIS_TYPE_THUMBNAIL = 'thumbnail'
-ANALYSIS_TYPE_TITLE = 'title'
-ANALYSIS_TYPE_DESCRIPTION = 'description'
-ANALYSIS_TYPE_TAGS = 'tags'
+ANALYSIS_TYPE_TITLE_DESCRIPTION = 'title_description'
+ANALYSIS_TYPES = [ANALYSIS_TYPE_THUMBNAIL, ANALYSIS_TYPE_TITLE_DESCRIPTION]
+
+INSIGHT_TYPE_CONTENT_GAPS = 'contentGaps'
+INSIGHT_TYPE_SUMMARY = 'summary'
 
 GEMINI_MODEL = 'gemini-2.0-flash'
 ```

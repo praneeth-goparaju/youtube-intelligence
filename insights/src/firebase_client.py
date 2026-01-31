@@ -118,9 +118,16 @@ def get_video_analysis(channel_id: str, video_id: str, analysis_type: str) -> Op
         return None
 
 
-def get_all_videos_with_analysis(analysis_type: str) -> List[Dict[str, Any]]:
-    """Get all videos with a specific analysis type."""
-    db = get_db()
+def get_all_videos_with_analyses() -> List[Dict[str, Any]]:
+    """Load all videos with both thumbnail and title analyses.
+
+    Returns videos that have at least a title analysis (needed for content type).
+    Thumbnail analysis is included when available but not required.
+
+    Returns:
+        List of video dicts with channel, video, title_analysis, and
+        thumbnail_analysis (may be None).
+    """
     channels = get_all_channels()
 
     all_videos = []
@@ -130,16 +137,32 @@ def get_all_videos_with_analysis(analysis_type: str) -> List[Dict[str, Any]]:
 
         for video in videos:
             video_id = video['id']
-            analysis = get_video_analysis(channel_id, video_id, analysis_type)
 
-            if analysis:
-                all_videos.append({
-                    'channel_id': channel_id,
-                    'video_id': video_id,
-                    'channel': channel,
-                    'video': video,
-                    'analysis': analysis,
-                })
+            # Title/description analysis (required — provides content type)
+            title_analysis = get_video_analysis(
+                channel_id, video_id, 'title_description'
+            )
+            if not title_analysis:
+                title_analysis = get_video_analysis(
+                    channel_id, video_id, 'title'
+                )
+
+            if not title_analysis:
+                continue  # Skip videos without title analysis
+
+            # Thumbnail analysis (optional but included when available)
+            thumbnail_analysis = get_video_analysis(
+                channel_id, video_id, 'thumbnail'
+            )
+
+            all_videos.append({
+                'channel_id': channel_id,
+                'video_id': video_id,
+                'channel': channel,
+                'video': video,
+                'title_analysis': title_analysis,
+                'thumbnail_analysis': thumbnail_analysis,
+            })
 
     return all_videos
 

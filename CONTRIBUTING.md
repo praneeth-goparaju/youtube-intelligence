@@ -536,7 +536,8 @@ youtube_channel_analysis/
 | `scraper/src/youtube/resolver.ts` | URL resolution |
 | `analyzer/src/main.py` | Analyzer entry point |
 | `analyzer/src/gemini_client.py` | Gemini API wrapper |
-| `insights/src/correlations.py` | Statistical analysis |
+| `insights/src/profiler.py` | Per-content-type feature profiling |
+| `insights/src/gaps.py` | Content gap analysis |
 | `functions/src/engine.ts` | Recommendation logic |
 | `functions/src/cli.ts` | CLI entry point |
 

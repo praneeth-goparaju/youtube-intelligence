@@ -20,34 +20,20 @@ COLLECTION_ANALYSIS_PROGRESS = 'analysis_progress'
 # =============================================================================
 
 ANALYSIS_TYPE_THUMBNAIL = 'thumbnail'
-ANALYSIS_TYPE_TITLE = 'title'
-ANALYSIS_TYPE_DESCRIPTION = 'description'
-ANALYSIS_TYPE_TAGS = 'tags'
-ANALYSIS_TYPE_CONTENT_STRUCTURE = 'content_structure'
+ANALYSIS_TYPE_TITLE_DESCRIPTION = 'title_description'
 
 ANALYSIS_TYPES = [
     ANALYSIS_TYPE_THUMBNAIL,
-    ANALYSIS_TYPE_TITLE,
-    ANALYSIS_TYPE_DESCRIPTION,
-    ANALYSIS_TYPE_TAGS,
-    ANALYSIS_TYPE_CONTENT_STRUCTURE,
+    ANALYSIS_TYPE_TITLE_DESCRIPTION,
 ]
 
 # =============================================================================
 # Insight Types (Phase 3 output)
+# Per-content-type profiles are stored as insights/{contentType}
 # =============================================================================
 
-INSIGHT_TYPE_THUMBNAILS = 'thumbnails'
-INSIGHT_TYPE_TITLES = 'titles'
-INSIGHT_TYPE_TIMING = 'timing'
 INSIGHT_TYPE_CONTENT_GAPS = 'contentGaps'
-
-INSIGHT_TYPES = [
-    INSIGHT_TYPE_THUMBNAILS,
-    INSIGHT_TYPE_TITLES,
-    INSIGHT_TYPE_TIMING,
-    INSIGHT_TYPE_CONTENT_GAPS,
-]
+INSIGHT_TYPE_SUMMARY = 'summary'
 
 # =============================================================================
 # AI Model Configuration

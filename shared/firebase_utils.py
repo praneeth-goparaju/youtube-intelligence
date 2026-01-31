@@ -4,6 +4,7 @@ This module provides common Firebase initialization and access patterns
 used across all phases.
 """
 
+import threading
 from typing import Optional, Dict, Any, List
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -12,6 +13,7 @@ from firebase_admin import credentials, firestore
 # Global state for Firebase singleton
 _app: Optional[firebase_admin.App] = None
 _db: Optional[firestore.Client] = None
+_init_lock = threading.Lock()
 
 
 def get_firebase_credentials(config) -> credentials.Certificate:
@@ -35,6 +37,9 @@ def get_firebase_credentials(config) -> credentials.Certificate:
 def initialize_firebase_app(config, options: Optional[Dict[str, Any]] = None) -> firebase_admin.App:
     """Initialize Firebase Admin SDK.
 
+    Thread-safe singleton: uses double-checked locking to ensure only one
+    initialization occurs even under concurrent access.
+
     Args:
         config: Configuration object with Firebase attributes
         options: Additional Firebase initialization options
@@ -44,26 +49,32 @@ def initialize_firebase_app(config, options: Optional[Dict[str, Any]] = None) ->
     """
     global _app, _db
 
+    # Fast path: already initialized
     if _app is not None:
         return _app
 
-    try:
-        cred = get_firebase_credentials(config)
-        init_options = options or {}
+    with _init_lock:
+        # Double-check after acquiring lock
+        if _app is not None:
+            return _app
 
-        if hasattr(config, 'FIREBASE_STORAGE_BUCKET') and config.FIREBASE_STORAGE_BUCKET:
-            init_options.setdefault('storageBucket', config.FIREBASE_STORAGE_BUCKET)
+        try:
+            cred = get_firebase_credentials(config)
+            init_options = options or {}
 
-        _app = firebase_admin.initialize_app(cred, init_options)
-        _db = firestore.client()
+            if hasattr(config, 'FIREBASE_STORAGE_BUCKET') and config.FIREBASE_STORAGE_BUCKET:
+                init_options.setdefault('storageBucket', config.FIREBASE_STORAGE_BUCKET)
 
-    except ValueError:
-        # Firebase already initialized in another module
-        _app = firebase_admin.get_app()
-        _db = firestore.client()
-    except Exception as e:
-        print(f"Error initializing Firebase: {e}")
-        raise RuntimeError(f"Failed to initialize Firebase: {e}")
+            _app = firebase_admin.initialize_app(cred, init_options)
+            _db = firestore.client()
+
+        except ValueError:
+            # Firebase already initialized in another module
+            _app = firebase_admin.get_app()
+            _db = firestore.client()
+        except Exception as e:
+            print(f"Error initializing Firebase: {e}")
+            raise RuntimeError(f"Failed to initialize Firebase: {e}")
 
     return _app
 

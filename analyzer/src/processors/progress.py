@@ -14,7 +14,7 @@ class ProgressTracker:
         Initialize progress tracker.
 
         Args:
-            analysis_type: Type of analysis (thumbnail, title, description, tags)
+            analysis_type: Type of analysis (thumbnail, title_description)
         """
         self.analysis_type = analysis_type
         self.start_time: Optional[datetime] = None
