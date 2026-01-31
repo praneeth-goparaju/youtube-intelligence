@@ -93,7 +93,8 @@ npm start -- --update                      # Incremental update (new videos only
 
 # Phase 2: Analyze with AI (after scraping completes)
 cd ../analyzer
-python src/main.py
+python -m analyzer.src.main                                   # Sync mode (per-video)
+python -m analyzer.src.main --mode batch --type thumbnail     # Batch mode (50% cheaper)
 
 # Phase 3: Generate insights (after analysis completes)
 cd ../insights
@@ -332,6 +333,8 @@ See [functions/README.md](functions/README.md) for complete API documentation.
 | `channels/{channelId}` | Channel metadata and stats |
 | `channels/{channelId}/videos/{videoId}` | Video data with metrics |
 | `channels/{channelId}/videos/{videoId}/analysis/{type}` | AI analysis results (thumbnail, title_description) |
+| `batch_jobs/{jobId}` | Batch API job tracking (state, request count, import status) |
+| `analysis_progress/{analysisType}` | Resume state for analysis (thumbnail, title_description) |
 | `scrape_progress/{channelId}` | Resume state for scraping |
 | `unresolved_channels/{id}` | Channel URLs that failed resolution |
 | `insights/{contentType}` | Per-content-type profiles (all vs top 10%) |
@@ -431,7 +434,7 @@ cd scraper && npx tsx scripts/validate.ts
 | YouTube Integration | googleapis | 131.0+ |
 | Database | Firebase Firestore | - |
 | File Storage | Firebase Storage | - |
-| AI Analysis | Google Gemini (2.0 Flash / 3.0 Flash) | - |
+| AI Analysis | Google Gemini 2.5 Flash | - |
 | Analytics | Python + Pandas | 3.11+ |
 | Testing (TS) | Vitest | 1.2+ |
 | Testing (Python) | pytest | 8.0+ |

@@ -6,7 +6,7 @@
 2. [Architecture](#architecture)
 3. [Phase 1: YouTube Scraper](#phase-1-youtube-scraper)
 4. [Phase 2: AI Analyzer](#phase-2-ai-analyzer)
-5. [Phase 3: Pattern Discovery](#phase-3-pattern-discovery)
+5. [Phase 3: Per-Content-Type Profiling](#phase-3-per-content-type-profiling)
 6. [Phase 4: Recommendation Engine](#phase-4-recommendation-engine)
 7. [Data Schemas](#data-schemas)
 8. [API Integration Details](#api-integration-details)
@@ -345,7 +345,23 @@ The analyzer processes scraped data using Google Gemini 2.5 Flash with **2 API c
   - Description (lean): Structure, timestamps, recipe content, hashtags, CTAs, SEO (~20 fields)
   - Description context improves niche detection (e.g., ingredient list confirms isRecipe)
 
+### Processing Modes
+
+The analyzer supports two processing modes:
+
+| Mode | SDK | Description | Cost |
+|------|-----|-------------|------|
+| **Sync** (default) | `google-generativeai` | Per-video API calls with `response_schema` | Standard |
+| **Batch** | `google-genai` | Gemini Batch API, JSONL file upload | 50% savings |
+
+Both modes use:
+- **`response_schema`**: Pydantic models (`ThumbnailAnalysisSchema`, `TitleDescriptionAnalysisSchema`) guarantee valid JSON output
+- **`system_instruction`**: Concise role/domain context set on the model
+- **User prompts**: Shorter analysis instructions (no JSON template needed since schema enforces structure)
+
 ### Gemini Client
+
+The Gemini client uses model caching per analysis type and structured output via `response_schema`:
 
 ```python
 # src/gemini_client.py
@@ -354,171 +370,388 @@ import google.generativeai as genai
 
 genai.configure(api_key=config.GOOGLE_API_KEY)
 
-_model = genai.GenerativeModel(
-    model_name='gemini-2.5-flash',
-    generation_config={
-        'temperature': 0.1,      # Low for consistent structured output
-        'top_p': 0.95,
-        'max_output_tokens': 8192,
-    }
-)
+# Model instances cached by analysis_type
+_models: Dict[str, genai.GenerativeModel] = {}
 
-def analyze_image(prompt: str, image_data: bytes) -> Dict[str, Any]:
-    """Analyze image with Gemini Vision."""
+def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
+    """Get or create Gemini model with response_schema for structured output."""
+    cache_key = analysis_type or 'default'
+    if cache_key not in _models:
+        gen_config = {
+            'temperature': 0.1,
+            'top_p': 0.95,
+            'top_k': 40,
+            'max_output_tokens': 8192,
+        }
+        model_kwargs = {'model_name': config.GEMINI_MODEL}
+
+        if analysis_type:
+            system_instruction, response_schema = _get_schema_config(analysis_type)
+            if system_instruction:
+                model_kwargs['system_instruction'] = system_instruction
+            if response_schema:
+                gen_config['response_mime_type'] = 'application/json'
+                gen_config['response_schema'] = response_schema
+
+        model_kwargs['generation_config'] = gen_config
+        _models[cache_key] = genai.GenerativeModel(**model_kwargs)
+    return _models[cache_key]
+
+def analyze_image(prompt, image_data, analysis_type=None) -> Dict[str, Any]:
+    """Analyze image with Gemini Vision (uses response_schema when analysis_type set)."""
+    model = get_model(analysis_type)
     image = Image.open(io.BytesIO(image_data))
-    response = _model.generate_content([prompt, image])
-    return json.loads(response.text)
+    response = model.generate_content([prompt, image])
+    return parse_json_response(response.text)
 
-def analyze_text(prompt: str, text: str) -> Dict[str, Any]:
-    """Analyze text with Gemini."""
-    response = _model.generate_content(f"{prompt}\n\nText:\n{text}")
-    return json.loads(response.text)
+def analyze_text(prompt, text, analysis_type=None) -> Dict[str, Any]:
+    """Analyze text with Gemini (uses response_schema when analysis_type set)."""
+    model = get_model(analysis_type)
+    response = model.generate_content(f"{prompt}\n\nText to analyze:\n{text}")
+    return parse_json_response(response.text)
 ```
 
-### Thumbnail Analysis Schema
+Retry logic handles specific error types:
+- `ResourceExhausted` (rate limit): exponential backoff with 2x multiplier
+- `InvalidArgument`: no retry (request is malformed)
+- `GoogleAPIError`: transient errors, linear backoff
+- `JSONDecodeError`: no retry (response format issue)
+- General `Exception`: logged with type info, linear backoff
 
-The thumbnail analyzer extracts 50+ attributes:
+### Thumbnail Analysis Schema (~109 fields)
+
+Defined as a Pydantic model in `src/batch_api/schemas.py`:
 
 ```python
+class ThumbnailAnalysisSchema(BaseModel):
+    composition: ThumbnailComposition        # 7 fields: layoutType, gridStructure, visualBalance, etc.
+    humanPresence: ThumbnailHumanPresence    # 16 fields: facePresent, faceCount, expression, etc.
+    textElements: ThumbnailTextElements      # 14 fields + nested primaryText (11 fields)
+    colors: ThumbnailColors                  # 10 fields + nested dominantColors list
+    food: ThumbnailFood                      # 15 fields: foodPresent, mainDish, appetiteAppeal, etc.
+    graphics: ThumbnailGraphics              # 18 fields: arrows, circles, borders, badges, etc.
+    branding: ThumbnailBranding              # 5 fields: channelLogoVisible, professionalQuality, etc.
+    psychology: ThumbnailPsychology          # 16 fields: curiosityGap, socialProof, urgency, etc.
+    technicalQuality: ThumbnailTechnicalQuality  # 6 fields: resolution, sharpness, lighting, etc.
+    scores: ThumbnailScores                  # 8 fields: clickability, clarity, predictedCTR, etc.
+```
+
+Key sections (examples of values):
+
+```json
 {
     "composition": {
         "layoutType": "split-screen|single-focus|collage|text-heavy|minimal",
-        "gridStructure": "rule-of-thirds|centered|asymmetric",
-        "visualBalance": "balanced|left-heavy|right-heavy",
+        "gridStructure": "rule-of-thirds|centered|asymmetric|golden-ratio",
+        "visualBalance": "balanced|left-heavy|right-heavy|top-heavy|bottom-heavy",
+        "negativeSpace": "minimal|moderate|heavy",
         "complexity": "simple|medium|complex|cluttered",
-        "focalPoint": "description",
+        "focalPoint": "description of main focal point",
         "depthOfField": "shallow|deep|flat"
     },
     "humanPresence": {
-        "facePresent": True/False,
-        "faceCount": int,
-        "facePosition": "right-third|center|left-third",
-        "expression": "surprised|happy|curious|neutral",
+        "facePresent": true,
+        "faceCount": 1,
+        "faceSize": "small|medium|large|dominant",
+        "expression": "happy|surprised|shocked|curious|neutral|excited|disgusted|thinking",
         "expressionIntensity": "subtle|moderate|high|extreme",
-        "eyeContact": True/False,
-        "handGesture": "pointing|thumbs-up|holding-item|none"
+        "mouthOpen": true,
+        "eyeContact": true,
+        "eyebrowsRaised": false,
+        "bodyVisible": true,
+        "bodyPortion": "face-only|upper|half|full",
+        "handVisible": true,
+        "handGesture": "none|thumbs-up|pointing|holding-item|peace|ok",
+        "lookingDirection": "camera|left|right|down|at-food"
     },
-    "textElements": {
-        "hasText": True/False,
-        "languages": ["english", "telugu"],
-        "hasTeluguScript": True/False,
-        "primaryText": {
-            "content": "text",
-            "position": "top-left|center|bottom",
-            "color": "#HEX",
-            "hasOutline": True/False
-        },
-        "hasNumbers": True/False,
-        "numberType": "view-count|price|quantity"
-    },
-    "colors": {
-        "dominantColors": [
-            {"hex": "#FF6B35", "name": "orange", "percentage": 35}
-        ],
-        "palette": "warm|cool|neutral",
-        "contrast": "low|medium|high",
-        "saturation": "desaturated|medium|vivid"
-    },
-    "food": {  # For cooking channels
-        "foodPresent": True/False,
+    "food": {
+        "foodPresent": true,
         "mainDish": "dish name",
-        "presentation": "close-up|plated|cooking-process",
-        "steam": True/False,
-        "appetiteAppeal": 1-10
+        "dishCategory": "rice|curry|snack|dessert|bread|indo-chinese|breakfast",
+        "presentation": "close-up|plated|cooking-process|ingredients|before-after",
+        "platingStyle": "rustic|elegant|home-style|restaurant",
+        "steam": true,
+        "sizzle": false,
+        "garnished": true,
+        "freshness": "low|medium|high",
+        "appetiteAppeal": 8,
+        "portionSize": "small|medium|generous|huge",
+        "cookingStage": "raw|in-progress|finished"
     },
     "psychology": {
-        "curiosityGap": True/False,
-        "socialProof": True/False,
-        "urgency": True/False,
-        "primaryEmotion": "curiosity|excitement|appetite"
+        "curiosityGap": true,
+        "socialProof": false,
+        "urgency": false,
+        "scarcity": false,
+        "authority": false,
+        "controversy": false,
+        "transformation": true,
+        "luxury": false,
+        "nostalgia": false,
+        "shock": false,
+        "humor": false,
+        "fear": false,
+        "primaryEmotion": "curiosity|excitement|appetite|nostalgia|amusement",
+        "emotionalIntensity": "low|moderate|high",
+        "clickMotivation": ["reasons why someone would click"],
+        "targetAudience": "description"
     },
     "scores": {
-        "clickability": 1-10,
-        "clarity": 1-10,
-        "professionalism": 1-10,
-        "predictedCTR": "below-average|average|above-average"
+        "clickability": 7,
+        "clarity": 8,
+        "professionalism": 6,
+        "uniqueness": 5,
+        "appetiteAppeal": 9,
+        "emotionalImpact": 6,
+        "predictedCTR": "below-average|average|above-average|exceptional",
+        "improvementAreas": ["list of suggestions"]
     }
 }
 ```
 
-### Title Analysis Schema
+### Title + Description Analysis Schema (~140 fields)
+
+Defined as a Pydantic model in `src/batch_api/schemas.py`:
 
 ```python
+class TitleDescriptionAnalysisSchema(BaseModel):
+    # Title analysis (~120 fields)
+    structure: TitleStructure          # 11 fields: pattern, segments, separators, counts
+    language: TitleLanguage            # 14 fields: languages, scripts, ratios, transliteration
+    hooks: TitleHooks                  # 16 fields + nested TitleTriggers (10 fields)
+    keywords: TitleKeywords            # 14 fields: primaryKeyword, niche, SEO, competition
+    formatting: TitleFormatting        # 16 fields: capitalization, emojis, brackets, hashtags
+    contentSignals: TitleContentSignals  # 15 fields: contentType, isRecipe, series, brands
+    teluguAnalysis: TitleTeluguAnalysis  # 12 fields: register, dialect, honorifics, food terms
+    competitive: TitleCompetitive      # 6 fields: uniquenessScore, standoutFactor
+    scores: TitleScores                # 11 fields: seo, clickability, clarity, overall (1-10)
+
+    # Description analysis (~20 fields)
+    descriptionAnalysis: DescriptionAnalysis  # structure, timestamps, recipeContent, hashtags, ctas, seo
+```
+
+Key sections (examples of values):
+
+```json
 {
     "structure": {
         "pattern": "dish-name | translation | modifier",
+        "patternType": "single|segmented|question|list|statement",
         "segments": [
             {"text": "Biryani Recipe", "type": "dish-name", "language": "english"},
             {"text": "బిర్యానీ", "type": "translation", "language": "telugu"}
         ],
+        "segmentCount": 2,
         "characterCount": 67,
-        "teluguCharacterCount": 12
+        "wordCount": 8,
+        "teluguCharacterCount": 12,
+        "englishCharacterCount": 55
     },
     "language": {
         "languages": ["english", "telugu"],
         "primaryLanguage": "english",
-        "hasTeluguScript": True,
+        "hasTeluguScript": true,
+        "hasLatinScript": true,
+        "hasTransliteration": true,
+        "transliteratedWords": ["biryani"],
+        "codeSwitch": true,
+        "codeSwitchStyle": "translation|mixed|parallel",
         "teluguRatio": 0.18,
-        "codeSwitch": True,
-        "codeSwitchStyle": "translation|mixed|parallel"
+        "englishRatio": 0.82
     },
     "hooks": {
-        "hasPowerWord": True,
+        "isQuestion": false,
+        "hasNumber": false,
+        "hasPowerWord": true,
         "powerWords": ["SECRET", "Restaurant Style"],
         "triggers": {
-            "curiosityGap": True/False,
-            "socialProof": True/False,
-            "urgency": True/False
+            "curiosityGap": true,
+            "socialProof": false,
+            "urgency": false,
+            "exclusivity": true,
+            "controversy": false,
+            "transformation": false,
+            "challenge": false,
+            "comparison": false,
+            "personal": false,
+            "storytelling": false
         },
-        "hookStrength": "weak|moderate|strong|viral"
+        "hookStrength": "weak|moderate|strong|viral",
+        "primaryHook": "description of main hook"
     },
     "keywords": {
         "primaryKeyword": "Biryani Recipe",
-        "searchIntent": "how-to|review|comparison",
+        "primaryKeywordPosition": "start|middle|end",
+        "searchIntent": "how-to|review|comparison|information|entertainment",
+        "niche": "cooking",
+        "subNiche": "Indian rice dishes",
         "keywordCompetition": "low|medium|high|extreme",
-        "seoOptimized": True/False
+        "seoOptimized": true,
+        "keywordInFirst3Words": true
+    },
+    "contentSignals": {
+        "contentType": "recipe|tutorial|review|vlog|challenge|reaction|comparison|list|storytime|unboxing|explainer|news",
+        "isRecipe": true,
+        "isTutorial": false,
+        "isPartOfSeries": false,
+        "hasCollaboration": false,
+        "hasBrandMention": false
+    },
+    "teluguAnalysis": {
+        "formalRegister": false,
+        "respectLevel": "casual|neutral|respectful",
+        "dialectHints": "andhra|telangana|rayalaseema|neutral",
+        "hasHonorifics": false,
+        "foodTermsAccurate": true,
+        "targetAudienceAge": "young|middle|older|all",
+        "urbanVsRural": "urban|rural|both"
+    },
+    "competitive": {
+        "uniquenessScore": 6,
+        "followsNichePattern": true,
+        "standoutFactor": "description"
     },
     "scores": {
-        "seoScore": 1-10,
-        "clickabilityScore": 1-10,
-        "overallScore": 1-10
+        "seoScore": 7,
+        "clickabilityScore": 8,
+        "clarityScore": 9,
+        "emotionalScore": 5,
+        "uniquenessScore": 6,
+        "lengthScore": 7,
+        "clickbaitLevel": 3,
+        "overallScore": 7,
+        "predictedPerformance": "below-average|average|above-average|exceptional"
+    },
+    "descriptionAnalysis": {
+        "structure": {
+            "length": 2450,
+            "lineCount": 35,
+            "wellOrganized": true,
+            "firstLineHook": true
+        },
+        "timestamps": {
+            "hasTimestamps": true,
+            "timestampCount": 5
+        },
+        "recipeContent": {
+            "hasIngredients": true,
+            "ingredientCount": 12,
+            "hasInstructions": true,
+            "instructionSteps": 8,
+            "hasCookingTime": true
+        },
+        "hashtags": {
+            "count": 5,
+            "position": "start|middle|end|throughout|none"
+        },
+        "ctas": {
+            "hasSubscribeCTA": true,
+            "hasLikeCTA": true,
+            "hasCommentCTA": true,
+            "commentQuestion": "What's your favorite biryani recipe?"
+        },
+        "seo": {
+            "keywordInFirst100Chars": true,
+            "keywordDensity": 0.02,
+            "internalLinking": "none|minimal|good|excellent"
+        }
     }
 }
 ```
 
-### Batch Processing
+### Sync Mode Processing
 
-The analyzer processes videos in batches with progress tracking:
+The analyzer processes videos sequentially with progress tracking:
 
 ```python
 # src/processors/batch.py
 
 class BatchProcessor:
     def process_channel(self, channel_id: str, limit: int = None):
-        videos = get_unanalyzed_videos(channel_id, self.analysis_type, limit)
+        # Paginated fetch to avoid loading all videos into memory
+        videos = get_unanalyzed_videos_paginated(channel_id, self.analysis_type, limit)
 
         for video in tqdm(videos):
             try:
                 result = self._analyze_video(channel_id, video)
-                if result:
-                    self.progress.record_success()
-                else:
+                if result is None:
                     self.progress.record_skip()
-            except Exception as e:
+                else:
+                    self.progress.record_success()
+            except GeminiRateLimitError:
+                self.progress.record_failure()
+                time.sleep(config.REQUEST_DELAY * 4)  # Extra delay
+            except GeminiResponseError:
+                self.progress.record_failure()
+            except GeminiAPIError:
+                self.progress.record_failure()
+            except (ConnectionError, TimeoutError, OSError):
+                self.progress.record_failure()
+            except Exception:
                 self.progress.record_failure()
 
-            time.sleep(config.REQUEST_DELAY)  # Rate limiting
+            time.sleep(config.REQUEST_DELAY)  # 0.5s rate limiting
 ```
+
+### Batch Mode (Gemini Batch API)
+
+The batch mode submits all requests as a JSONL file to the Gemini Batch API for 50% cost savings. Uses the `google-genai` SDK (different from the `google-generativeai` SDK used in sync mode).
+
+#### 4-Phase Workflow
+
+```
+PREPARE → SUBMIT → POLL → IMPORT
+```
+
+| Phase | Module | What it does |
+|-------|--------|-------------|
+| `prepare` | `batch_api/prepare.py` | Scans Firestore for unanalyzed videos, writes JSONL to `data/batch/` |
+| `submit` | `batch_api/submit.py` | Uploads JSONL via Files API, creates batch job, tracks in Firestore `batch_jobs` |
+| `poll` | `batch_api/submit.py` | Checks job status every 60s until terminal state |
+| `import` | `batch_api/import_results.py` | Downloads result JSONL, parses results, saves to Firestore |
+
+```bash
+# Run all phases sequentially
+python -m analyzer.src.main --mode batch --type thumbnail
+
+# Or run phases individually
+python -m analyzer.src.main --mode batch --phase prepare --type thumbnail
+python -m analyzer.src.main --mode batch --phase submit --type thumbnail
+python -m analyzer.src.main --mode batch --phase poll --type thumbnail
+python -m analyzer.src.main --mode batch --phase import --type thumbnail
+
+# Check status of all jobs
+python -m analyzer.src.main --mode batch --phase status
+```
+
+#### Batch Request Key Format
+
+Keys follow the pattern `{channelId}_{videoId}_{analysisType}`. On import, keys are parsed using fixed-length channel IDs (24 chars starting with UC) and 11-char video IDs.
+
+#### Thumbnail Batch Requests
+
+Thumbnails use GCS URIs directly (`gs://{bucket}/thumbnails/UCxxx/videoId.jpg`) since Firebase Storage is Google Cloud Storage.
 
 ### Analysis Storage
 
-Analysis results are stored as subcollections:
+Analysis results are stored as Firestore subcollections:
 
 ```
 channels/{channelId}/videos/{videoId}/analysis/
-├── thumbnail            # Thumbnail vision analysis results
-└── title_description    # Combined title+description text analysis results
+├── thumbnail            # Thumbnail vision analysis (analysisVersion: "1.0")
+└── title_description    # Combined title+description text analysis (analysisVersion: "2.0")
+
+batch_jobs/{jobId}       # Batch job tracking (state, request count, import status)
+analysis_progress/{type} # Sync mode progress tracking (saves every 10 records)
 ```
+
+Metadata fields added to each analysis document:
+- `analyzedAt`: ISO timestamp
+- `modelUsed`: `"gemini-2.5-flash"`
+- `analysisVersion`: `"1.0"` (thumbnail) or `"2.0"` (title_description)
+- `batchMode`: `true` (batch mode only)
+- `rawTitle`: original title text (title_description only)
+- `hasDescription`: whether description was present (title_description only)
 
 Note: Legacy analysis types (`title`, `description`, `tags`, `content_structure`) may exist in Firestore from previous runs but are no longer generated. The insights phase falls back to legacy `title` analysis when `title_description` is not available.
 
@@ -892,8 +1125,9 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
 {
   analyzedAt: "2024-01-25T10:30:00Z",
   modelUsed: "gemini-2.5-flash",
-  analysisVersion: "1.0",
+  analysisVersion: "2.0",
   rawTitle: "Original title text",
+  hasDescription: true,
 
   // Title analysis
   structure: { ... },
@@ -912,9 +1146,41 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
     timestamps: { ... },
     recipeContent: { ... },
     hashtags: { ... },
-    callToActions: { ... },
+    ctas: { ... },
     seo: { ... }
   }
+}
+```
+
+#### `batch_jobs/{jobId}`
+
+```javascript
+{
+  jobName: "batch_thumbnail_20260125_103000",
+  analysisType: "thumbnail",        // thumbnail | title_description
+  state: "JOB_STATE_SUCCEEDED",     // PENDING, RUNNING, SUCCEEDED, FAILED, CANCELLED
+  requestCount: 500,
+  requestFile: "data/batch/batch_thumbnail_20260125_103000.jsonl",
+  resultFile: "data/batch/results_thumbnail_20260125_103000.jsonl",
+  createdAt: "2026-01-25T10:30:00Z",
+  completedAt: "2026-01-25T11:45:00Z",
+  importedAt: "2026-01-25T11:50:00Z",
+  importedCount: 498,
+  failedCount: 2
+}
+```
+
+#### `analysis_progress/{analysisType}`
+
+```javascript
+// analysisType = "thumbnail" or "title_description"
+{
+  analysisType: "thumbnail",
+  totalProcessed: 1500,
+  successCount: 1480,
+  failureCount: 15,
+  skipCount: 5,
+  lastUpdatedAt: "2026-01-25T10:30:00Z"
 }
 ```
 
@@ -1019,23 +1285,36 @@ const response = await youtube.videos.list({
 
 ### Google Gemini API
 
-**Model**: `gemini-2.5-flash`
+**Model**: `gemini-2.5-flash` (configured in `shared/constants.py`)
 
-**Authentication**: API Key via `google-generativeai` SDK
+**Two SDKs Used**:
+- **Sync mode**: `google-generativeai` SDK — per-video calls with `response_schema` (Pydantic models)
+- **Batch mode**: `google-genai` SDK — JSONL file upload, batch job management
+
+**Authentication**: API Key via `GOOGLE_API_KEY` environment variable
 
 **Configuration**:
 ```python
 generation_config = {
-    'temperature': 0.1,      # Low for consistent JSON output
+    'temperature': 0.1,           # Low for consistent JSON output
     'top_p': 0.95,
     'top_k': 40,
-    'max_output_tokens': 8192
+    'max_output_tokens': 8192,
+    'response_mime_type': 'application/json',  # When using response_schema
+    'response_schema': PydanticModel           # Enforces structured output
 }
 ```
 
-**Vision Input**: PIL Image objects or raw bytes
+**Vision Input**: PIL Image objects (sync) or GCS URIs `gs://bucket/path` (batch)
 
 **Rate Limits**: Varies by tier (free tier: 60 requests/minute)
+
+**Batch API Tier Limits**:
+| Tier | Enqueued Token Limit | Max requests per job |
+|------|---------------------|---------------------|
+| Tier 1 | 3M tokens | ~680 |
+| Tier 2 | 400M tokens | ~50K (API max) |
+| Tier 3 | 1B tokens | ~50K, concurrent jobs |
 
 ### Firebase Admin SDK
 
@@ -1115,25 +1394,33 @@ if (existingProgress && existingProgress.status !== 'completed') {
 
 ### Analyzer Error Handling
 
+The Gemini client uses `call_with_retry()` from `shared/gemini_utils.py` with 3 retries and linear backoff. The `BatchProcessor` handles specific exception types:
+
 ```python
-def analyze_image(prompt, image_data, retries=3):
-    last_error = None
+# src/processors/batch.py - per-video error handling
 
-    for attempt in range(retries):
-        try:
-            response = model.generate_content([prompt, image])
-            return json.loads(response.text)
-        except json.JSONDecodeError:
-            # Gemini returned invalid JSON
-            last_error = e
-        except Exception as e:
-            # API error
-            last_error = e
-
-        time.sleep(config.RETRY_DELAY * (attempt + 1))
-
-    raise last_error
+except GeminiRateLimitError:
+    # Rate limit (429) — extra delay (4x REQUEST_DELAY)
+    self.progress.record_failure()
+    time.sleep(config.REQUEST_DELAY * 4)
+except GeminiResponseError:
+    # Invalid/blocked response from Gemini
+    self.progress.record_failure()
+except GeminiAPIError:
+    # General API-level errors
+    self.progress.record_failure()
+except (ConnectionError, TimeoutError, OSError):
+    # Network errors
+    self.progress.record_failure()
+except Exception:
+    # Unexpected errors — logged with type info
+    self.progress.record_failure()
 ```
+
+Custom exception classes in `gemini_client.py`:
+- `GeminiAPIError`: Base class for all Gemini errors
+- `GeminiRateLimitError(GeminiAPIError)`: 429 / ResourceExhausted
+- `GeminiResponseError(GeminiAPIError)`: Invalid or blocked response
 
 ### Graceful Degradation
 
@@ -1162,8 +1449,11 @@ except:
 ### Analyzer Optimization
 
 1. **Skip Analyzed**: Check if analysis exists before processing
-2. **Rate Limiting**: Configurable delay between requests
-3. **Batch Progress**: Track at channel level, not video level
+2. **Rate Limiting**: 0.5s delay between requests (hardcoded in config)
+3. **Paginated Queries**: `get_unanalyzed_videos_paginated()` uses Firestore cursors (page size 100)
+4. **Progress Batching**: Writes to Firestore every 10 records (not per-video)
+5. **Batch Mode**: 50% cost savings via Gemini Batch API (submit JSONL, poll, import)
+6. **Model Caching**: Gemini model instances cached per analysis type
 
 ### Firestore Optimization
 
@@ -1218,9 +1508,10 @@ npm start  # Run scraper
 
 # Phase 2: Analyzer (after scraping completes)
 cd ../analyzer
-pip install -r requirements.txt
-python -m src.main --validate
-python -m src.main
+pip install -r ../requirements.txt
+python -m analyzer.src.main --validate              # Test connections
+python -m analyzer.src.main                          # Sync mode (all types)
+python -m analyzer.src.main --mode batch --type all  # Batch mode (50% cheaper)
 
 # Phase 3: Insights (after analysis completes)
 cd ../insights

@@ -121,11 +121,8 @@ Error: 429 Resource has been exhausted (e.g. check quota).
 **Cause:** Too many requests to Gemini API.
 
 **Solution:**
-1. Increase `REQUEST_DELAY` in environment:
-   ```bash
-   REQUEST_DELAY=1.0  # or higher
-   ```
-2. Reduce batch size:
+1. The request delay is hardcoded at 0.5s in `analyzer/src/config.py`. For persistent rate limit issues, consider upgrading your Gemini API tier.
+2. Reduce batch size (configurable via environment variable):
    ```bash
    BATCH_SIZE=5
    ```
@@ -176,15 +173,15 @@ Error: Thumbnail not found at path: thumbnails/UCxxx/videoId.jpg
 **Solution:**
 1. Process smaller batches:
    ```bash
-   python src/main.py --type thumbnail --limit 100
+   python -m analyzer.src.main --type thumbnail --limit 100
    ```
 2. Process one channel at a time:
    ```bash
-   python src/main.py --channel UCxxx --limit 50
+   python -m analyzer.src.main --channel UCxxx --limit 50
    ```
-3. Increase delay to prevent rate limits:
+3. Consider using batch mode for large volumes (50% cheaper, no per-video rate limits):
    ```bash
-   REQUEST_DELAY=2.0
+   python -m analyzer.src.main --mode batch --type thumbnail
    ```
 
 ### Memory Error

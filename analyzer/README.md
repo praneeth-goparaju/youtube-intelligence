@@ -16,8 +16,8 @@ Supports two processing modes:
 ## Quick Start
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (from project root)
+pip install -r requirements.txt   # run from project root, or ../requirements.txt from analyzer/
 
 # Validate connections
 python -m analyzer.src.main --validate
@@ -164,10 +164,11 @@ Analysis results are stored as Firestore subcollections:
 
 ```
 channels/{channelId}/videos/{videoId}/analysis/
-├── thumbnail           # Thumbnail vision analysis
-└── title_description   # Combined title+description text analysis
+├── thumbnail           # Thumbnail vision analysis (analysisVersion: "1.0")
+└── title_description   # Combined title+description text analysis (analysisVersion: "2.0")
 
-batch_jobs/{jobId}      # Batch job tracking (state, request count, import status)
+batch_jobs/{jobId}          # Batch job tracking (state, request count, import status)
+analysis_progress/{type}    # Sync mode progress tracking (saves every 10 records)
 ```
 
 Legacy analysis types (`title`, `description`, `tags`, `content_structure`) may exist in Firestore from previous runs but are no longer generated. The insights phase falls back to legacy `title` analysis when `title_description` is not available.
