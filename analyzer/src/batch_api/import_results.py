@@ -6,7 +6,6 @@ data to the appropriate Firestore subcollection.
 
 import json
 import os
-import tempfile
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 
@@ -22,7 +21,7 @@ from .client import (
     download_result_file,
 )
 
-from shared.constants import BATCH_ANALYSIS_VERSION
+from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
 
 
 def import_batch_results(
@@ -217,7 +216,7 @@ def _import_single_result(result: Dict[str, Any], analysis_type: str) -> None:
 
     # Add metadata
     analysis_data['analyzedAt'] = datetime.utcnow().isoformat()
-    analysis_data['modelUsed'] = 'gemini-2.5-flash'
+    analysis_data['modelUsed'] = GEMINI_MODEL
     analysis_data['analysisVersion'] = BATCH_ANALYSIS_VERSION
     analysis_data['batchMode'] = True
 

@@ -6,7 +6,6 @@ with the proper request format for thumbnail and title_description analysis.
 
 import json
 import os
-import tempfile
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -22,6 +21,7 @@ from ..prompts import (
     THUMBNAIL_USER_PROMPT,
     TITLE_DESC_SYSTEM_INSTRUCTION,
     TITLE_DESC_USER_PROMPT,
+    build_title_description_input,
 )
 from .schemas import ThumbnailAnalysisSchema, TitleDescriptionAnalysisSchema
 
@@ -30,10 +30,6 @@ from shared.constants import (
     ANALYSIS_TYPE_TITLE_DESCRIPTION,
     GEMINI_MODEL,
 )
-
-
-# Max description length (same as TitleDescriptionAnalyzer)
-MAX_DESCRIPTION_LENGTH = 10000
 
 
 def _build_thumbnail_request(channel_id: str, video_id: str,
@@ -75,15 +71,7 @@ def _build_thumbnail_request(channel_id: str, video_id: str,
 def _build_title_description_request(channel_id: str, video_id: str,
                                       title: str, description: str) -> Dict[str, Any]:
     """Build a single title+description batch request."""
-    desc = description or ''
-    if len(desc) > MAX_DESCRIPTION_LENGTH:
-        desc = desc[:MAX_DESCRIPTION_LENGTH]
-
-    if desc.strip():
-        input_text = f"TITLE:\n{title}\n\nDESCRIPTION:\n{desc}"
-    else:
-        input_text = f"TITLE:\n{title}\n\nDESCRIPTION:\n(no description provided)"
-
+    input_text = build_title_description_input(title, description)
     user_prompt = f"{TITLE_DESC_USER_PROMPT}\n\nText to analyze:\n{input_text}"
 
     return {

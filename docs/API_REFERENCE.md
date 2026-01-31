@@ -250,7 +250,7 @@ result = analyzer.analyze(video_data)
 **Parameters:**
 - `video_data`: Dict with `title` and `description`
 
-**Returns:** Dict with ~140 attributes covering title analysis (structure, language, hooks, keywords, contentSignals, teluguAnalysis) and lean description analysis (structure, timestamps, recipeContent, hashtags, callToActions, seo)
+**Returns:** Dict with ~140 attributes covering title analysis (structure, language, hooks, keywords, contentSignals, teluguAnalysis) and lean description analysis (structure, timestamps, recipeContent, hashtags, ctas, seo)
 
 ### Batch Processor
 
@@ -753,7 +753,7 @@ class BaseGeminiConfig(BaseFirebaseConfig):
 
 | Code | Message | Solution |
 |------|---------|----------|
-| `RATE_LIMIT` | Gemini rate limit exceeded | Increase REQUEST_DELAY |
+| `RATE_LIMIT` | Gemini rate limit exceeded | Wait and retry; delay is hardcoded at 0.5s in config |
 | `INVALID_JSON` | Gemini returned invalid JSON | Automatic retry |
 | `THUMBNAIL_NOT_FOUND` | Thumbnail missing in storage | Run scraper first |
 

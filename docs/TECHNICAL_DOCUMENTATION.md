@@ -119,21 +119,27 @@ youtube_channel_analysis/
 │   └── tests/                # Vitest tests
 │
 ├── analyzer/                 # PHASE 2: Python AI Analyzer
-│   ├── requirements.txt
 │   ├── src/
 │   │   ├── __init__.py
-│   │   ├── main.py           # Entry point
+│   │   ├── main.py           # Entry point (sync + batch routing)
 │   │   ├── config.py         # Configuration
-│   │   ├── firebase_client.py
-│   │   ├── gemini_client.py  # Gemini API wrapper
-│   │   ├── analyzers/        # Analysis modules
+│   │   ├── firebase_client.py  # Firebase operations + batch_jobs CRUD
+│   │   ├── gemini_client.py  # Gemini API wrapper (response_schema support)
+│   │   ├── analyzers/        # Per-video analysis modules (sync mode)
 │   │   │   ├── __init__.py
 │   │   │   ├── thumbnail.py  # Vision analysis
 │   │   │   └── title_description.py  # Combined title+description text analysis
-│   │   ├── processors/       # Batch processing
+│   │   ├── batch_api/        # Gemini Batch API integration
 │   │   │   ├── __init__.py
-│   │   │   ├── batch.py
-│   │   │   └── progress.py
+│   │   │   ├── schemas.py    # Pydantic models for response_schema
+│   │   │   ├── client.py     # google-genai SDK wrapper
+│   │   │   ├── prepare.py    # Build JSONL request files
+│   │   │   ├── submit.py     # Submit jobs + track in Firestore
+│   │   │   └── import_results.py  # Download results + save to Firestore
+│   │   ├── processors/       # Sync mode orchestration
+│   │   │   ├── __init__.py
+│   │   │   ├── batch.py      # Channel/video iteration
+│   │   │   └── progress.py   # Progress tracking
 │   │   └── prompts/          # AI prompts
 │   │       ├── __init__.py
 │   │       ├── thumbnail_prompt.py
@@ -1543,7 +1549,7 @@ npm run recommend -- --topic "Biryani" --type recipe
 |-------|----------|
 | Quota exhausted | Wait until midnight Pacific, then resume |
 | Firebase permission denied | Check service account credentials |
-| Gemini rate limit | Increase REQUEST_DELAY in config |
+| Gemini rate limit | Wait and retry; consider upgrading Gemini API tier |
 | Invalid JSON from Gemini | Retry logic handles this |
 | Channel not found | Check URL format, try different format |
 

@@ -73,26 +73,6 @@ def get_channel(channel_id: str) -> Optional[Dict[str, Any]]:
 
 # ===== Video Operations =====
 
-def get_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
-    """Get all videos for a channel."""
-    db = get_db()
-    docs = db.collection('channels').document(channel_id).collection('videos').stream()
-    return [{'id': doc.id, **doc.to_dict()} for doc in docs]
-
-
-def get_video(channel_id: str, video_id: str) -> Optional[Dict[str, Any]]:
-    """Get a single video by ID."""
-    db = get_db()
-    doc = (db.collection('channels')
-           .document(channel_id)
-           .collection('videos')
-           .document(video_id)
-           .get())
-    if doc.exists:
-        return {'id': doc.id, **doc.to_dict()}
-    return None
-
-
 def get_unanalyzed_videos(channel_id: str, analysis_type: str, limit: int = 100) -> List[Dict[str, Any]]:
     """Get videos that haven't been analyzed yet for a specific analysis type.
 
@@ -175,21 +155,6 @@ def save_analysis(channel_id: str, video_id: str, analysis_type: str, data: Dict
      .set(data, merge=True))
 
 
-def get_analysis(channel_id: str, video_id: str, analysis_type: str) -> Optional[Dict[str, Any]]:
-    """Get analysis results for a video."""
-    db = get_db()
-    doc = (db.collection('channels')
-           .document(channel_id)
-           .collection('videos')
-           .document(video_id)
-           .collection('analysis')
-           .document(analysis_type)
-           .get())
-    if doc.exists:
-        return doc.to_dict()
-    return None
-
-
 def has_analysis(channel_id: str, video_id: str, analysis_type: str) -> bool:
     """Check if analysis exists for a video."""
     db = get_db()
@@ -204,16 +169,6 @@ def has_analysis(channel_id: str, video_id: str, analysis_type: str) -> bool:
 
 
 # ===== Storage Operations =====
-
-def get_thumbnail_url(storage_path: str) -> str:
-    """Get signed URL for a thumbnail in storage."""
-    bucket = get_bucket()
-    blob = bucket.blob(storage_path)
-
-    # Generate signed URL valid for 1 hour
-    url = blob.generate_signed_url(expiration=3600)
-    return url
-
 
 def download_thumbnail(storage_path: str) -> bytes:
     """Download thumbnail from storage as bytes."""

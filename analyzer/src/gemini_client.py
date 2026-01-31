@@ -253,48 +253,6 @@ def analyze_image(prompt: str, image_data: Union[bytes, Image.Image], retries: i
                 pass  # Ignore close errors
 
 
-def analyze_image_with_text(prompt: str, image_data: Union[bytes, Image.Image],
-                            additional_text: str, retries: int = 3) -> Dict[str, Any]:
-    """
-    Analyze an image with additional text context using Gemini Vision.
-
-    Args:
-        prompt: The analysis prompt with instructions
-        image_data: Image as bytes or PIL Image
-        additional_text: Additional text context
-        retries: Number of retry attempts
-
-    Returns:
-        Parsed JSON response from Gemini
-    """
-    model = get_model()
-    image = None
-    should_close = False
-
-    try:
-        # Convert bytes to PIL Image if needed
-        if isinstance(image_data, bytes):
-            image = Image.open(io.BytesIO(image_data))
-            should_close = True  # We created this image, so we should close it
-        else:
-            image = image_data
-            should_close = False  # Caller owns this image
-
-        full_prompt = f"{prompt}\n\nAdditional context:\n{additional_text}"
-
-        return _execute_with_retry(
-            lambda: model.generate_content([full_prompt, image]),
-            retries
-        )
-    finally:
-        # Clean up image resource if we created it
-        if should_close and image is not None:
-            try:
-                image.close()
-            except Exception:
-                pass  # Ignore close errors
-
-
 def test_connection() -> bool:
     """Test the Gemini API connection."""
     try:

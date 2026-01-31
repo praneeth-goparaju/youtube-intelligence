@@ -100,9 +100,8 @@ npm install
 cd scraper
 npx tsx scripts/validate.ts
 
-# Test Gemini API
-cd ../analyzer
-python src/main.py --validate
+# Test Gemini API (from project root)
+python -m analyzer.src.main --validate
 ```
 
 ### 5. Run the Pipeline
@@ -112,13 +111,11 @@ python src/main.py --validate
 cd scraper
 npm start
 
-# Phase 2: Analyze (after scraping)
-cd ../analyzer
-python src/main.py
+# Phase 2: Analyze (after scraping, from project root)
+python -m analyzer.src.main
 
-# Phase 3: Generate insights
-cd ../insights
-python src/main.py
+# Phase 3: Generate insights (from project root)
+python -m insights.src.main
 
 # Phase 4: Get recommendations
 cd ../functions
@@ -273,10 +270,10 @@ crontab -e
 0 1 * * * cd /opt/youtube-intelligence/scraper && npm start >> /var/log/yt-scraper.log 2>&1
 
 # Analyzer: Daily at 6 AM
-0 6 * * * cd /opt/youtube-intelligence/analyzer && source venv/bin/activate && python src/main.py >> /var/log/yt-analyzer.log 2>&1
+0 6 * * * cd /opt/youtube-intelligence && source venv/bin/activate && python -m analyzer.src.main >> /var/log/yt-analyzer.log 2>&1
 
 # Insights: Weekly on Sunday at noon
-0 12 * * 0 cd /opt/youtube-intelligence/insights && source ../analyzer/venv/bin/activate && python src/main.py >> /var/log/yt-insights.log 2>&1
+0 12 * * 0 cd /opt/youtube-intelligence && source venv/bin/activate && python -m insights.src.main >> /var/log/yt-insights.log 2>&1
 ```
 
 ---
@@ -425,7 +422,7 @@ jobs:
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-        run: cd analyzer && python src/main.py
+        run: python -m analyzer.src.main
 
   insights:
     needs: analyzer
@@ -447,7 +444,7 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-        run: cd insights && python src/main.py
+        run: python -m insights.src.main
 ```
 
 ---
@@ -619,7 +616,7 @@ notificationChannels:
 | Scraper stops daily | Quota exhausted | Normal - resumes next day |
 | Firebase timeout | Large batch writes | Reduce batch size |
 | Memory errors | Too many videos in memory | Process in smaller chunks |
-| Gemini rate limits | Too fast requests | Increase REQUEST_DELAY |
+| Gemini rate limits | Too fast requests | Wait and retry; delay is hardcoded at 0.5s in `analyzer/src/config.py` |
 
 ### Recovery Procedures
 
@@ -636,8 +633,8 @@ firebase firestore:delete scrape_progress --recursive --project=YOUR_PROJECT
 #### Reprocess Failed Videos
 
 ```bash
-# Run analyzer with force flag
-python src/main.py --type thumbnail --force --channel CHANNEL_ID
+# Re-run analyzer for a specific channel
+python -m analyzer.src.main --type thumbnail --channel CHANNEL_ID
 ```
 
 ---
