@@ -18,11 +18,21 @@ COMPLETED_STATES = {
     'JOB_STATE_SUCCEEDED',
     'JOB_STATE_FAILED',
     'JOB_STATE_CANCELLED',
-    'JOB_STATE_PAUSED',
 }
 
 # Client singleton
 _client: Optional[genai.Client] = None
+
+
+def _state_str(state) -> str:
+    """Convert a job state enum to a plain string.
+
+    The google-genai SDK returns JobState enums where str() gives
+    'JobState.JOB_STATE_SUCCEEDED' but we need 'JOB_STATE_SUCCEEDED'.
+    """
+    if hasattr(state, 'value'):
+        return state.value
+    return str(state)
 
 
 def get_client() -> genai.Client:
@@ -46,7 +56,7 @@ def upload_jsonl_file(file_path: str, display_name: str) -> str:
     client = get_client()
     uploaded = client.files.upload(
         file=file_path,
-        config=types.UploadFileConfig(display_name=display_name),
+        config=types.UploadFileConfig(display_name=display_name, mime_type='application/jsonl'),
     )
     logger.info(f"Uploaded {file_path} as {uploaded.name}")
     return uploaded.name
@@ -84,13 +94,15 @@ def get_batch_job(job_name: str) -> Any:
     return client.batches.get(name=job_name)
 
 
-def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440) -> Any:
+def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440,
+                   max_retries: int = 5) -> Any:
     """Poll a batch job until it reaches a terminal state.
 
     Args:
         job_name: The batch job name.
         poll_interval: Seconds between polls.
         max_polls: Maximum number of polls before giving up (default: 24 hours at 60s).
+        max_retries: Max consecutive network errors before giving up.
 
     Returns:
         BatchJob object in terminal state.
@@ -98,15 +110,28 @@ def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440
     client = get_client()
     job = client.batches.get(name=job_name)
     polls = 0
+    consecutive_errors = 0
+    start_time = time.time()
 
-    while job.state not in COMPLETED_STATES and polls < max_polls:
+    while _state_str(job.state) not in COMPLETED_STATES and polls < max_polls:
         polls += 1
-        logger.info(f"Job {job_name}: state={job.state} (poll {polls}/{max_polls})")
-        print(f"  State: {job.state} | Waiting {poll_interval}s... (poll {polls})")
+        elapsed = int(time.time() - start_time)
+        elapsed_str = f"{elapsed // 60}m {elapsed % 60:02d}s"
+        logger.info(f"Job {job_name}: state={_state_str(job.state)} (poll {polls}/{max_polls})")
+        print(f"  State: {_state_str(job.state)} | {elapsed_str} elapsed | Waiting {poll_interval}s... (poll {polls})")
         time.sleep(poll_interval)
-        job = client.batches.get(name=job_name)
+        try:
+            job = client.batches.get(name=job_name)
+            consecutive_errors = 0
+        except Exception as e:
+            consecutive_errors += 1
+            logger.warning(f"Poll error ({consecutive_errors}/{max_retries}): {e}")
+            print(f"  Network error (attempt {consecutive_errors}/{max_retries}), retrying...")
+            if consecutive_errors >= max_retries:
+                logger.error(f"Too many consecutive poll errors, giving up")
+                raise
 
-    if job.state not in COMPLETED_STATES:
+    if _state_str(job.state) not in COMPLETED_STATES:
         logger.warning(f"Job {job_name} did not complete after {max_polls} polls")
 
     return job
@@ -156,7 +181,7 @@ def download_result_file(file_name: str, output_path: str) -> str:
     """
     client = get_client()
     # Download the file content
-    response = client.files.download(name=file_name)
+    response = client.files.download(file=file_name)
     with open(output_path, 'wb') as f:
         f.write(response)
     logger.info(f"Downloaded results to {output_path}")

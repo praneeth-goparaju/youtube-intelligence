@@ -743,6 +743,81 @@
       "category": "education",
       "priority": 2,
       "analysis_note": "Informational content regarding Telugu language and culture."
+    },
+    {
+      "url": "https://www.youtube.com/@YourFoodLab",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@mucherlaaruna28",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@SallysWelt",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@allrecipes",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@EaterAtHome",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@chefharpalsingh",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@joyofbaking",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@foodfoodindia",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@IanKyo",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@RainbowPlantLife",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@via.ilyouu",
+      "category": "vlogging",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@soosonall",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@BakingHermann",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@AuberginenLiebe-o1s",
+      "category": "cooking",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@homegupshup",
+      "category": "lifestyle",
+      "priority": 2
     }
   ],
   "settings": {

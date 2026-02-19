@@ -56,7 +56,20 @@ def get_bucket():
 # ===== Channel Operations =====
 
 def get_all_channels() -> List[Dict[str, Any]]:
-    """Get all channels from Firestore."""
+    """Get channels with analyzeEnabled == True from Firestore.
+
+    Channels without the analyzeEnabled field are excluded.
+    Use get_all_channels_unfiltered() for status displays.
+    """
+    db = get_db()
+    query = db.collection('channels').where(
+        filter=FieldFilter('analyzeEnabled', '==', True)
+    )
+    return [{'id': doc.id, **doc.to_dict()} for doc in query.stream()]
+
+
+def get_all_channels_unfiltered() -> List[Dict[str, Any]]:
+    """Get all channels from Firestore (no analyzeEnabled filter)."""
     db = get_db()
     docs = db.collection('channels').stream()
     return [{'id': doc.id, **doc.to_dict()} for doc in docs]
@@ -86,12 +99,12 @@ def get_unanalyzed_videos_paginated(
     channel_id: str,
     analysis_type: str,
     limit: int = 100,
-    page_size: int = 100,
+    page_size: int = 1000,
 ) -> List[Dict[str, Any]]:
     """Get unanalyzed videos using paginated Firestore queries.
 
-    Fetches videos in pages to avoid loading all channel videos into memory
-    at once. This is important for channels with thousands of videos.
+    Fetches videos in pages and uses batch get (db.get_all) to check
+    analysis status for each page, avoiding per-video round-trips.
 
     Args:
         channel_id: The channel ID to fetch videos for.
@@ -120,25 +133,45 @@ def get_unanalyzed_videos_paginated(
 
         last_doc = docs[-1]
 
+        # Filter out Shorts and build lookup
+        candidates = {}
         for video_doc in docs:
-            if len(unanalyzed) >= limit:
-                break
+            video_data = video_doc.to_dict()
+            if not video_data.get('isShort', False):
+                candidates[video_doc.id] = video_data
 
-            video_id = video_doc.id
-            # Check if analysis already exists
-            analysis_doc = (videos_ref.document(video_id)
-                           .collection('analysis')
-                           .document(analysis_type)
-                           .get())
+        # Batch check analysis status for all candidates in this page
+        if candidates:
+            refs = [
+                videos_ref.document(vid).collection('analysis').document(analysis_type)
+                for vid in candidates
+            ]
+            analyzed_ids = set()
+            for doc_snapshot in db.get_all(refs, field_paths=[]):
+                if doc_snapshot.exists:
+                    analyzed_ids.add(doc_snapshot.reference.parent.parent.id)
 
-            if not analysis_doc.exists:
-                unanalyzed.append({'id': video_id, **video_doc.to_dict()})
+            for vid, video_data in candidates.items():
+                if len(unanalyzed) >= limit:
+                    break
+                if vid not in analyzed_ids:
+                    unanalyzed.append({'id': vid, **video_data})
 
         # If we got fewer docs than page_size, we've reached the end
         if len(docs) < page_size:
             break
 
     return unanalyzed
+
+
+def get_video(channel_id: str, video_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a single video document."""
+    db = get_db()
+    doc = (db.collection('channels').document(channel_id)
+           .collection('videos').document(video_id).get())
+    if doc.exists:
+        return doc.to_dict()
+    return None
 
 
 # ===== Analysis Operations =====
@@ -263,7 +296,49 @@ def get_all_channel_videos_for_batch(channel_id: str) -> List[Dict[str, Any]]:
     """Get all videos for a channel (used during batch prepare to check analysis status).
 
     Returns minimal video data needed for batch preparation.
+    Excludes Shorts (isShort=true).
     """
     db = get_db()
     docs = db.collection('channels').document(channel_id).collection('videos').stream()
-    return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+    videos = []
+    for doc in docs:
+        data = doc.to_dict()
+        if not data.get('isShort', False):
+            videos.append({'id': doc.id, **data})
+    return videos
+
+
+def get_analyzed_video_ids(channel_id: str, analysis_type: str, video_ids: List[str]) -> set:
+    """Get the set of video IDs that already have a given analysis type.
+
+    Uses Firestore batch get (db.get_all) to check all videos in a single
+    RPC call instead of one .get() per video.
+
+    Args:
+        channel_id: The channel to check.
+        analysis_type: The analysis type (thumbnail, title_description).
+        video_ids: List of video IDs to check.
+
+    Returns:
+        Set of video IDs that already have the analysis.
+    """
+    if not video_ids:
+        return set()
+
+    db = get_db()
+    videos_ref = db.collection('channels').document(channel_id).collection('videos')
+
+    # Build refs for all analysis docs we want to check
+    refs = [
+        videos_ref.document(vid).collection('analysis').document(analysis_type)
+        for vid in video_ids
+    ]
+
+    # get_all fetches all refs in batched RPCs (internally batches by ~100)
+    analyzed = set()
+    for doc_snapshot in db.get_all(refs, field_paths=[]):
+        if doc_snapshot.exists:
+            # Path: channels/{ch}/videos/{vid}/analysis/{type} — video ID is 4th segment from end
+            analyzed.add(doc_snapshot.reference.parent.parent.id)
+
+    return analyzed

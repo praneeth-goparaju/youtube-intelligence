@@ -6,18 +6,14 @@ import {
   daysBetween,
   getDayOfWeek,
   getHourIST,
-  containsTelugu,
-  containsEnglish,
-  containsNumber,
-  containsEmoji,
   VIDEO_CATEGORIES,
   retry,
 } from '../utils/helpers.js';
 import { config } from '../config.js';
 
-// Retry configuration for YouTube API calls
-const API_MAX_RETRIES = 3;
-const API_BASE_DELAY_MS = 1000;
+// Retry configuration from centralized config
+const API_MAX_RETRIES = config.scraper.maxRetries;
+const API_BASE_DELAY_MS = config.scraper.retryDelayMs;
 
 interface PlaylistPageResult {
   items: PlaylistItem[];
@@ -141,8 +137,6 @@ export function calculateVideoMetrics(
     viewCount: number;
     likeCount: number;
     commentCount: number;
-    title: string;
-    description: string;
     tags: string[];
   },
   subscriberCount: number | null
@@ -167,13 +161,7 @@ export function calculateVideoMetrics(
     viewsPerDay: video.viewCount / daysSince,
     publishDayOfWeek: getDayOfWeek(video.publishedAt),
     publishHourIST: getHourIST(video.publishedAt),
-    titleLength: video.title.length,
-    descriptionLength: video.description.length,
     tagCount: video.tags.length,
-    hasNumberInTitle: containsNumber(video.title),
-    hasEmojiInTitle: containsEmoji(video.title),
-    hasTeluguInTitle: containsTelugu(video.title),
-    hasEnglishInTitle: containsEnglish(video.title),
   };
 }
 
@@ -208,8 +196,6 @@ export function transformVideoData(
       viewCount,
       likeCount,
       commentCount,
-      title: data.snippet.title,
-      description: data.snippet.description,
       tags,
     },
     subscriberCount

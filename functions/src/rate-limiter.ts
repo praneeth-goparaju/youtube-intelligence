@@ -6,6 +6,7 @@
  */
 
 import * as admin from 'firebase-admin';
+import { createHash } from 'crypto';
 
 const RATE_LIMIT_COLLECTION = 'rateLimits';
 
@@ -28,8 +29,8 @@ export async function checkRateLimit(
   const db = admin.firestore();
   const now = Date.now();
 
-  // Sanitize key for use as Firestore document ID
-  const docId = key.replace(/[/\\.\s]/g, '_').slice(0, 128);
+  // Hash key for use as Firestore document ID (avoids storing raw API keys/tokens)
+  const docId = createHash('sha256').update(key).digest('hex').slice(0, 64);
   const docRef = db.collection(RATE_LIMIT_COLLECTION).doc(docId);
 
   try {

@@ -85,6 +85,8 @@ export const logger = {
 
   subheader: (title: string) => {
     logger.divider('-', 80);
+    console.log(`${COLORS.bright}  ${title}${COLORS.reset}`);
+    logger.divider('-', 80);
   },
 
   progress: (current: number, total: number, label: string) => {

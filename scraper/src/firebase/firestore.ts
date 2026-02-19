@@ -169,9 +169,16 @@ export async function deleteProgress(channelId: string): Promise<void> {
 export async function deleteAllProgress(): Promise<void> {
   const db = getDb();
   const snapshot = await db.collection(PROGRESS_COLLECTION).get();
-  const batch = db.batch();
-  snapshot.docs.forEach((doc) => batch.delete(doc.ref));
-  await batch.commit();
+
+  // Firestore batches limited to 500 operations
+  const BATCH_LIMIT = 500;
+  const docs = snapshot.docs;
+  for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+    const chunk = docs.slice(i, i + BATCH_LIMIT);
+    const batch = db.batch();
+    chunk.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+  }
 }
 
 /**

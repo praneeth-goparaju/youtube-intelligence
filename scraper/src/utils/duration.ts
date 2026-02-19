@@ -3,12 +3,25 @@
  * Examples: PT15M33S -> 933, PT1H30M -> 5400, PT45S -> 45
  */
 export function parseDuration(isoDuration: string): number {
-  if (!isoDuration || !isoDuration.startsWith('PT')) {
+  if (!isoDuration) {
     return 0;
   }
 
-  const duration = isoDuration.substring(2); // Remove 'PT'
+  // Handle P1DT2H3M4S format (with day component)
+  let remaining = isoDuration;
   let totalSeconds = 0;
+
+  if (remaining.startsWith('P')) {
+    remaining = remaining.substring(1);
+    const dayMatch = remaining.match(/(\d+)D/);
+    if (dayMatch) {
+      totalSeconds += parseInt(dayMatch[1], 10) * 86400;
+    }
+  }
+
+  // Remove 'T' separator if present
+  const tIndex = remaining.indexOf('T');
+  const duration = tIndex >= 0 ? remaining.substring(tIndex + 1) : remaining;
 
   // Match hours
   const hoursMatch = duration.match(/(\d+)H/);

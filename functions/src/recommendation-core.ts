@@ -363,13 +363,10 @@ export function generateTitlesFromTemplates(
  * Generate thumbnail recommendation from templates.
  */
 export function generateThumbnailFromTemplates(topic: string, type: ContentType): ThumbnailRecommendation {
-  const spec = { ...THUMBNAIL_SPECS[type] };
+  const spec: ThumbnailRecommendation = JSON.parse(JSON.stringify(THUMBNAIL_SPECS[type]));
 
   if (spec.elements.text.primary) {
-    spec.elements.text.primary = {
-      ...spec.elements.text.primary,
-      content: topic.toUpperCase().split(' ')[0],
-    };
+    spec.elements.text.primary.content = topic.toUpperCase().split(' ')[0];
   }
 
   return spec;
@@ -435,7 +432,7 @@ export function generateFromTemplates(
     metadata: {
       generatedAt: new Date().toISOString(),
       modelUsed: 'template',
-      insightsVersion: null,
+      insightsVersion,
       fallbackUsed: true,
     },
   };

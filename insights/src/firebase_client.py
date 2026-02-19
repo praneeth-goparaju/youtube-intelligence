@@ -175,25 +175,3 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
     except Exception as e:
         print(f"Error saving insights for {insight_type}: {e}")
         raise
-
-
-def get_insights(insight_type: str) -> Optional[Dict[str, Any]]:
-    """Get insights from Firestore.
-
-    Args:
-        insight_type: The type of insights to fetch.
-
-    Returns:
-        Insights document data or None if not found.
-
-    Raises:
-        RuntimeError: If fetching insights fails due to Firestore error.
-    """
-    try:
-        db = get_db()
-        doc = db.collection('insights').document(insight_type).get()
-        if doc.exists:
-            return doc.to_dict()
-        return None
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch insights for {insight_type}: {e}") from e

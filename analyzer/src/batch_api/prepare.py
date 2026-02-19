@@ -13,8 +13,9 @@ from ..config import config, logger
 from ..firebase_client import (
     get_all_channels,
     get_channel,
-    has_analysis,
+    get_analyzed_video_ids,
     get_all_channel_videos_for_batch,
+    download_thumbnail,
 )
 from ..prompts import (
     THUMBNAIL_SYSTEM_INSTRUCTION,
@@ -33,12 +34,14 @@ from shared.constants import (
 
 
 def _build_thumbnail_request(channel_id: str, video_id: str,
-                              thumbnail_storage_path: str) -> Dict[str, Any]:
+                              image_bytes: bytes) -> Dict[str, Any]:
     """Build a single thumbnail batch request.
 
-    Uses GCS URI directly since Firebase Storage IS Google Cloud Storage.
+    Embeds the image as inline base64 data. GCS URIs don't work because the
+    Gemini API service account lacks read access to the Firebase Storage bucket.
     """
-    gcs_uri = f"{config.GCS_BUCKET_URI}/{thumbnail_storage_path}"
+    import base64
+    b64_data = base64.b64encode(image_bytes).decode('ascii')
 
     return {
         "key": f"{channel_id}_{video_id}_{ANALYSIS_TYPE_THUMBNAIL}",
@@ -48,8 +51,8 @@ def _build_thumbnail_request(channel_id: str, video_id: str,
                 "parts": [
                     {"text": THUMBNAIL_USER_PROMPT},
                     {
-                        "file_data": {
-                            "file_uri": gcs_uri,
+                        "inline_data": {
+                            "data": b64_data,
                             "mime_type": "image/jpeg",
                         }
                     },
@@ -60,9 +63,9 @@ def _build_thumbnail_request(channel_id: str, video_id: str,
             },
             "generation_config": {
                 "response_mime_type": "application/json",
-                "response_schema": _pydantic_to_schema(ThumbnailAnalysisSchema),
+                "response_json_schema": _pydantic_to_schema(ThumbnailAnalysisSchema),
                 "temperature": 0.1,
-                "max_output_tokens": 8192,
+                "max_output_tokens": 16384,
             },
         },
     }
@@ -86,9 +89,9 @@ def _build_title_description_request(channel_id: str, video_id: str,
             },
             "generation_config": {
                 "response_mime_type": "application/json",
-                "response_schema": _pydantic_to_schema(TitleDescriptionAnalysisSchema),
+                "response_json_schema": _pydantic_to_schema(TitleDescriptionAnalysisSchema),
                 "temperature": 0.1,
-                "max_output_tokens": 8192,
+                "max_output_tokens": 16384,
             },
         },
     }
@@ -98,10 +101,30 @@ def _pydantic_to_schema(model_class) -> Dict[str, Any]:
     """Convert a Pydantic model to JSON Schema dict for the Batch API.
 
     The Batch API JSONL format requires a raw JSON Schema dict (not a Pydantic
-    model object) since it's serialized to JSON. We use Pydantic's built-in
-    json_schema() method to generate the schema.
+    model object) since it's serialized to JSON. Pydantic generates $defs/$ref
+    for nested models, but the Gemini Batch API doesn't support those — we must
+    inline all references.
     """
-    return model_class.model_json_schema()
+    schema = model_class.model_json_schema()
+    defs = schema.pop('$defs', {})
+    if defs:
+        schema = _resolve_refs(schema, defs)
+    return schema
+
+
+def _resolve_refs(node: Any, defs: Dict[str, Any]) -> Any:
+    """Recursively resolve all $ref pointers by inlining from $defs."""
+    if isinstance(node, dict):
+        if '$ref' in node:
+            ref_path = node['$ref']  # e.g. "#/$defs/ThumbnailScene"
+            ref_name = ref_path.split('/')[-1]
+            resolved = defs.get(ref_name, {})
+            # Recursively resolve in case of nested refs
+            return _resolve_refs(resolved, defs)
+        return {k: _resolve_refs(v, defs) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_resolve_refs(item, defs) for item in node]
+    return node
 
 
 def prepare_batch_requests(
@@ -138,15 +161,35 @@ def prepare_batch_requests(
     jsonl_path = os.path.join(output_dir, f"batch_{analysis_type}_{timestamp}.jsonl")
 
     request_count = 0
-    skipped_count = 0
+    already_analyzed = 0
+    missing_data = 0
+    channels_scanned = 0
+    channels_with_work = 0
+    total_channels = len(channels)
 
     print(f"\nPreparing {analysis_type} batch requests...")
-    print(f"Scanning {len(channels)} channels for unanalyzed videos...")
+    print(f"Scanning up to {total_channels} channels (batch size: {batch_size})...\n")
 
     with open(jsonl_path, 'w') as f:
         for channel in channels:
+            if request_count >= batch_size:
+                break
+
             ch_id = channel['id']
+            ch_name = channel.get('title', channel.get('name', ch_id))
+            channels_scanned += 1
+
+            print(f"  [{channels_scanned}/{total_channels}] {ch_name[:35]}...", end=" ", flush=True)
+
             videos = get_all_channel_videos_for_batch(ch_id)
+            video_ids = [v['id'] for v in videos]
+
+            # Batch check all analysis docs in one RPC instead of per-video
+            analyzed_set = get_analyzed_video_ids(ch_id, analysis_type, video_ids)
+
+            ch_needs = 0
+            ch_analyzed = len(analyzed_set)
+            already_analyzed += ch_analyzed
 
             for video in videos:
                 if request_count >= batch_size:
@@ -154,27 +197,32 @@ def prepare_batch_requests(
 
                 video_id = video['id']
 
-                # Check if already analyzed
-                if has_analysis(ch_id, video_id, analysis_type):
-                    skipped_count += 1
+                if video_id in analyzed_set:
                     continue
 
                 request = _build_request(analysis_type, ch_id, video_id, video)
                 if request is None:
-                    skipped_count += 1
+                    missing_data += 1
                     continue
 
                 f.write(json.dumps(request) + '\n')
                 request_count += 1
+                ch_needs += 1
 
-            if request_count >= batch_size:
-                print(f"  Reached batch size limit ({batch_size})")
-                break
+            if ch_needs > 0:
+                channels_with_work += 1
+                print(f"+{ch_needs} new  (total: {request_count})")
+            else:
+                print(f"all {ch_analyzed} done")
 
-    print(f"\nBatch preparation complete:")
-    print(f"  Requests written: {request_count}")
-    print(f"  Skipped (already analyzed or missing data): {skipped_count}")
-    print(f"  Output file: {jsonl_path}")
+    remaining = total_channels - channels_scanned
+    print(f"\n  Batch preparation complete:")
+    print(f"    Requests written:  {request_count}" + (f" (hit batch size limit)" if request_count >= batch_size else ""))
+    print(f"    Already analyzed:  {already_analyzed}")
+    print(f"    Missing data:      {missing_data}")
+    print(f"    Channels scanned:  {channels_scanned}/{total_channels}"
+          + (f" ({remaining} skipped — batch full)" if remaining > 0 else ""))
+    print(f"    Output file:       {jsonl_path}")
 
     if request_count == 0:
         # Clean up empty file
@@ -192,7 +240,12 @@ def _build_request(analysis_type: str, channel_id: str, video_id: str,
         thumbnail_path = video.get('thumbnailStoragePath', '')
         if not thumbnail_path:
             return None
-        return _build_thumbnail_request(channel_id, video_id, thumbnail_path)
+        try:
+            image_bytes = download_thumbnail(thumbnail_path)
+        except Exception as e:
+            logger.warning(f"Failed to download thumbnail {thumbnail_path}: {e}")
+            return None
+        return _build_thumbnail_request(channel_id, video_id, image_bytes)
 
     elif analysis_type == ANALYSIS_TYPE_TITLE_DESCRIPTION:
         title = video.get('title', '')

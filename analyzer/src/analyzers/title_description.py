@@ -13,6 +13,7 @@ from ..gemini_client import analyze_text
 from ..firebase_client import save_analysis, has_analysis
 from ..prompts import TITLE_DESCRIPTION_ANALYSIS_PROMPT, build_title_description_input
 from ..config import config, logger
+from .local_text_features import extract_local_features, deep_merge
 
 
 class TitleDescriptionAnalyzer:
@@ -48,10 +49,18 @@ class TitleDescriptionAnalyzer:
             input_text = build_title_description_input(title, description)
 
             # Analyze with Gemini (single API call, uses response_schema when available)
-            result = analyze_text(
+            gemini_result = analyze_text(
                 TITLE_DESCRIPTION_ANALYSIS_PROMPT, input_text,
                 analysis_type=self.ANALYSIS_TYPE,
             )
+
+            if not gemini_result:
+                logger.warning(f"Empty result from Gemini for {video_id}")
+                return None
+
+            # Compute local (deterministic) features and merge with Gemini output
+            local_result = extract_local_features(title, description)
+            result = deep_merge(gemini_result, local_result)
 
             # Add metadata
             result['analyzedAt'] = datetime.utcnow().isoformat()

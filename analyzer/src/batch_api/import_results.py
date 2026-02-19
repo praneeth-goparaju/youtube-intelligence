@@ -12,13 +12,16 @@ from typing import Optional, Dict, Any, Tuple
 from ..config import config, logger
 from ..firebase_client import (
     save_analysis,
+    get_video,
     get_batch_job as get_batch_job_record,
     get_latest_batch_job,
     update_batch_job,
 )
+from ..analyzers.local_text_features import extract_local_features, deep_merge
 from .client import (
     get_batch_job as get_batch_job_status,
     download_result_file,
+    _state_str,
 )
 
 from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
@@ -56,13 +59,16 @@ def import_batch_results(
         job_id = job_record['id']
 
     batch_job_name = job_record['jobName']
+    request_count = job_record.get('requestCount', '?')
     print(f"\nImporting results from batch job: {batch_job_name}")
-    print(f"  Analysis type: {analysis_type}")
+    print(f"  Analysis type: {analysis_type}"
+          + (" (hybrid: Gemini + local features)" if analysis_type == 'title_description' else ""))
+    print(f"  Expected results: {request_count}")
 
     # Get the actual job status to find result location
     job = get_batch_job_status(batch_job_name)
 
-    if str(job.state) != 'JOB_STATE_SUCCEEDED':
+    if _state_str(job.state) != 'JOB_STATE_SUCCEEDED':
         print(f"  Job state is {job.state}, cannot import results")
         return {'error': f'Job not in succeeded state: {job.state}'}
 
@@ -80,11 +86,13 @@ def import_batch_results(
         'importStats': stats,
     })
 
-    print(f"\nImport complete:")
-    print(f"  Total results: {stats['total']}")
-    print(f"  Successful imports: {stats['imported']}")
-    print(f"  Failed imports: {stats['failed']}")
-    print(f"  Parse errors: {stats['parseErrors']}")
+    print(f"\n  Import complete:")
+    print(f"    Total results:       {stats['total']}")
+    print(f"    Successful imports:  {stats['imported']}")
+    print(f"    Failed imports:      {stats['failed']}")
+    print(f"    Parse errors:        {stats['parseErrors']}")
+    if stats.get('localFeaturesMerged', 0) > 0:
+        print(f"    Local features:      {stats['localFeaturesMerged']} merged (title_description)")
 
     return stats
 
@@ -162,14 +170,22 @@ def _process_result_file(file_path: str, analysis_type: str) -> Dict[str, Any]:
         'imported': 0,
         'failed': 0,
         'parseErrors': 0,
+        'localFeaturesMerged': 0,
     }
+
+    # Count total lines for progress display
+    with open(file_path, 'r') as f:
+        total_lines = sum(1 for line in f if line.strip())
+
+    current_channel = None
 
     with open(file_path, 'r') as f:
         for line_num, line in enumerate(f, 1):
-            stats['total'] += 1
             line = line.strip()
             if not line:
                 continue
+
+            stats['total'] += 1
 
             try:
                 result = json.loads(line)
@@ -178,25 +194,39 @@ def _process_result_file(file_path: str, analysis_type: str) -> Dict[str, Any]:
                 stats['parseErrors'] += 1
                 continue
 
+            # Track channel changes for progress display
+            key = result.get('key', '')
+            if key and len(key) >= 24 and key[0:2] == 'UC':
+                ch_id = key[:24]
+                if ch_id != current_channel:
+                    current_channel = ch_id
+
             try:
-                _import_single_result(result, analysis_type)
+                merged_local = _import_single_result(result, analysis_type)
                 stats['imported'] += 1
+                if merged_local:
+                    stats['localFeaturesMerged'] += 1
             except Exception as e:
                 logger.error(f"Import error on line {line_num}: {e}")
                 stats['failed'] += 1
 
-            # Progress logging every 1000 results
-            if stats['total'] % 1000 == 0:
-                print(f"  Processed {stats['total']} results...")
+            # Progress logging every 100 results
+            if stats['total'] % 100 == 0:
+                ch_display = current_channel or '?'
+                print(f"  [{stats['total']:>{len(str(total_lines))}}/{total_lines}]  {ch_display} — "
+                      f"{stats['imported']} imported, {stats['failed']} failed")
 
     return stats
 
 
-def _import_single_result(result: Dict[str, Any], analysis_type: str) -> None:
+def _import_single_result(result: Dict[str, Any], analysis_type: str) -> bool:
     """Import a single batch result into Firestore.
 
     Parses the key to extract channelId and videoId, then extracts
     the JSON response text and saves it as analysis data.
+
+    Returns:
+        True if local features were merged, False otherwise.
     """
     key = result.get('key', '')
     response = result.get('response', {})
@@ -214,6 +244,17 @@ def _import_single_result(result: Dict[str, Any], analysis_type: str) -> None:
     if not analysis_data:
         raise ValueError(f"No analysis data in response for key: {key}")
 
+    # For title_description, merge locally-computed deterministic features
+    merged_local = False
+    if analysis_type == 'title_description':
+        video_doc = get_video(channel_id, video_id)
+        if video_doc:
+            title = video_doc.get('title', '')
+            description = video_doc.get('description', '')
+            local_features = extract_local_features(title, description)
+            analysis_data = deep_merge(analysis_data, local_features)
+            merged_local = True
+
     # Add metadata
     analysis_data['analyzedAt'] = datetime.utcnow().isoformat()
     analysis_data['modelUsed'] = GEMINI_MODEL
@@ -222,6 +263,7 @@ def _import_single_result(result: Dict[str, Any], analysis_type: str) -> None:
 
     # Save to Firestore
     save_analysis(channel_id, video_id, analysis_type, analysis_data)
+    return merged_local
 
 
 def _parse_result_key(key: str, analysis_type: str) -> Tuple[str, str]:

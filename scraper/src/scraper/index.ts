@@ -693,6 +693,6 @@ export async function runScraper(options: { updateMode?: boolean; ignoreQuota?: 
   } else if (updateMode) {
     logger.success('All channels updated!');
   } else {
-    logger.success('All channels processed! Proceed to Phase 2: python analyzer/src/main.py');
+    logger.success('All channels processed! Proceed to Phase 2: cd analyzer && python -m src.main');
   }
 }

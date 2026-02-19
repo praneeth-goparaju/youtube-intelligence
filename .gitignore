@@ -74,3 +74,7 @@ insights/outputs/*.csv
 *.tmp
 *.temp
 .cache/
+data/batch/
+data/channels-review.csv
+data/old-channels-review.csv
+data/channels-review.csv

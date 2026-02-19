@@ -9,6 +9,7 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineString } from 'firebase-functions/params';
 import { RecommendationEngine } from './engine';
 import { checkRateLimit } from './rate-limiter';
+import { sanitizeInput, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
 import type { RecommendationRequest, RecommendationResponse, ContentType } from './types';
 
 // Set global options for all functions
@@ -74,32 +75,6 @@ const VALID_CONTENT_TYPES: ContentType[] = ['recipe', 'vlog', 'tutorial', 'revie
 
 function isValidContentType(type: string): type is ContentType {
   return VALID_CONTENT_TYPES.includes(type as ContentType);
-}
-
-// Input length limits for security
-const MAX_TOPIC_LENGTH = 200;
-const MAX_ANGLE_LENGTH = 500;
-const MAX_AUDIENCE_LENGTH = 200;
-
-/**
- * Sanitize user input to prevent prompt injection
- * Removes control characters and limits length
- */
-function sanitizeInput(input: string | undefined, maxLength: number): string {
-  if (!input) return '';
-
-  // Remove control characters and normalize whitespace
-  let sanitized = input
-    .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
-    .replace(/\s+/g, ' ')            // Normalize whitespace
-    .trim();
-
-  // Truncate to max length
-  if (sanitized.length > maxLength) {
-    sanitized = sanitized.slice(0, maxLength);
-  }
-
-  return sanitized;
 }
 
 // ============================================
@@ -210,12 +185,20 @@ export const recommend = onRequest(
  * const getRecommendation = httpsCallable(functions, 'getRecommendation');
  * const result = await getRecommendation({ topic: 'Biryani', type: 'recipe' });
  */
-export const getRecommendation = onCall<RecommendationRequest, Promise<RecommendationResponse>>(
+export const getRecommendation = onCall<RecommendationRequest, RecommendationResponse>(
   async (request) => {
+    // Require authentication
+    if (!request.auth) {
+      throw new HttpsError(
+        'unauthenticated',
+        'Authentication required. Please sign in to use this service.'
+      );
+    }
+
     const { topic, type, angle, audience } = request.data;
 
-    // Check rate limit using auth UID or app check token (distributed via Firestore)
-    const rateLimitKey = request.auth?.uid || request.rawRequest.ip || 'anonymous';
+    // Check rate limit using auth UID (distributed via Firestore)
+    const rateLimitKey = request.auth.uid;
     const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
 
     if (!rateLimit.allowed) {

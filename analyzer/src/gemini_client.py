@@ -29,11 +29,17 @@ class GeminiResponseError(GeminiAPIError):
     pass
 
 
-# Initialize the Gemini client
-genai.configure(api_key=config.GOOGLE_API_KEY)
-
 # Model instances: keyed by (analysis_type or 'default')
 _models: Dict[str, genai.GenerativeModel] = {}
+_configured: bool = False
+
+
+def _ensure_configured() -> None:
+    """Configure the Gemini SDK on first use (after Config.load() has run)."""
+    global _configured
+    if not _configured:
+        genai.configure(api_key=config.GOOGLE_API_KEY)
+        _configured = True
 
 
 def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
@@ -47,6 +53,7 @@ def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
         analysis_type: Optional analysis type ('thumbnail' or 'title_description')
                        for schema-aware model creation.
     """
+    _ensure_configured()
     cache_key = analysis_type or 'default'
 
     if cache_key not in _models:
@@ -57,7 +64,7 @@ def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
             'temperature': 0.1,
             'top_p': 0.95,
             'top_k': 40,
-            'max_output_tokens': 8192,
+            'max_output_tokens': 16384,
         }
 
         # Try to use structured output for specific analysis types

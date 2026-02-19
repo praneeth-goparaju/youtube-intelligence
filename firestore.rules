@@ -37,5 +37,20 @@ service cloud.firestore {
     match /analysis_progress/{progressId} {
       allow read, write: if false;
     }
+
+    // Batch jobs - admin only (no client access)
+    match /batch_jobs/{jobId} {
+      allow read, write: if false;
+    }
+
+    // Unresolved channels - admin only
+    match /unresolved_channels/{docId} {
+      allow read, write: if false;
+    }
+
+    // Rate limits - admin only (managed by Cloud Functions)
+    match /rateLimits/{docId} {
+      allow read, write: if false;
+    }
   }
 }

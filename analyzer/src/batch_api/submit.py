@@ -15,6 +15,7 @@ from .client import (
     poll_batch_job,
     get_batch_job as get_batch_job_status,
     COMPLETED_STATES,
+    _state_str,
 )
 
 from shared.constants import GEMINI_MODEL, BATCH_ANALYSIS_VERSION
@@ -71,7 +72,7 @@ def submit_batch(
         'analysisType': analysis_type,
         'model': GEMINI_MODEL,
         'analysisVersion': BATCH_ANALYSIS_VERSION,
-        'state': str(job.state),
+        'state': _state_str(job.state),
         'requestCount': request_count,
         'srcFileName': file_name,
         'jsonlPath': jsonl_path,
@@ -82,6 +83,15 @@ def submit_batch(
     }
     save_batch_job(job_id, job_record)
     print(f"  Tracked in Firestore: batch_jobs/{job_id}")
+
+    # Estimated cost (batch pricing is ~50% of standard)
+    # Rough estimate: ~$0.001 per request for text, ~$0.002 for vision
+    if analysis_type == 'thumbnail':
+        cost_per_req = 0.002
+    else:
+        cost_per_req = 0.001
+    est_cost = request_count * cost_per_req
+    print(f"  Estimated cost: ~${est_cost:.2f} ({request_count} requests x ~${cost_per_req}/req at batch pricing)")
 
     return job_record
 
@@ -127,7 +137,7 @@ def poll_and_update(
     job = poll_batch_job(batch_job_name, poll_interval=interval)
 
     # Update Firestore
-    state = str(job.state)
+    state = _state_str(job.state)
     updates = {'state': state}
     if state == 'JOB_STATE_SUCCEEDED':
         updates['completedAt'] = datetime.utcnow().isoformat()

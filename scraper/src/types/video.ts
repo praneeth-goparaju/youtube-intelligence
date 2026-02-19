@@ -17,13 +17,7 @@ export interface CalculatedMetrics {
   performancePercentile?: number;
   publishDayOfWeek: string;
   publishHourIST: number;
-  titleLength: number;
-  descriptionLength: number;
   tagCount: number;
-  hasNumberInTitle: boolean;
-  hasEmojiInTitle: boolean;
-  hasTeluguInTitle: boolean;
-  hasEnglishInTitle: boolean;
 }
 
 export interface Video {

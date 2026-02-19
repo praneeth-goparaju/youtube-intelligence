@@ -8,6 +8,7 @@ import requests
 from ..gemini_client import analyze_image
 from ..firebase_client import download_thumbnail, save_analysis, has_analysis
 from ..prompts import THUMBNAIL_ANALYSIS_PROMPT
+from shared.constants import BATCH_ANALYSIS_VERSION
 from ..config import config, logger
 
 
@@ -47,10 +48,14 @@ class ThumbnailAnalyzer:
                 analysis_type=self.ANALYSIS_TYPE,
             )
 
+            if not result:
+                logger.warning(f"Empty result from Gemini for thumbnail {video_id}")
+                return None
+
             # Add metadata
             result['analyzedAt'] = datetime.utcnow().isoformat()
             result['modelUsed'] = config.GEMINI_MODEL
-            result['analysisVersion'] = '1.0'
+            result['analysisVersion'] = BATCH_ANALYSIS_VERSION
 
             # Save to Firestore
             save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
@@ -75,6 +80,10 @@ class ThumbnailAnalyzer:
         Returns:
             Analysis results or None if failed
         """
+        # Check if already analyzed
+        if not force and has_analysis(channel_id, video_id, self.ANALYSIS_TYPE):
+            return None
+
         try:
             # Fetch image from URL using synchronous request
             response = requests.get(thumbnail_url, timeout=30)
@@ -87,10 +96,14 @@ class ThumbnailAnalyzer:
                 analysis_type=self.ANALYSIS_TYPE,
             )
 
+            if not result:
+                logger.warning(f"Empty result from Gemini for thumbnail URL {video_id}")
+                return None
+
             # Add metadata
             result['analyzedAt'] = datetime.utcnow().isoformat()
             result['modelUsed'] = config.GEMINI_MODEL
-            result['analysisVersion'] = '1.0'
+            result['analysisVersion'] = BATCH_ANALYSIS_VERSION
 
             # Save to Firestore
             save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
