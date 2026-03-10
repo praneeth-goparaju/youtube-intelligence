@@ -81,3 +81,54 @@ export async function getInsightsVersion(): Promise<string | null> {
     return null;
   }
 }
+
+// ============================================
+// Generations (auto-save history)
+// ============================================
+
+export interface GenerationDoc {
+  type: 'ideas' | 'recommendation';
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  savedAt: string;
+}
+
+/**
+ * Save a generation document to Firestore
+ */
+export async function saveGeneration(data: {
+  type: 'ideas' | 'recommendation';
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+}): Promise<{ id: string; savedAt: string }> {
+  const savedAt = new Date().toISOString();
+  const docRef = await db.collection('generations').add({
+    type: data.type,
+    request: data.request,
+    response: data.response,
+    savedAt,
+  });
+  return { id: docRef.id, savedAt };
+}
+
+/**
+ * List generations, newest first
+ */
+export async function listGenerations(
+  type?: 'ideas' | 'recommendation',
+  limit = 50
+): Promise<Array<{ id: string } & GenerationDoc>> {
+  let query: admin.firestore.Query = db.collection('generations')
+    .orderBy('savedAt', 'desc')
+    .limit(limit);
+
+  if (type) {
+    query = query.where('type', '==', type);
+  }
+
+  const snapshot = await query.get();
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...(doc.data() as GenerationDoc),
+  }));
+}

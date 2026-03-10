@@ -30,6 +30,10 @@ export interface ScrapeProgress {
   lastUpdateAt?: Timestamp | null;
   lastUpdateNewVideos?: number;
 
+  // Stats Refresh Tracking
+  lastRefreshAt?: Timestamp | null;
+  lastRefreshVideosUpdated?: number;
+
   // Timestamps
   startedAt: Timestamp;
   lastProcessedAt: Timestamp;
