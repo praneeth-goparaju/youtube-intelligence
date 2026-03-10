@@ -94,7 +94,7 @@ The scraper supports multiple YouTube URL formats:
 
 | Format | Example | API Cost | Method |
 |--------|---------|----------|--------|
-| Handle | `@VismaiFood` | 1 unit | `channels.list` with `forHandle` |
+| Handle | `@ExampleChannel` | 1 unit | `channels.list` with `forHandle` |
 | Channel ID | `/channel/UCxxx` | 0 units | Direct use |
 | Username | `/user/name` | 1 unit | `channels.list` with `forUsername` |
 | Custom URL | `/c/name` | 1-101 units | Try handle, fallback to search |
@@ -103,7 +103,7 @@ The scraper supports multiple YouTube URL formats:
 // src/youtube/resolver.ts
 import { resolveChannelUrl } from './youtube/resolver';
 
-const result = await resolveChannelUrl('https://www.youtube.com/@VismaiFood');
+const result = await resolveChannelUrl('https://www.youtube.com/@ExampleChannel');
 // { channelId: 'UCxxx...', quotaCost: 1, resolvedFrom: 'handle' }
 ```
 
@@ -215,10 +215,10 @@ Quality setting: `mqdefault` (320x180) for storage efficiency.
 
 ```typescript
 {
-  channelId: "UCBSwcE0p0PMwhvE6FVjgITw",
-  channelTitle: "Vismai Food",
-  channelDescription: "Telugu cooking channel...",
-  customUrl: "@VismaiFood",
+  channelId: "UCxxxxxxxxxxxxxxxxxxxxxxxxx",
+  channelTitle: "ExampleChannel",
+  channelDescription: "A cooking channel...",
+  customUrl: "@ExampleChannel",
   subscriberCount: 4930000,
   videoCount: 2200,
   viewCount: 1250000000,
@@ -235,8 +235,8 @@ Quality setting: `mqdefault` (320x180) for storage efficiency.
 ```typescript
 {
   videoId: "dQw4w9WgXcQ",
-  channelId: "UCBSwcE0p0PMwhvE6FVjgITw",
-  title: "Veg Manchurian Recipe | వెజ్ మంచూరియా",
+  channelId: "UCxxxxxxxxxxxxxxxxxxxxxxxxx",
+  title: "Easy Pasta Recipe | Quick Weeknight Dinner",
   description: "Full recipe...",
   publishedAt: Timestamp,
   duration: "PT15M33S",
@@ -244,7 +244,7 @@ Quality setting: `mqdefault` (320x180) for storage efficiency.
   viewCount: 16000000,
   likeCount: 450000,
   commentCount: 12000,
-  tags: ["veg manchurian", "telugu cooking", ...],
+  tags: ["pasta recipe", "weeknight dinner", ...],
   thumbnailStoragePath: "thumbnails/UCxxx/videoId.jpg",
   isShort: false,
   calculated: {
@@ -314,26 +314,11 @@ npm test
 
 ## Configuration
 
-### Required Environment Variables
+### Environment Variables
 
-```bash
-# YouTube API
-YOUTUBE_API_KEY=your_api_key
+This phase requires `YOUTUBE_API_KEY`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, and `FIREBASE_STORAGE_BUCKET`.
 
-# Firebase
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk@your-project.iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-FIREBASE_STORAGE_BUCKET=your-project.appspot.com
-```
-
-### Optional Settings
-
-```bash
-API_DELAY_MS=100              # Delay between API calls (ms)
-QUOTA_WARNING_THRESHOLD=500   # Save progress at this quota level
-THUMBNAIL_QUALITY=mqdefault   # YouTube thumbnail quality
-```
+See [Deployment Guide](../docs/DEPLOYMENT.md) for full environment variable reference.
 
 ### Channel Configuration
 
@@ -343,7 +328,7 @@ Edit `config/channels.json`:
 {
   "channels": [
     {
-      "url": "https://www.youtube.com/@VismaiFood",
+      "url": "https://www.youtube.com/@ExampleChannel",
       "category": "cooking",
       "priority": 1
     }
@@ -458,6 +443,13 @@ npm test -- --coverage
 ### Progress not resuming
 - **Cause**: Corrupted progress document
 - **Solution**: Run `npx tsx scripts/reset-progress.ts` for that channel
+
+## Related Documentation
+
+- [Deployment Guide](../docs/DEPLOYMENT.md) — Environment setup and configuration
+- [Technical Documentation](../docs/TECHNICAL_DOCUMENTATION.md) — Firestore schemas and data structures
+- [Troubleshooting](../docs/TROUBLESHOOTING.md#phase-1-scraper-issues) — Common scraper issues
+- [CLAUDE.md](../CLAUDE.md) — Full command reference
 
 ## Next Steps
 

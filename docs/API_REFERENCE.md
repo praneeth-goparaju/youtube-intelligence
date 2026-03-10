@@ -58,14 +58,14 @@ interface ResolvedChannel {
 ```typescript
 import { resolveChannelUrl } from './youtube/resolver';
 
-const result = await resolveChannelUrl('https://www.youtube.com/@VismaiFood');
+const result = await resolveChannelUrl('https://www.youtube.com/@ExampleChannel');
 // { channelId: 'UCxxx...', quotaCost: 1, resolvedFrom: 'handle' }
 ```
 
 **Supported URL Formats:**
 | Format | Example | Cost |
 |--------|---------|------|
-| Handle | `@VismaiFood` | 1 |
+| Handle | `@ExampleChannel` | 1 |
 | Channel ID | `/channel/UCxxx` | 0 |
 | Username | `/user/name` | 1 |
 | Custom URL | `/c/name` | 1-101 |
@@ -219,7 +219,7 @@ Analyzes text using Gemini.
 ```python
 from src.gemini_client import analyze_text
 
-result = analyze_text(TITLE_PROMPT, "Video Title | వీడియో టైటిల్")
+result = analyze_text(TITLE_PROMPT, "Easy Pasta Recipe | Quick Dinner")
 ```
 
 ### Analyzers
@@ -236,7 +236,7 @@ result = analyzer.analyze(video_data)
 **Parameters:**
 - `video_data`: Dict with `thumbnailStoragePath`
 
-**Returns:** Dict with ~132 attributes (composition, humanPresence, textElements, colors, food, graphics, branding, psychology, technicalQuality)
+**Returns:** Dict with ~109 attributes (composition, humanPresence, textElements, colors, food, graphics, branding, psychology, technicalQuality)
 
 #### `TitleDescriptionAnalyzer`
 
@@ -250,7 +250,7 @@ result = analyzer.analyze(video_data)
 **Parameters:**
 - `video_data`: Dict with `title` and `description`
 
-**Returns:** Dict with ~135 attributes covering title analysis (structure, language, hooks, keywords, contentSignals) and lean description analysis (structure, recipeContent, ctas, seo) plus 59 locally-computed fields (formatting, language detection, description links/monetization/timestamps)
+**Returns:** Dict with ~134 attributes covering title analysis (structure, language, hooks, keywords, contentSignals) and lean description analysis (structure, recipeContent, ctas, seo) plus 59 locally-computed fields (formatting, language detection, description links/monetization/timestamps)
 
 ### Batch Processor
 
@@ -404,14 +404,14 @@ The recommendation engine is implemented in TypeScript and can be used via CLI o
 cd functions
 
 # Basic usage
-npm run recommend -- --topic "Hyderabadi Biryani" --type recipe
+npm run recommend -- --topic "Easy Dinner Recipe" --type recipe
 
 # With all options
 npm run recommend -- \
-  --topic "Hyderabadi Biryani" \
+  --topic "Easy Dinner Recipe" \
   --type recipe \
   --angle "Restaurant secret recipe" \
-  --audience "Telugu home cooks" \
+  --audience "Home cooks" \
   --output recommendation.json
 ```
 
@@ -423,10 +423,10 @@ curl -X POST https://us-central1-PROJECT.cloudfunctions.net/recommend \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
-    "topic": "Hyderabadi Biryani",
+    "topic": "Easy Dinner Recipe",
     "type": "recipe",
     "angle": "Restaurant secret recipe",
-    "audience": "Telugu home cooks"
+    "audience": "Home cooks"
   }'
 ```
 
@@ -439,10 +439,10 @@ const functions = getFunctions();
 const getRecommendation = httpsCallable(functions, 'getRecommendation');
 
 const result = await getRecommendation({
-  topic: 'Hyderabadi Biryani',
+  topic: 'Easy Dinner Recipe',
   type: 'recipe',
   angle: 'Restaurant secret recipe',
-  audience: 'Telugu home cooks'
+  audience: 'Home cooks'
 });
 ```
 
@@ -453,12 +453,13 @@ const result = await getRecommendation({
 | `topic` | string | Yes | - | Video topic |
 | `type` | string | No | `'recipe'` | `'recipe'`, `'vlog'`, `'tutorial'`, `'review'`, `'challenge'` |
 | `angle` | string | No | `undefined` | Unique positioning |
-| `audience` | string | No | `'Telugu audience'` | Target audience |
+| `audience` | string | No | `'general audience'` | Target audience |
 
 ### Response Structure
 
 ```typescript
 {
+  // Note: Fields like `telugu` reflect the system's built-in bilingual support from its original use case. These can be adapted for other languages.
   titles: {
     primary: {
       english: string,
@@ -512,10 +513,10 @@ import { RecommendationEngine } from './engine';
 const engine = new RecommendationEngine();
 
 const recommendation = await engine.generateRecommendation({
-  topic: 'Biryani',
+  topic: 'Pasta',
   type: 'recipe',
   angle: 'Secret recipe',
-  audience: 'Telugu home cooks'
+  audience: 'Home cooks'
 });
 ```
 
@@ -528,7 +529,7 @@ import { TITLE_TEMPLATES, THUMBNAIL_SPECS, POWER_WORDS } from './templates';
 
 // Title templates by content type
 const recipeTemplates = TITLE_TEMPLATES['recipe'];
-// ['{dish} Recipe | {dish_telugu} | {modifier}', ...]
+// ['{dish} Recipe | {modifier}', ...]
 
 // Thumbnail specifications
 const recipeSpec = THUMBNAIL_SPECS['recipe'];
@@ -536,7 +537,7 @@ const recipeSpec = THUMBNAIL_SPECS['recipe'];
 
 // Power words for titles
 const teluguWords = POWER_WORDS.telugu;
-// ['రహస్యం', 'పర్ఫెక్ట్', 'అసలైన', ...]
+// ['secret', 'perfect', 'authentic', ...]
 ```
 
 ---

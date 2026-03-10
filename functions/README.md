@@ -36,24 +36,16 @@ npm run recommend -- --help
 | `--topic, -t` | Video topic (required) | - |
 | `--type` | Content type: recipe, vlog, tutorial, review, challenge | recipe |
 | `--angle, -a` | Unique positioning angle | - |
-| `--audience` | Target audience | Telugu audience |
+| `--audience` | Target audience | Telugu audience (configurable) |
 | `--output, -o` | Save to JSON file | stdout |
 | `--no-thumbnail` | Skip AI thumbnail generation | false |
 | `--ideas, -i` | Generate data-backed video ideas | false |
 
 ### Environment Variables
 
-Create a `.env` file in the project root or `functions/` directory:
+See [Deployment Guide](../docs/DEPLOYMENT.md) for full environment variable reference.
 
-```bash
-# Required for AI generation
-GOOGLE_API_KEY=your_gemini_api_key
-
-# Optional: For Firestore insights (improves recommendations)
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk@project.iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-```
+> The default audience reflects the system's original use case. Pass `--audience "Your audience"` to customize.
 
 ## Quick Start (API)
 
@@ -132,7 +124,7 @@ Generate video recommendations.
   "topic": "Hyderabadi Biryani",
   "type": "recipe",
   "angle": "Restaurant secret recipe",
-  "audience": "Telugu home cooks"
+  "audience": "Home cooks"
 }
 ```
 
@@ -143,16 +135,19 @@ Generate video recommendations.
 | `topic` | string | Yes | - | Video topic |
 | `type` | string | No | `recipe` | Content type: `recipe`, `vlog`, `tutorial`, `review`, `challenge` |
 | `angle` | string | No | - | Unique positioning angle |
-| `audience` | string | No | `Telugu audience` | Target audience |
+| `audience` | string | No | `Telugu audience` | Target audience (configurable) |
 
 **Response:**
+
+> Fields named `telugu` reflect the system's built-in bilingual support. These contain localized content for the configured target language.
+
 ```json
 {
   "titles": {
     "primary": {
       "english": "Restaurant Style Hyderabadi Biryani | BEST Recipe",
-      "telugu": "హోటల్ స్టైల్ హైదరాబాదీ బిర్యానీ",
-      "combined": "Hyderabadi Biryani | హైదరాబాదీ బిర్యానీ | Restaurant Style",
+      "telugu": "(localized title in target language)",
+      "combined": "Hyderabadi Biryani | (localized) | Restaurant Style",
       "predictedCTR": "above-average",
       "reasoning": "Combines high-search keyword with quality modifier"
     },
@@ -166,7 +161,7 @@ Generate video recommendations.
   "tags": {
     "primary": ["biryani recipe", "hyderabadi biryani"],
     "secondary": [...],
-    "telugu": ["బిర్యానీ", "హైదరాబాదీ బిర్యానీ"],
+    "telugu": ["(localized tags in target language)"],
     "longtail": [...]
   },
   "posting": {
@@ -200,7 +195,7 @@ curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
     "topic": "Chicken Biryani",
     "type": "recipe",
     "angle": "Secret restaurant recipe",
-    "audience": "Telugu home cooks"
+    "audience": "Home cooks"
   }'
 ```
 
@@ -251,7 +246,7 @@ const result = await getRecommendation({
   topic: 'Biryani',
   type: 'recipe',
   angle: 'Restaurant secret',
-  audience: 'Telugu home cooks'
+  audience: 'Food enthusiasts'
 });
 
 console.log(result.data);
@@ -316,9 +311,9 @@ functions/
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GOOGLE_API_KEY` | Gemini API key | Yes |
+See [Deployment Guide](../docs/DEPLOYMENT.md) for full environment variable reference.
+
+For Firebase Functions deployment, set secrets via `firebase functions:secrets:set` (see [Authentication](#authentication)).
 
 ### Function Settings
 
@@ -499,6 +494,9 @@ def get_recommendation(topic: str, content_type: str = 'recipe', api_key: str = 
     return response.json()
 ```
 
----
+## Related Documentation
 
-For more details, see the [main documentation](../README.md).
+- [Deployment Guide](../docs/DEPLOYMENT.md) — Environment setup and deployment
+- [API Reference](../docs/API_REFERENCE.md) — Programmatic interface documentation
+- [Troubleshooting](../docs/TROUBLESHOOTING.md#phase-4-recommender-issues) — Common recommender issues
+- [Root README](../README.md) — Project overview

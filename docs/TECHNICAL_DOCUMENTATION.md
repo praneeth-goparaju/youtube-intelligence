@@ -1,5 +1,7 @@
 # YouTube Intelligence System - Technical Documentation
 
+> For quick command reference see [CLAUDE.md](../CLAUDE.md). For deployment see [Deployment Guide](DEPLOYMENT.md). For API signatures see [API Reference](API_REFERENCE.md).
+
 ## Table of Contents
 
 1. [System Overview](#system-overview)
@@ -19,7 +21,7 @@
 
 The YouTube Intelligence System is a four-phase analytics platform designed to:
 
-1. **Collect** video data from 100+ Telugu YouTube channels
+1. **Collect** video data from 100+ YouTube channels
 2. **Analyze** thumbnails and title+description using Gemini AI (2 calls per video)
 3. **Profile** content types and compare top 10% performers to discover what works
 4. **Generate** data-driven recommendations for new video creation
@@ -191,7 +193,7 @@ The system supports multiple YouTube URL formats:
 
 | Format | Example | Quota Cost | Resolution Method |
 |--------|---------|------------|-------------------|
-| Handle | `@VismaiFood` | 1 unit | `channels.list` with `forHandle` |
+| Handle | `@ExampleChannel` | 1 unit | `channels.list` with `forHandle` |
 | Channel ID | `/channel/UCxxx` | 0 units | Direct use |
 | Username | `/user/name` | 1 unit | `channels.list` with `forUsername` |
 | Custom URL | `/c/name` | 1-101 units | Try handle first, fallback to search |
@@ -338,9 +340,9 @@ Storage structure:
 
 The analyzer processes scraped data using Google Gemini 2.5 Flash with **2 API calls per video**:
 
-- **Thumbnail Analysis** (vision call): Composition, colors, human presence, text, food, graphics, psychology (~132 fields)
+- **Thumbnail Analysis** (vision call): Composition, colors, human presence, text, food, graphics, psychology (~109 fields)
 - **Title + Description Analysis** (combined text call): Single call analyzing both together
-  - Title: Structure, language mix, hooks, keywords, content signals, Telugu-specific patterns (~120 fields)
+  - Title: Structure, language mix, hooks, keywords, content signals, language-specific patterns (~120 fields)
   - Description (lean): Structure, timestamps, recipe content, hashtags, CTAs, SEO (~20 fields)
   - Description context improves niche detection (e.g., ingredient list confirms isRecipe)
 
@@ -417,7 +419,7 @@ Retry logic handles specific error types:
 - `JSONDecodeError`: no retry (response format issue)
 - General `Exception`: logged with type info, linear backoff
 
-### Thumbnail Analysis Schema (~132 fields)
+### Thumbnail Analysis Schema (~109 fields)
 
 Defined as a Pydantic model in `src/batch_api/schemas.py`:
 
@@ -508,7 +510,7 @@ Key sections (examples of values):
 }
 ```
 
-### Title + Description Analysis Schema (~135 fields)
+### Title + Description Analysis Schema (~134 fields)
 
 Defined as a Pydantic model in `src/batch_api/schemas.py`:
 
@@ -522,6 +524,7 @@ class TitleDescriptionAnalysisSchema(BaseModel):
     formatting: TitleFormatting        # 16 fields: capitalization, emojis, brackets, hashtags
     contentSignals: TitleContentSignals  # 15 fields: contentType, isRecipe, series, brands
     teluguAnalysis: TitleTeluguAnalysis  # 12 fields: register, dialect, honorifics, food terms
+    # > Note: Fields like `telugu` reflect the system's built-in bilingual support from its original use case. These can be adapted for other languages.
     competitive: TitleCompetitive      # 6 fields: uniquenessScore, standoutFactor
     scores: TitleScores                # 11 fields: seo, clickability, clarity, overall (1-10)
 
@@ -537,26 +540,26 @@ Key sections (examples of values):
         "pattern": "dish-name | translation | modifier",
         "patternType": "single|segmented|question|list|statement",
         "segments": [
-            {"text": "Biryani Recipe", "type": "dish-name", "language": "english"},
-            {"text": "బిర్యానీ", "type": "translation", "language": "telugu"}
+            {"text": "Pasta Recipe", "type": "dish-name", "language": "english"},
+            {"text": "Easy Dinner", "type": "modifier", "language": "english"}
         ],
         "segmentCount": 2,
-        "characterCount": 67,
-        "wordCount": 8,
-        "teluguCharacterCount": 12,
-        "englishCharacterCount": 55
+        "characterCount": 45,
+        "wordCount": 6,
+        "teluguCharacterCount": 0,
+        "englishCharacterCount": 45
     },
     "language": {
-        "languages": ["english", "telugu"],
+        "languages": ["english"],
         "primaryLanguage": "english",
-        "hasTeluguScript": true,
+        "hasTeluguScript": false,
         "hasLatinScript": true,
-        "hasTransliteration": true,
-        "transliteratedWords": ["biryani"],
-        "codeSwitch": true,
+        "hasTransliteration": false,
+        "transliteratedWords": [],
+        "codeSwitch": false,
         "codeSwitchStyle": "translation|mixed|parallel",
-        "teluguRatio": 0.18,
-        "englishRatio": 0.82
+        "teluguRatio": 0.0,
+        "englishRatio": 1.0
     },
     "hooks": {
         "isQuestion": false,
@@ -579,7 +582,7 @@ Key sections (examples of values):
         "primaryHook": "description of main hook"
     },
     "keywords": {
-        "primaryKeyword": "Biryani Recipe",
+        "primaryKeyword": "Pasta Recipe",
         "primaryKeywordPosition": "start|middle|end",
         "searchIntent": "how-to|review|comparison|information|entertainment",
         "niche": "cooking",
@@ -647,7 +650,7 @@ Key sections (examples of values):
             "hasSubscribeCTA": true,
             "hasLikeCTA": true,
             "hasCommentCTA": true,
-            "commentQuestion": "What's your favorite biryani recipe?"
+            "commentQuestion": "What's your favorite pasta recipe?"
         },
         "seo": {
             "keywordInFirst100Chars": true,
@@ -907,13 +910,13 @@ The recommender is a TypeScript module (CLI + Firebase Functions API) that gener
 ```bash
 # CLI usage
 cd functions
-npm run recommend -- --topic "Biryani" --type recipe
+npm run recommend -- --topic "Pasta" --type recipe
 
 # API usage (Firebase Functions)
 npm run serve  # Start local emulator
 curl -X POST http://localhost:5001/PROJECT/us-central1/recommend \
   -H "Content-Type: application/json" \
-  -d '{"topic": "Biryani", "type": "recipe"}'
+  -d '{"topic": "Pasta", "type": "recipe"}'
 ```
 
 ### Architecture
@@ -954,11 +957,11 @@ When AI generation fails, templates provide basic recommendations:
 
 const TITLE_TEMPLATES: Record<string, string[]> = {
   recipe: [
-    "{dish} Recipe | {dish_telugu} | {modifier}",
-    "SECRET {dish} Recipe | {dish_telugu} రహస్యం",
+    "{dish} Recipe | {modifier}",
+    "SECRET {dish} Recipe | {modifier}",
   ],
   vlog: [
-    "My {topic} Experience | {topic_telugu}",
+    "My {topic} Experience | {modifier}",
   ],
 };
 ```
@@ -969,30 +972,30 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
 {
     "titles": {
         "primary": {
-            "english": "Restaurant Style Hyderabadi Biryani | BEST Recipe",
-            "telugu": "హోటల్ స్టైల్ హైదరాబాదీ బిర్యానీ",
-            "combined": "Hyderabadi Biryani | హైదరాబాదీ బిర్యానీ | Restaurant Style"
+            "english": "Restaurant Style Creamy Pasta | BEST Recipe",
+            "telugu": "",
+            "combined": "Creamy Pasta | Restaurant Style | Easy Dinner"
         },
         "alternatives": [
-            {"title": "SECRET Biryani Recipe | బిర్యానీ రహస్యం", "reasoning": "Uses power word"}
+            {"title": "SECRET Pasta Recipe | Easy Dinner", "reasoning": "Uses power word"}
         ]
     },
     "thumbnail": {
         "layout": "split-composition",
         "elements": {
             "face": {"position": "right-third", "expression": "surprised", "required": True},
-            "mainVisual": {"type": "biryani-close-up", "position": "left-center"},
+            "mainVisual": {"type": "pasta-close-up", "position": "left-center"},
             "text": {
                 "primary": {"content": "SECRET", "position": "top-left", "color": "#FFFF00"},
-                "secondary": {"content": "బిర్యానీ రహస్యం", "language": "telugu"}
+                "secondary": {"content": "Easy Dinner", "language": "english"}
             }
         },
         "colors": {"background": "#FF6B35", "accent": "#FFFF00"}
     },
     "tags": {
-        "primary": ["biryani recipe", "hyderabadi biryani"],
-        "telugu": ["బిర్యానీ", "హైదరాబాదీ బిర్యానీ"],
-        "longtail": ["how to make biryani at home"]
+        "primary": ["pasta recipe", "creamy pasta"],
+        "telugu": [],
+        "longtail": ["how to make pasta at home"]
     },
     "posting": {
         "bestDay": "Saturday",
@@ -1018,9 +1021,9 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
 ```javascript
 {
   channelId: "UCBSwcE0p0PMwhvE6FVjgITw",
-  channelTitle: "Vismai Food",
-  channelDescription: "Telugu cooking channel...",
-  customUrl: "@VismaiFood",
+  channelTitle: "Example Channel",
+  channelDescription: "Cooking channel...",
+  customUrl: "@ExampleChannel",
 
   subscriberCount: 4930000,
   videoCount: 2200,
@@ -1036,7 +1039,7 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
   category: "cooking",      // From channels.json
   priority: 1,              // From channels.json
 
-  sourceUrl: "https://www.youtube.com/@VismaiFood",
+  sourceUrl: "https://www.youtube.com/@ExampleChannel",
   scrapedAt: Timestamp,
   lastUpdatedAt: Timestamp
 }
@@ -1049,7 +1052,7 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
   videoId: "dQw4w9WgXcQ",
   channelId: "UCBSwcE0p0PMwhvE6FVjgITw",
 
-  title: "Veg Manchurian Recipe | వెజ్ మంచూరియా",
+  title: "Easy Pasta Recipe | Quick Dinner Idea",
   description: "Full recipe...",
   publishedAt: Timestamp,
 
@@ -1067,7 +1070,7 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
   likeCount: 450000,
   commentCount: 12000,
 
-  tags: ["veg manchurian", "telugu cooking", ...],
+  tags: ["pasta recipe", "easy dinner", ...],
 
   categoryId: "26",
   categoryName: "Howto & Style",
@@ -1181,8 +1184,8 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
 ```javascript
 {
   channelId: "UCBSwcE0p0PMwhvE6FVjgITw",
-  channelTitle: "Vismai Food",
-  sourceUrl: "https://www.youtube.com/@VismaiFood",
+  channelTitle: "Example Channel",
+  sourceUrl: "https://www.youtube.com/@ExampleChannel",
 
   status: "in_progress",  // pending | in_progress | completed | failed
   phase: "scraping",      // scraping | thumbnails | calculations
@@ -1513,7 +1516,7 @@ python3 -m src.main
 # Phase 4: Recommender
 cd ../functions
 npm install
-npm run recommend -- --topic "Biryani" --type recipe
+npm run recommend -- --topic "Pasta" --type recipe
 ```
 
 ### Monitoring Progress

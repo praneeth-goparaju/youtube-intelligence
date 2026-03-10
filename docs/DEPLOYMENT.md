@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Complete guide for deploying the YouTube Intelligence System in various environments.
+Complete guide for deploying the YouTube Intelligence System in various environments. For a quick setup overview, see the [Quick Start](../README.md#quick-start) in the root README. For security configuration, see [SECURITY.md](../SECURITY.md).
 
 ## Table of Contents
 

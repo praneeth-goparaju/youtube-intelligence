@@ -151,3 +151,10 @@ FIREBASE_STORAGE_BUCKET=your-project.appspot.com
 | `scipy` | >=1.12.0 | Statistical analysis |
 | `firebase-admin` | >=6.4.0 | Firebase SDK |
 | `python-dotenv` | >=1.0.1 | Environment config |
+
+## Related Documentation
+
+- [Deployment Guide](../docs/DEPLOYMENT.md) — Environment setup and configuration
+- [Technical Documentation](../docs/TECHNICAL_DOCUMENTATION.md) — Firestore schemas and data structures
+- [Troubleshooting](../docs/TROUBLESHOOTING.md#phase-3-insights-issues) — Common insights issues
+- [CLAUDE.md](../CLAUDE.md) — Full command reference

@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions for the YouTube Intelligence System.
+Common issues and solutions for the YouTube Intelligence System. See also: [Deployment Guide](DEPLOYMENT.md) for configuration, and individual phase READMEs for command reference.
 
 ## Table of Contents
 
@@ -285,20 +285,20 @@ Warning: No insights found, using template-based generation
 
 **Symptoms:**
 - Generic or irrelevant suggestions
-- Not Telugu-specific
+- Not matching your target niche
 
 **Cause:** Insufficient data or context.
 
 **Solution:**
-1. Ensure enough Telugu channels analyzed
+1. Ensure enough channels in your niche are analyzed
 2. Verify insights contain relevant patterns
 3. Provide more specific input:
    ```bash
    npm run recommend -- \
-     --topic "Hyderabadi Biryani" \
+     --topic "Pasta Carbonara" \
      --type recipe \
      --angle "Restaurant secret" \
-     --audience "Telugu home cooks"
+     --audience "Home cooks"
    ```
 
 ---

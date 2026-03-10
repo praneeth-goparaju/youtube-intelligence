@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-YouTube Intelligence System - a multi-phase analytics platform that scrapes Telugu YouTube channel data, analyzes content with Gemini AI, discovers performance patterns, and generates recommendations for new video creation.
+YouTube Intelligence System - a multi-phase analytics platform that scrapes YouTube channel data, analyzes content with Gemini AI, discovers performance patterns, and generates recommendations for new video creation.
 
 ## Architecture
 
@@ -200,9 +200,9 @@ Text analysis fields (titleLength, hasEmoji, etc.) are computed by the analyzer'
 
 All analysis uses Gemini 2.5 Flash (`gemini-2.5-flash`) with 2 API calls per video:
 
-1. **Thumbnail** (vision call): Composition, colors, text, food, graphics, psychology (~132 fields, 100% Gemini)
-2. **Title + Description** (hybrid local + LLM): ~135 total fields per video
-   - **76 Gemini fields** (semantic): pattern recognition, transliteration, code-switching, power words, triggers, keywords, niche classification, content signals, recipe detection, SEO assessment, comment question
+1. **Thumbnail** (vision call): Composition, colors, text, food, graphics, psychology (~109 fields, 100% Gemini)
+2. **Title + Description** (hybrid local + LLM): ~134 total fields per video
+   - **75 Gemini fields** (semantic): pattern recognition, transliteration, code-switching, power words, triggers, keywords, niche classification, content signals, recipe detection, SEO assessment, comment question
    - **59 local fields** (`local_text_features.py`): formatting (20), structure counts (8), language detection (8), hooks basics (3), desc structure/timestamps/hashtags/CTAs/links/monetization (20)
    - Local fields are computed via regex/Unicode detection (no API cost, no hallucination)
    - Both are merged into a single analysis document in Firestore
