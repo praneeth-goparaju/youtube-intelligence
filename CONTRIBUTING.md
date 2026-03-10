@@ -36,8 +36,8 @@ Thank you for your interest in contributing to the YouTube Intelligence System! 
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/youtube-intelligence.git
-cd youtube-intelligence
+git clone https://github.com/tranquillity-hub/youtube_channel_analysis.git
+cd youtube_channel_analysis
 
 # Copy environment template
 cp .env.example .env

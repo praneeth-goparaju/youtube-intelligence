@@ -55,9 +55,8 @@ export async function checkRateLimit(
 
     return result;
   } catch (error) {
-    // If Firestore fails, allow the request (fail-open)
-    // This prevents rate limiter failures from blocking all API traffic
-    console.error('Rate limiter Firestore error (allowing request):', error);
-    return { allowed: true, remaining: maxRequests };
+    // If Firestore fails, deny the request (fail-closed)
+    console.error('Rate limiter Firestore error (denying request):', error);
+    return { allowed: false, remaining: 0 };
   }
 }

@@ -65,8 +65,8 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/youtube-intelligence.git
-cd youtube-intelligence
+git clone https://github.com/tranquillity-hub/youtube_channel_analysis.git
+cd youtube_channel_analysis
 
 # Configure environment
 cp .env.example .env
@@ -441,7 +441,7 @@ cd scraper && npx tsx scripts/validate.ts
 
 ## License
 
-This project is proprietary. All rights reserved.
+This project is licensed under the [MIT License](LICENSE).
 
 ## Support
 

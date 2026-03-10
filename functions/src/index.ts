@@ -54,11 +54,10 @@ function getAllowedOrigins(): string[] | boolean {
 function validateApiKey(authHeader: string | undefined): boolean {
   const configuredKey = apiKeyParam.value();
 
-  // If no API key is configured, allow requests (for development)
-  // In production, ALWAYS configure RECOMMEND_API_KEY
+  // Reject all requests if API key is not configured
   if (!configuredKey) {
-    console.warn('WARNING: RECOMMEND_API_KEY not configured. API is unprotected!');
-    return true;
+    console.error('RECOMMEND_API_KEY not configured. All API requests will be rejected.');
+    return false;
   }
 
   if (!authHeader) {
@@ -274,7 +273,7 @@ export const health = onRequest(async (req, res) => {
   } catch (error) {
     res.status(500).json({
       status: 'error',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'Internal server error',
     });
   }
 });

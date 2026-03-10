@@ -1,0 +1,22 @@
+{
+  "channels": [
+    {
+      "url": "https://www.youtube.com/@ExampleChannel1",
+      "category": "cooking",
+      "priority": 1
+    },
+    {
+      "url": "https://www.youtube.com/@ExampleChannel2",
+      "category": "vlog",
+      "priority": 2
+    },
+    {
+      "url": "https://www.youtube.com/@ExampleChannel3",
+      "category": "news",
+      "priority": 3
+    }
+  ],
+  "settings": {
+    "skipShortThumbnails": true
+  }
+}

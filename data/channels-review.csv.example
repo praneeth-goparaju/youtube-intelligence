@@ -1,0 +1,4 @@
+analyze,channel_name,handle,link,subscribers,videos,category
+yes,Example Channel 1,@examplechannel1,https://www.youtube.com/@examplechannel1,500000,1200,cooking
+yes,Example Channel 2,@examplechannel2,https://www.youtube.com/@examplechannel2,1000000,3500,vlog
+no,Example Channel 3,@examplechannel3,https://www.youtube.com/@examplechannel3,250000,800,news

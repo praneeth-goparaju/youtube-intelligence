@@ -70,6 +70,10 @@ firebase-debug.log
 insights/outputs/*.json
 insights/outputs/*.csv
 
+# Research data (use .example versions as templates)
+config/channels.json
+data/channels-review.csv
+
 # Temporary files
 *.tmp
 *.temp
