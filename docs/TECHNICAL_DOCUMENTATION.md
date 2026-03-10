@@ -74,7 +74,7 @@ The YouTube Intelligence System is a four-phase analytics platform designed to:
 ### Directory Structure
 
 ```
-youtube_channel_analysis/
+youtube-intelligence/
 │
 ├── .env.example              # Environment variables template
 ├── .env                      # Actual credentials (git-ignored)
@@ -1501,7 +1501,7 @@ except:
 
 ```bash
 # Clone and setup
-cd youtube_channel_analysis
+cd youtube-intelligence
 cp .env.example .env
 # Edit .env with your credentials
 

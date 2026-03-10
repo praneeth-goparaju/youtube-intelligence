@@ -36,8 +36,8 @@ Thank you for your interest in contributing to the YouTube Intelligence System! 
 
 ```bash
 # Clone the repository
-git clone https://github.com/praneeth-goparaju/youtube_channel_analysis.git
-cd youtube_channel_analysis
+git clone https://github.com/praneeth-goparaju/youtube-intelligence.git
+cd youtube-intelligence
 
 # Copy environment template
 cp .env.example .env
@@ -486,7 +486,7 @@ git push origin --delete feature/your-feature
 ### Directory Overview
 
 ```
-youtube_channel_analysis/
+youtube-intelligence/
 ├── .env.example              # Environment template
 ├── .gitignore
 ├── README.md                 # Main documentation
