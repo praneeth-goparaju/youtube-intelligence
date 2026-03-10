@@ -9,16 +9,16 @@ This system answers the question: **"What title, thumbnail, and posting time sho
 The platform processes 100+ Telugu YouTube channels to extract actionable insights:
 
 - **208,000+ non-short videos** scraped across 116 channels
-- **AI-powered analysis** of thumbnails and title+description (2 Gemini calls per video)
+- **AI-powered analysis** of thumbnails and title+description (2 API calls per video)
 - **Per-content-type profiling** comparing all videos vs top 10% performers
 - **Automated recommendations** based on proven patterns
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              DATA PIPELINE                                   │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                               DATA PIPELINE                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
 
   channels.json
        │
@@ -30,16 +30,16 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
        │                   │                   │                   │
        ▼                   ▼                   ▼                   ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                         FIREBASE FIRESTORE                                │
-│  channels/ ─► videos/ ─► analysis/ ─► insights/                          │
-└──────────────────────────────────────────────────────────────────────────┘
-                                                                    │
-                                                                    ▼
-                                                        ┌──────────────────┐
-                                                        │ Firebase Function │
-                                                        │  REST API / SDK   │
-                                                        └──────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          FIREBASE FIRESTORE                                  │
+│  channels/ ─► videos/ ─► analysis/ ─► insights/                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                                                     │
+                                                                     ▼
+                                                         ┌──────────────────┐
+                                                         │ Firebase Function │
+                                                         │  REST API / SDK  │
+                                                         └──────────────────┘
 ```
 
 ### Phase Components
@@ -47,7 +47,7 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 | Phase | Name | Technology | Purpose |
 |-------|------|------------|---------|
 | 1 | **Scraper** | TypeScript/Node.js | Collect video data from YouTube API |
-| 2 | **Analyzer** | Python + Gemini AI | AI analysis of thumbnails, title+description (2 calls/video) |
+| 2 | **Analyzer** | Python + Gemini AI | Thumbnail vision + hybrid local/LLM title+description analysis (2 API calls/video) |
 | 3 | **Insights** | Python | Per-content-type profiling and content gap analysis |
 | 4 | **Recommender** | TypeScript | Generate video recommendations (CLI + API) |
 
@@ -105,9 +105,10 @@ python -m src.main
 cd ../functions
 npm run recommend -- --topic "Biryani Recipe" --type recipe
 
-# Option B: API (after deployment)
+# Option B: API (after deployment — see docs/DEPLOYMENT.md)
 curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{"topic": "Biryani Recipe", "type": "recipe"}'
 ```
 
@@ -167,16 +168,7 @@ youtube_channel_analysis/
 ├── functions/                   # Phase 4: Recommendation Engine (CLI + API)
 │   ├── README.md
 │   ├── package.json
-│   └── src/
-│       ├── cli.ts               # CLI entry point
-│       ├── index.ts             # Firebase Function definitions
-│       ├── engine.ts            # Recommendation engine
-│       ├── recommendation-core.ts  # Core recommendation logic
-│       ├── gemini.ts            # Gemini AI integration
-│       ├── firebase.ts          # Firebase client
-│       ├── rate-limiter.ts      # API rate limiting
-│       ├── types.ts             # TypeScript type definitions
-│       └── templates.ts         # Fallback templates
+│   └── src/                    # CLI, Firebase Functions, Gemini, rate limiter
 │
 └── docs/
     ├── TECHNICAL_DOCUMENTATION.md
@@ -251,9 +243,9 @@ cp config/channels.json.example config/channels.json
 - Unresolved channel URL tracking for retry
 - Calculated metrics (engagement rate, views per day, etc.)
 
-### Phase 2: AI Analysis (2 Gemini calls per video)
-- **Thumbnail Analysis** (vision): Composition, colors, human presence, text, food presentation, psychological triggers (~141 fields)
-- **Title + Description Analysis** (combined text): Structure, language mix, hooks, keywords, Telugu-specific patterns, description structure, recipe content, CTAs, SEO (~175 fields)
+### Phase 2: AI Analysis (2 API calls per video)
+- **Thumbnail Analysis** (100% Gemini vision): Composition, colors, human presence, text, food presentation, psychological triggers (~141 fields)
+- **Title + Description Analysis** (hybrid local + LLM): 75 Gemini fields (semantic analysis, pattern recognition, niche classification) + 59 local fields (formatting, structure, language detection via regex/Unicode — no API cost)
 
 ### Phase 3: Per-Content-Type Profiling
 - Group videos by content type (recipe, vlog, tutorial, etc.)
@@ -273,119 +265,6 @@ cp config/channels.json.example config/channels.json
 - **Callable Function** for Firebase SDK integration
 - Automatic fallback to templates if AI fails
 - Real-time recommendations in 2-5 seconds
-
-## Recommendation API
-
-The system includes a serverless API deployed as Firebase Functions for real-time recommendations.
-
-### API Endpoint
-
-```bash
-POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend
-```
-
-### Example Request
-
-```bash
-curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "topic": "Hyderabadi Biryani",
-    "type": "recipe",
-    "angle": "Restaurant secret recipe",
-    "audience": "Telugu home cooks"
-  }'
-```
-
-> **Note**: API authentication is required. Set your API key using Firebase secrets (see Deploy section).
-
-### Using Firebase SDK
-
-```typescript
-import { getFunctions, httpsCallable } from 'firebase/functions';
-
-const functions = getFunctions();
-const getRecommendation = httpsCallable(functions, 'getRecommendation');
-
-const result = await getRecommendation({
-  topic: 'Biryani',
-  type: 'recipe'
-});
-console.log(result.data);
-```
-
-### Deploy the API
-
-```bash
-cd functions
-npm install
-
-# Required secrets
-firebase functions:secrets:set GOOGLE_API_KEY      # Gemini API key for AI generation
-firebase functions:secrets:set RECOMMEND_API_KEY   # API key for authenticating requests
-
-# Optional: Restrict CORS origins (comma-separated)
-firebase functions:secrets:set ALLOWED_ORIGINS     # e.g., "https://yourdomain.com,https://app.yourdomain.com"
-
-npm run deploy
-```
-
-### Security Features
-
-- **API Authentication**: All requests require `Authorization: Bearer <API_KEY>` header
-- **Rate Limiting**: 100 requests per hour per API key/IP
-- **CORS**: Configurable allowed origins (defaults to same-origin only)
-- **Input Sanitization**: All user inputs are sanitized to prevent prompt injection
-- **Firestore Rules**: Require Firebase Authentication for client reads
-
-See [functions/README.md](functions/README.md) for complete API documentation.
-
-## Data Schema
-
-### Firebase Collections
-
-| Collection | Purpose |
-|------------|---------|
-| `channels/{channelId}` | Channel metadata and stats |
-| `channels/{channelId}/videos/{videoId}` | Video data with metrics |
-| `channels/{channelId}/videos/{videoId}/analysis/{type}` | AI analysis results (thumbnail, title_description) |
-| `batch_jobs/{jobId}` | Batch API job tracking (state, request count, import status) |
-| `analysis_progress/{analysisType}` | Resume state for analysis (thumbnail, title_description) |
-| `scrape_progress/{channelId}` | Resume state for scraping |
-| `unresolved_channels/{id}` | Channel URLs that failed resolution |
-| `insights/{contentType}` | Per-content-type profiles (all vs top 10%) |
-| `insights/contentGaps` | Content gap and keyword opportunity analysis |
-| `insights/summary` | Overview of all content types and counts |
-
-### Calculated Metrics
-
-For each video, the scraper calculates:
-
-| Metric | Formula | Purpose |
-|--------|---------|---------|
-| `engagementRate` | (likes + comments) / views | Overall engagement |
-| `viewsPerDay` | views / days since publish | Velocity |
-| `viewsPerSubscriber` | views / channel subscribers | Relative performance |
-| `publishDayOfWeek` | Day name (Monday-Sunday) | Timing analysis |
-| `publishHourIST` | Hour (0-23) in IST | Timing analysis |
-
-## API Quota Management
-
-YouTube Data API has a **10,000 units/day** limit:
-
-| Operation | Cost |
-|-----------|------|
-| `channels.list` | 1 unit |
-| `playlistItems.list` | 1 unit |
-| `videos.list` | 1 unit |
-| `search.list` | 100 units (avoid!) |
-
-The scraper:
-1. Tracks quota usage in memory
-2. Saves progress when quota reaches 500 remaining
-3. Displays "Run again tomorrow" message
-4. Resumes from last position on restart
 
 ## Testing
 
