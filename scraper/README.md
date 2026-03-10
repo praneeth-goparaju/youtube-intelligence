@@ -109,17 +109,11 @@ const result = await resolveChannelUrl('https://www.youtube.com/@ExampleChannel'
 
 ### 2. Video Fetching Strategy
 
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Channel ID     │────▶│  Uploads Playlist │────▶│  Video IDs      │
-│  UCxxx...       │     │  UUxxx... (UC→UU) │     │  (50 per page)  │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-                                                          │
-                                                          ▼
-                                                 ┌─────────────────┐
-                                                 │  videos.list    │
-                                                 │  (50 per batch) │
-                                                 └─────────────────┘
+```mermaid
+graph LR
+    A[Channel ID<br/>UCxxx...] --> B[Uploads Playlist<br/>UUxxx... UC→UU]
+    B --> C[Video IDs<br/>50 per page]
+    C --> D[videos.list<br/>50 per batch]
 ```
 
 ### 3. Quota Management
