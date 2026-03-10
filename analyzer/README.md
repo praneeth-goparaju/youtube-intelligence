@@ -99,8 +99,9 @@ Works on all paid tiers. Tier 1 has a 3M enqueued token limit (~680 requests per
 
 #### 4-Phase Workflow
 
-```
-PREPARE → SUBMIT → POLL → IMPORT
+```mermaid
+graph LR
+    A[PREPARE] --> B[SUBMIT] --> C[POLL] --> D[IMPORT]
 ```
 
 | Phase | What it does | Duration |

@@ -131,37 +131,15 @@ npm run recommend -- --topic "Test Recipe"
 
 ### Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        PRODUCTION ARCHITECTURE                           │
-└─────────────────────────────────────────────────────────────────────────┘
-
-                    ┌─────────────────┐
-                    │   Scheduler     │
-                    │  (Cron/Cloud)   │
-                    └────────┬────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│    Scraper    │   │   Analyzer    │   │   Insights    │
-│   (Node.js)   │   │   (Python)    │   │   (Python)    │
-└───────┬───────┘   └───────┬───────┘   └───────┬───────┘
-        │                   │                   │
-        └───────────────────┼───────────────────┘
-                            │
-                            ▼
-                  ┌─────────────────┐
-                  │    Firebase     │
-                  │ Firestore + GCS │
-                  └─────────────────┘
-                            │
-                            ▼
-                  ┌─────────────────┐
-                  │  Recommender    │
-                  │  (API/CLI)      │
-                  └─────────────────┘
+```mermaid
+graph TD
+    A[Scheduler<br/>Cron/Cloud] --> B[Scraper<br/>Node.js]
+    A --> C[Analyzer<br/>Python]
+    A --> D[Insights<br/>Python]
+    B --> E[(Firebase<br/>Firestore + GCS)]
+    C --> E
+    D --> E
+    E --> F[Recommender<br/>API/CLI]
 ```
 
 ### Server Setup (Linux)

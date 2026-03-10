@@ -285,19 +285,13 @@ functions/
 
 ## How It Works
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│  Firebase   │────▶│   Engine    │
-│  Request    │     │  Function   │     │             │
-└─────────────┘     └─────────────┘     └──────┬──────┘
-                                               │
-                    ┌──────────────────────────┼──────────────────────────┐
-                    │                          │                          │
-                    ▼                          ▼                          ▼
-            ┌─────────────┐           ┌─────────────┐           ┌─────────────┐
-            │  Firestore  │           │   Gemini    │           │  Templates  │
-            │  Insights   │           │     AI      │           │  (Fallback) │
-            └─────────────┘           └─────────────┘           └─────────────┘
+```mermaid
+graph TD
+    A[Client Request] --> B[Firebase Function]
+    B --> C[Engine]
+    C --> D[(Firestore Insights)]
+    C --> E[Gemini AI]
+    C --> F[Templates<br/>Fallback]
 ```
 
 1. **Request received** - HTTP or callable function
