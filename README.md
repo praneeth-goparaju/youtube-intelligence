@@ -65,7 +65,7 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 
 ```bash
 # Clone the repository
-git clone https://github.com/tranquillity-hub/youtube_channel_analysis.git
+git clone https://github.com/praneeth-goparaju/youtube_channel_analysis.git
 cd youtube_channel_analysis
 
 # Configure environment

@@ -5,7 +5,7 @@
 If you discover a security vulnerability in this project, please report it responsibly:
 
 1. **Do not** open a public GitHub issue for security vulnerabilities
-2. Email the maintainers or use [GitHub's private vulnerability reporting](https://github.com/tranquillity-hub/youtube_channel_analysis/security/advisories/new)
+2. Email the maintainers or use [GitHub's private vulnerability reporting](https://github.com/praneeth-goparaju/youtube_channel_analysis/security/advisories/new)
 3. Include a description of the vulnerability, steps to reproduce, and potential impact
 
 We will acknowledge your report within 48 hours and aim to provide a fix within 7 days for critical issues.

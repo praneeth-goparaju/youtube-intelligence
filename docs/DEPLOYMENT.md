@@ -40,7 +40,7 @@ Complete guide for deploying the YouTube Intelligence System in various environm
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/tranquillity-hub/youtube_channel_analysis.git
+git clone https://github.com/praneeth-goparaju/youtube_channel_analysis.git
 cd youtube_channel_analysis
 ```
 
@@ -192,7 +192,7 @@ sudo chown $USER:$USER /opt/youtube-intelligence
 
 # Clone repository
 cd /opt/youtube-intelligence
-git clone https://github.com/tranquillity-hub/youtube_channel_analysis.git .
+git clone https://github.com/praneeth-goparaju/youtube_channel_analysis.git .
 
 # Install dependencies
 cd scraper && npm install --production
