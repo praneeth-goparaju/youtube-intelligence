@@ -9,8 +9,9 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineString } from 'firebase-functions/params';
 import { RecommendationEngine } from './engine';
 import { checkRateLimit } from './rate-limiter';
-import { sanitizeInput, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
-import type { RecommendationRequest, RecommendationResponse, ContentType } from './types';
+import { sanitizeInput, VALID_CONTENT_TYPES, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
+import { saveGeneration as saveGen, listGenerations as listGens } from './firebase';
+import type { RecommendationRequest, RecommendationResponse, ContentType, IdeaGenerationResponse } from './types';
 
 // Set global options for all functions
 setGlobalOptions({
@@ -68,9 +69,6 @@ function validateApiKey(authHeader: string | undefined): boolean {
   const key = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
   return key === configuredKey;
 }
-
-// Validate content type
-const VALID_CONTENT_TYPES: ContentType[] = ['recipe', 'vlog', 'tutorial', 'review', 'challenge'];
 
 function isValidContentType(type: string): type is ContentType {
   return VALID_CONTENT_TYPES.includes(type as ContentType);
@@ -184,7 +182,7 @@ export const recommend = onRequest(
  * const getRecommendation = httpsCallable(functions, 'getRecommendation');
  * const result = await getRecommendation({ topic: 'Biryani', type: 'recipe' });
  */
-export const getRecommendation = onCall<RecommendationRequest, RecommendationResponse>(
+export const getRecommendation = onCall<RecommendationRequest, Promise<RecommendationResponse>>(
   async (request) => {
     // Require authentication
     if (!request.auth) {
@@ -247,6 +245,235 @@ export const getRecommendation = onCall<RecommendationRequest, RecommendationRes
 );
 
 // ============================================
+// Ideas HTTP Endpoint
+// ============================================
+
+/**
+ * HTTP endpoint for generating video ideas
+ *
+ * POST /ideas
+ * Headers: Authorization: Bearer <API_KEY>
+ * Body: { type?: string }
+ */
+export const ideas = onRequest(
+  {
+    cors: getAllowedOrigins(),
+  },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed. Use POST.' });
+      return;
+    }
+
+    if (!validateApiKey(req.headers.authorization)) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
+      });
+      return;
+    }
+
+    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
+
+    if (!rateLimit.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: 'Too many requests. Please try again later.',
+      });
+      return;
+    }
+
+    try {
+      const { type } = req.body as { type?: string };
+
+      if (type && !isValidContentType(type)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`,
+        });
+        return;
+      }
+
+      const engine = new RecommendationEngine();
+      const response = await engine.generateIdeas(type as ContentType | undefined);
+      res.status(200).json(response);
+    } catch (error) {
+      console.error('Ideas generation error:', error);
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to generate ideas',
+      });
+    }
+  }
+);
+
+// ============================================
+// Ideas Callable Function
+// ============================================
+
+/**
+ * Callable function for generating video ideas
+ */
+export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse>>(
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError(
+        'unauthenticated',
+        'Authentication required. Please sign in to use this service.'
+      );
+    }
+
+    const rateLimitKey = request.auth.uid;
+    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+
+    if (!rateLimit.allowed) {
+      throw new HttpsError(
+        'resource-exhausted',
+        'Rate limit exceeded. Please try again later.'
+      );
+    }
+
+    const { type } = request.data;
+
+    if (type && !isValidContentType(type)) {
+      throw new HttpsError(
+        'invalid-argument',
+        `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`
+      );
+    }
+
+    try {
+      const engine = new RecommendationEngine();
+      return await engine.generateIdeas(type as ContentType | undefined);
+    } catch (error) {
+      console.error('Ideas generation error:', error);
+      throw new HttpsError(
+        'internal',
+        'Failed to generate ideas'
+      );
+    }
+  }
+);
+
+// ============================================
+// Generations Endpoints (auto-save history)
+// ============================================
+
+/**
+ * POST /generations-save
+ * Body: { type, request, response }
+ * Returns: { id, savedAt }
+ */
+export const generationsSave = onRequest(
+  {
+    cors: getAllowedOrigins(),
+  },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed. Use POST.' });
+      return;
+    }
+
+    if (!validateApiKey(req.headers.authorization)) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
+      });
+      return;
+    }
+
+    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
+
+    if (!rateLimit.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: 'Too many requests. Please try again later.',
+      });
+      return;
+    }
+
+    try {
+      const { type, request, response } = req.body as {
+        type?: string;
+        request?: Record<string, unknown>;
+        response?: Record<string, unknown>;
+      };
+
+      if (!type || (type !== 'ideas' && type !== 'recommendation')) {
+        res.status(400).json({ error: 'Invalid type. Must be "ideas" or "recommendation".' });
+        return;
+      }
+
+      if (!request || !response) {
+        res.status(400).json({ error: 'Both request and response fields are required.' });
+        return;
+      }
+
+      const result = await saveGen({ type, request, response });
+      res.status(200).json(result);
+    } catch (error) {
+      console.error('Save generation error:', error);
+      res.status(500).json({ error: 'Failed to save generation' });
+    }
+  }
+);
+
+/**
+ * GET /generations-list
+ * Query: ?type=ideas|recommendation (optional)
+ * Returns: { generations: [...] }
+ */
+export const generationsList = onRequest(
+  {
+    cors: getAllowedOrigins(),
+  },
+  async (req, res) => {
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed. Use GET.' });
+      return;
+    }
+
+    if (!validateApiKey(req.headers.authorization)) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
+      });
+      return;
+    }
+
+    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
+
+    if (!rateLimit.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: 'Too many requests. Please try again later.',
+      });
+      return;
+    }
+
+    try {
+      const typeParam = req.query.type as string | undefined;
+      let type: 'ideas' | 'recommendation' | undefined;
+      if (typeParam === 'ideas' || typeParam === 'recommendation') {
+        type = typeParam;
+      }
+
+      const generations = await listGens(type);
+      res.status(200).json({ generations });
+    } catch (error) {
+      console.error('List generations error:', error);
+      res.status(500).json({ error: 'Failed to list generations' });
+    }
+  }
+);
+
+// ============================================
 // Health Check Endpoint
 // ============================================
 
@@ -285,5 +512,6 @@ export const health = onRequest(async (req, res) => {
 export type {
   RecommendationRequest,
   RecommendationResponse,
+  IdeaGenerationResponse,
   ContentType,
 } from './types';

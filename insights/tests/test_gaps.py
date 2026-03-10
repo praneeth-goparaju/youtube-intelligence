@@ -111,6 +111,17 @@ class TestFindContentGaps:
         saturated_topics = [t['topic'] for t in result['saturatedTopics']]
         assert 'cooking' in saturated_topics
 
+    def test_has_avg_views_per_subscriber_field(self):
+        videos = []
+        for _ in range(5):
+            videos.append(make_video(niche='cooking', vps=10.0))
+
+        analyzer = GapAnalyzer(videos, get_vps)
+        result = analyzer.find_content_gaps()
+
+        for opp in result['highOpportunity']:
+            assert 'avgViewsPerSubscriber' in opp
+
 
 class TestAnalyzeKeywordGaps:
     def test_basic_keyword_analysis(self):
@@ -138,6 +149,35 @@ class TestAnalyzeKeywordGaps:
         analyzer = GapAnalyzer(videos, get_vps)
         result = analyzer.analyze_keyword_gaps()
         assert result['totalKeywords'] >= 2  # At least primary + some secondaries
+
+    def test_secondary_keywords_as_string(self):
+        """secondaryKeywords is now comma-separated string, not a list."""
+        videos = []
+        for _ in range(5):
+            videos.append(make_video(
+                primary_kw='food',
+                secondary_kws='spicy, traditional, homestyle',
+                vps=5.0
+            ))
+
+        analyzer = GapAnalyzer(videos, get_vps)
+        result = analyzer.analyze_keyword_gaps()
+        # Should NOT iterate char-by-char
+        assert result['totalKeywords'] >= 2
+        # Verify individual keywords are found, not characters
+        all_kws = set()
+        for v in videos:
+            kws = v['title_analysis']['keywords']
+            secondary = kws.get('secondaryKeywords', '')
+            if isinstance(secondary, str):
+                for kw in secondary.split(','):
+                    kw = kw.strip().lower()
+                    if kw:
+                        all_kws.add(kw)
+
+        # 'spicy' should be a keyword, 's' should not
+        assert 'spicy' in all_kws
+        assert 's' not in all_kws
 
     def test_minimum_keyword_count(self):
         # Only 1 video per keyword

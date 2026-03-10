@@ -5,10 +5,10 @@ import { logger } from '../utils/logger.js';
 import { chunk, delay, formatNumber } from '../utils/helpers.js';
 import { formatDuration } from '../utils/duration.js';
 import { initializeFirebase } from '../firebase/client.js';
-import { saveChannel, saveVideosBatch, saveProgress, getProgress, getExistingVideoIds, saveUnresolvedChannel, getUnresolvedChannel } from '../firebase/firestore.js';
+import { saveChannel, saveVideosBatch, saveProgress, getProgress, getExistingVideoIds, getAllVideoIdsForChannel, updateVideoStatsBatch, saveUnresolvedChannel, getUnresolvedChannel } from '../firebase/firestore.js';
 import { resolveChannelUrl } from '../youtube/resolver.js';
 import { getChannelDetails, transformChannelData, getUploadsPlaylistId } from '../youtube/channels.js';
-import { getPlaylistVideos, getVideoDetails, transformVideoData } from '../youtube/videos.js';
+import { getPlaylistVideos, getVideoDetails, transformVideoData, calculateVideoMetrics } from '../youtube/videos.js';
 import { getQuotaUsed, getQuotaRemaining, isQuotaLow, setQuotaUsed, setIgnoreQuota } from '../youtube/client.js';
 import {
   getOrCreateProgress,
@@ -17,6 +17,7 @@ import {
   updateProgressPhase,
   updateProgressThumbnails,
   updateProgressForUpdate,
+  updateProgressForRefresh,
   getProgressSummary,
   loadSavedQuota,
 } from './progress.js';
@@ -569,14 +570,138 @@ export async function updateChannel(
 }
 
 /**
+ * Refresh stats (views, likes, comments) for all existing videos in a completed channel.
+ * Reads video IDs from Firestore, batch-fetches current stats from YouTube API,
+ * recalculates derived metrics, and writes only stats fields back to Firestore.
+ */
+export async function refreshChannel(
+  input: ChannelInput,
+  settings: ChannelsConfig['settings']
+): Promise<{
+  success: boolean;
+  channelId?: string;
+  videosRefreshed: number;
+  error?: string;
+}> {
+  let channelId: string | undefined;
+
+  try {
+    // Step 1: Resolve channel URL to ID
+    logger.info(`Resolving URL: ${input.url}`);
+    const resolved = await resolveChannelUrl(input.url);
+    channelId = resolved.channelId;
+    logger.success(`Resolved to channel ID: ${channelId} (${resolved.quotaCost} quota)`);
+
+    // Step 2: Only refresh completed channels
+    const existingProgress = await getProgress(channelId);
+    if (!existingProgress || existingProgress.status !== 'completed') {
+      const reason = !existingProgress ? 'never scraped' : `status: ${existingProgress.status}`;
+      logger.info(`Skipping refresh (${reason}): ${channelId}`);
+      return { success: true, channelId, videosRefreshed: 0 };
+    }
+
+    // Step 3: Refresh channel metadata (subscriber count needed for viewsPerSubscriber)
+    logger.info('Refreshing channel metadata...');
+    const channelData = await getChannelDetails(channelId);
+    if (!channelData) {
+      throw new Error('Channel not found');
+    }
+
+    const channelInfo = transformChannelData(channelData, input);
+    const subscriberCount = channelInfo.subscriberCount;
+    logger.success(`Channel: ${channelInfo.channelTitle} (${subscriberCount !== null ? formatNumber(subscriberCount) + ' subs' : 'subs hidden'})`);
+
+    // Save refreshed channel metadata (merge:true preserves thumbnailStoragePath)
+    const channel: Channel = {
+      ...channelInfo,
+      thumbnailStoragePath: '',
+    };
+    await saveChannel(channel);
+
+    // Step 4: Get all existing video IDs from Firestore
+    logger.info('Fetching video IDs from Firestore...');
+    const allVideoIds = await getAllVideoIdsForChannel(channelId);
+    logger.success(`Found ${allVideoIds.length} videos to refresh`);
+
+    if (allVideoIds.length === 0) {
+      await updateProgressForRefresh(channelId, 0);
+      return { success: true, channelId, videosRefreshed: 0 };
+    }
+
+    // Step 5: Fetch current stats from YouTube API in batches of 50
+    const videoChunks = chunk(allVideoIds, config.scraper.batchSize);
+    let videosRefreshed = 0;
+
+    for (let i = 0; i < videoChunks.length; i++) {
+      if (isQuotaLow()) {
+        logger.warn('Quota running low, stopping refresh...');
+        break;
+      }
+
+      const batchIds = videoChunks[i];
+      const videoData = await getVideoDetails(batchIds);
+
+      // Build stats-only updates
+      const updates = videoData.map((data) => {
+        const viewCount = parseInt(data.statistics.viewCount, 10) || 0;
+        const likeCount = parseInt(data.statistics.likeCount, 10) || 0;
+        const commentCount = parseInt(data.statistics.commentCount, 10) || 0;
+        const publishedAt = new Date(data.snippet.publishedAt);
+        const tags = data.snippet.tags || [];
+
+        const calculated = calculateVideoMetrics(
+          { publishedAt, viewCount, likeCount, commentCount, tags },
+          subscriberCount
+        );
+
+        return {
+          videoId: data.id,
+          viewCount,
+          likeCount,
+          commentCount,
+          calculated,
+          statsRefreshedAt: Timestamp.now(),
+        };
+      });
+
+      await updateVideoStatsBatch(channelId, updates);
+      videosRefreshed += updates.length;
+
+      logger.info(`Refreshed ${videosRefreshed}/${allVideoIds.length} videos`);
+      await delay(config.scraper.apiDelayMs);
+    }
+
+    // Step 6: Update progress
+    await updateProgressForRefresh(channelId, videosRefreshed);
+
+    logger.success(`Refresh complete: ${channelInfo.channelTitle}`);
+    logger.stats({
+      'Videos Refreshed': formatNumber(videosRefreshed),
+      'Quota Used': `${getQuotaUsed()} / ${config.quota.dailyLimit}`,
+    });
+
+    return { success: true, channelId, videosRefreshed };
+  } catch (error) {
+    const errorMessage = (error as Error).message;
+    logger.error(`Refresh failed: ${errorMessage}`);
+    return { success: false, channelId, videosRefreshed: 0, error: errorMessage };
+  }
+}
+
+/**
  * Run the main scraper
  */
-export async function runScraper(options: { updateMode?: boolean; ignoreQuota?: boolean } = {}): Promise<void> {
-  const { updateMode = false, ignoreQuota = false } = options;
+export async function runScraper(options: { updateMode?: boolean; refreshMode?: boolean; ignoreQuota?: boolean } = {}): Promise<void> {
+  const { updateMode = false, refreshMode = false, ignoreQuota = false } = options;
   const startTime = Date.now();
 
+  const modeLabel = refreshMode && updateMode ? 'Incremental Update + Stats Refresh'
+    : refreshMode ? 'Stats Refresh'
+    : updateMode ? 'Incremental Update'
+    : 'Data Collection';
+
   logger.header('YouTube Intelligence System v1.0');
-  logger.info(updateMode ? 'Phase 1: Incremental Update' : 'Phase 1: Data Collection');
+  logger.info(`Phase 1: ${modeLabel}`);
   logger.divider();
 
   // Initialize Firebase
@@ -621,6 +746,7 @@ export async function runScraper(options: { updateMode?: boolean; ignoreQuota?: 
   // Process channels
   let totalVideos = 0;
   let totalThumbnails = 0;
+  let totalVideosRefreshed = 0;
   let channelsProcessed = 0;
   let channelsFailed = 0;
 
@@ -633,10 +759,8 @@ export async function runScraper(options: { updateMode?: boolean; ignoreQuota?: 
       break;
     }
 
-    const verb = updateMode ? 'Updating' : 'Processing';
-    logger.subheader(`${verb} [${i + 1}/${channelsConfig.channels.length}]: ${channelInput.url}`);
-
     if (updateMode) {
+      logger.subheader(`Updating [${i + 1}/${channelsConfig.channels.length}]: ${channelInput.url}`);
       const result = await updateChannel(channelInput, channelsConfig.settings);
 
       if (result.success) {
@@ -650,7 +774,31 @@ export async function runScraper(options: { updateMode?: boolean; ignoreQuota?: 
         }
         channelsFailed++;
       }
-    } else {
+    }
+
+    if (refreshMode) {
+      if (isQuotaLow()) {
+        logger.warn('API quota nearly exhausted. Stopping refresh.');
+        break;
+      }
+
+      logger.subheader(`Refreshing [${i + 1}/${channelsConfig.channels.length}]: ${channelInput.url}`);
+      const refreshResult = await refreshChannel(channelInput, channelsConfig.settings);
+
+      if (refreshResult.success) {
+        if (!updateMode) channelsProcessed++;
+        totalVideosRefreshed += refreshResult.videosRefreshed;
+      } else {
+        if (refreshResult.error === 'Quota exhausted') {
+          logger.warn('Stopping due to quota exhaustion.');
+          break;
+        }
+        if (!updateMode) channelsFailed++;
+      }
+    }
+
+    if (!updateMode && !refreshMode) {
+      logger.subheader(`Processing [${i + 1}/${channelsConfig.channels.length}]: ${channelInput.url}`);
       const result = await processChannel(channelInput, channelsConfig.settings);
 
       if (result.success) {
@@ -671,25 +819,43 @@ export async function runScraper(options: { updateMode?: boolean; ignoreQuota?: 
 
   // Print summary
   const duration = Date.now() - startTime;
-  const videoLabel = updateMode ? 'New Videos Found' : 'Videos Scraped';
+  const videoLabel = updateMode ? 'New Videos Found' : refreshMode ? 'Videos Refreshed' : 'Videos Scraped';
 
-  logger.header('Session Summary');
-  logger.stats({
+  const summaryStats: Record<string, string | number> = {
     'Duration': formatDuration(Math.floor(duration / 1000)),
     'Channels Processed': `${channelsProcessed}/${channelsConfig.channels.length}`,
     'Channels Failed': channelsFailed,
-    [videoLabel]: formatNumber(totalVideos),
-    'Thumbnails Downloaded': formatNumber(totalThumbnails),
-    'API Quota Used': `${formatNumber(getQuotaUsed())} / ${formatNumber(config.quota.dailyLimit)}`,
-    'API Quota Remaining': formatNumber(getQuotaRemaining()),
-  });
+  };
+
+  if (updateMode) {
+    summaryStats['New Videos Found'] = formatNumber(totalVideos);
+    summaryStats['Thumbnails Downloaded'] = formatNumber(totalThumbnails);
+  }
+
+  if (refreshMode) {
+    summaryStats['Videos Refreshed'] = formatNumber(totalVideosRefreshed);
+  }
+
+  if (!updateMode && !refreshMode) {
+    summaryStats['Videos Scraped'] = formatNumber(totalVideos);
+    summaryStats['Thumbnails Downloaded'] = formatNumber(totalThumbnails);
+  }
+
+  summaryStats['API Quota Used'] = `${formatNumber(getQuotaUsed())} / ${formatNumber(config.quota.dailyLimit)}`;
+  summaryStats['API Quota Remaining'] = formatNumber(getQuotaRemaining());
+
+  logger.header('Session Summary');
+  logger.stats(summaryStats);
 
   logger.divider();
 
   if (getQuotaRemaining() < config.scraper.quotaWarningThreshold) {
     logger.warn('Quota nearly exhausted. Run again after midnight Pacific Time.');
   } else if (channelsProcessed < channelsConfig.channels.length) {
-    logger.info(`More channels to process. Run again: npm start${updateMode ? ' -- --update' : ''}`);
+    const flags = [updateMode && '--update', refreshMode && '--refresh'].filter(Boolean).join(' ');
+    logger.info(`More channels to process. Run again: npm start${flags ? ` -- ${flags}` : ''}`);
+  } else if (refreshMode) {
+    logger.success('All channels refreshed!');
   } else if (updateMode) {
     logger.success('All channels updated!');
   } else {

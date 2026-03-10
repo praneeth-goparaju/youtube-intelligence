@@ -11,13 +11,18 @@ import type {
   RecommendationResponse,
   ContentType,
   Insights,
+  IdeaGenerationResponse,
+  VideoIdea,
 } from './types';
 
-import { getAllInsights, getInsightsVersion } from './firebase';
+import { getAllInsights } from './firebase';
 import { generateWithGemini } from './gemini';
 import {
   buildContext,
   buildPrompt,
+  buildIdeasContext,
+  buildIdeasPrompt,
+  generateIdeasFromTemplates,
   validateAndFillResponse,
   generateFromTemplates,
   getPostingRecommendation,
@@ -32,17 +37,19 @@ export class RecommendationEngine {
   private insights: Insights = {};
   private insightsVersion: string | null = null;
 
+  private async loadInsights(): Promise<boolean> {
+    this.insights = await getAllInsights();
+    this.insightsVersion = this.insights.thumbnails?.generatedAt || null;
+    return Object.keys(this.insights).length > 0;
+  }
+
   /**
    * Generate a complete recommendation
    */
   async generateRecommendation(request: RecommendationRequest): Promise<RecommendationResponse> {
     const { topic, type = 'recipe', angle, audience = 'Telugu audience' } = request;
 
-    // Load insights from Firestore
-    this.insights = await getAllInsights();
-    this.insightsVersion = await getInsightsVersion();
-
-    const hasInsightsData = Object.keys(this.insights).length > 0;
+    const hasInsightsData = await this.loadInsights();
 
     let recommendation: RecommendationResponse;
     let fallbackUsed = false;
@@ -75,6 +82,44 @@ export class RecommendationEngine {
     };
 
     return recommendation;
+  }
+
+  /**
+   * Generate data-backed video ideas
+   */
+  async generateIdeas(type?: ContentType): Promise<IdeaGenerationResponse> {
+    const hasInsightsData = await this.loadInsights();
+
+    let ideas: VideoIdea[];
+    let fallbackUsed = false;
+
+    try {
+      if (hasInsightsData) {
+        const context = buildIdeasContext(this.insights);
+        const prompt = buildIdeasPrompt(type, context);
+        const responseText = await generateWithGemini(prompt);
+        const parsed = JSON.parse(responseText);
+        ideas = parsed.ideas || [];
+        if (ideas.length === 0) throw new Error('No ideas in AI response');
+      } else {
+        ideas = generateIdeasFromTemplates(type, this.insights);
+        fallbackUsed = true;
+      }
+    } catch (error) {
+      console.error('AI idea generation failed, falling back to templates:', error);
+      ideas = generateIdeasFromTemplates(type, this.insights);
+      fallbackUsed = true;
+    }
+
+    return {
+      ideas,
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        modelUsed: fallbackUsed ? 'template' : GEMINI_MODEL,
+        insightsVersion: this.insightsVersion,
+        fallbackUsed,
+      },
+    };
   }
 
   /**

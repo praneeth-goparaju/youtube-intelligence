@@ -4,7 +4,11 @@ from typing import Optional, Dict, Any, List
 import firebase_admin
 from firebase_admin import credentials, firestore
 
+from shared.constants import ANALYSIS_TYPE_THUMBNAIL, ANALYSIS_TYPE_TITLE_DESCRIPTION
 from .config import config
+
+# Legacy fallback type for channels analyzed before title_description was introduced
+_LEGACY_TITLE_TYPE = 'title'
 
 
 _app: Optional[firebase_admin.App] = None
@@ -17,6 +21,8 @@ def initialize_firebase() -> None:
 
     if _app is not None:
         return
+
+    config.initialize()
 
     try:
         cred = credentials.Certificate({
@@ -85,84 +91,136 @@ def get_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
         raise RuntimeError(f"Failed to fetch videos for channel {channel_id}: {e}") from e
 
 
-def get_video_analysis(channel_id: str, video_id: str, analysis_type: str) -> Optional[Dict[str, Any]]:
-    """Get analysis for a video.
+def _batch_get_analyses_for_channel(
+    channel_id: str,
+    video_ids: List[str],
+    analysis_types: List[str],
+    batch_size: int = 500,
+) -> Dict[str, Dict[str, Any]]:
+    """Batch-fetch analysis documents for a channel's videos.
 
     Args:
         channel_id: The channel ID.
-        video_id: The video ID.
-        analysis_type: The type of analysis (thumbnail, title, etc.).
+        video_ids: List of video IDs to fetch analyses for.
+        analysis_types: List of analysis types to fetch (e.g. ['title_description', 'title', 'thumbnail']).
+        batch_size: Max documents per get_all() call (Firestore limit).
 
     Returns:
-        Analysis document data or None if not found.
-
-    Note:
-        Returns None if analysis doesn't exist (not an error).
-        Raises RuntimeError for actual Firestore errors.
+        Dict mapping video_id -> {analysis_type: data}.
     """
-    try:
-        db = get_db()
-        doc = (db.collection('channels')
-               .document(channel_id)
-               .collection('videos')
-               .document(video_id)
-               .collection('analysis')
-               .document(analysis_type)
-               .get())
-        if doc.exists:
-            return doc.to_dict()
-        return None
-    except Exception as e:
-        # Log but don't fail - analysis may not exist yet
-        print(f"Warning: Error fetching analysis for video {video_id}: {e}")
-        return None
+    db = get_db()
+    channel_ref = db.collection('channels').document(channel_id)
+
+    # Build all document references
+    refs = []
+    for video_id in video_ids:
+        video_ref = channel_ref.collection('videos').document(video_id)
+        for atype in analysis_types:
+            refs.append(video_ref.collection('analysis').document(atype))
+
+    # Fetch in batches
+    results: Dict[str, Dict[str, Any]] = {}
+    for i in range(0, len(refs), batch_size):
+        batch_refs = refs[i:i + batch_size]
+        snapshots = db.get_all(batch_refs)
+
+        for snapshot in snapshots:
+            if not snapshot.exists:
+                continue
+            # Path: channels/{channelId}/videos/{videoId}/analysis/{type}
+            a_type = snapshot.reference.id
+            vid_id = snapshot.reference.parent.parent.id
+
+            if vid_id not in results:
+                results[vid_id] = {}
+            results[vid_id][a_type] = snapshot.to_dict()
+
+    return results
 
 
-def get_all_videos_with_analyses() -> List[Dict[str, Any]]:
-    """Load all videos with both thumbnail and title analyses.
+def get_all_videos_with_analyses(channel_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Load videos with both thumbnail and title analyses.
+
+    Uses batch reads (db.get_all) instead of per-video document fetches
+    for dramatically fewer Firestore reads.
 
     Returns videos that have at least a title analysis (needed for content type).
     Thumbnail analysis is included when available but not required.
+
+    Args:
+        channel_id: If provided, only load videos from this channel.
 
     Returns:
         List of video dicts with channel, video, title_analysis, and
         thumbnail_analysis (may be None).
     """
-    channels = get_all_channels()
+    if channel_id:
+        db = get_db()
+        doc = db.collection('channels').document(channel_id).get()
+        if not doc.exists:
+            print(f"  Channel {channel_id} not found in Firestore")
+            return []
+        channels = [{'id': doc.id, **doc.to_dict()}]
+    else:
+        channels = get_all_channels()
+    print(f"  Found {len(channels)} channel{'s' if len(channels) != 1 else ''}")
 
     all_videos = []
-    for channel in channels:
+    skipped_no_videos = 0
+    skipped_no_analysis = 0
+
+    for i, channel in enumerate(channels, 1):
         channel_id = channel['id']
+        channel_name = channel.get('title', channel_id)
+        print(f"  [{i}/{len(channels)}] {channel_name}...", end=' ', flush=True)
+
         videos = get_channel_videos(channel_id)
 
-        for video in videos:
-            video_id = video['id']
+        if not videos:
+            print("no videos")
+            skipped_no_videos += 1
+            continue
+
+        video_ids = [v['id'] for v in videos]
+        video_map = {v['id']: v for v in videos}
+
+        # Batch fetch all analyses (include legacy 'title' as fallback)
+        analyses = _batch_get_analyses_for_channel(
+            channel_id, video_ids,
+            [ANALYSIS_TYPE_TITLE_DESCRIPTION, _LEGACY_TITLE_TYPE, ANALYSIS_TYPE_THUMBNAIL]
+        )
+
+        channel_count = 0
+        for video_id in video_ids:
+            video_analyses = analyses.get(video_id, {})
 
             # Title/description analysis (required — provides content type)
-            title_analysis = get_video_analysis(
-                channel_id, video_id, 'title_description'
-            )
+            title_analysis = video_analyses.get(ANALYSIS_TYPE_TITLE_DESCRIPTION)
             if not title_analysis:
-                title_analysis = get_video_analysis(
-                    channel_id, video_id, 'title'
-                )
+                title_analysis = video_analyses.get(_LEGACY_TITLE_TYPE)
 
             if not title_analysis:
+                skipped_no_analysis += 1
                 continue  # Skip videos without title analysis
 
-            # Thumbnail analysis (optional but included when available)
-            thumbnail_analysis = get_video_analysis(
-                channel_id, video_id, 'thumbnail'
-            )
+            thumbnail_analysis = video_analyses.get(ANALYSIS_TYPE_THUMBNAIL)
 
             all_videos.append({
                 'channel_id': channel_id,
                 'video_id': video_id,
                 'channel': channel,
-                'video': video,
+                'video': video_map[video_id],
                 'title_analysis': title_analysis,
                 'thumbnail_analysis': thumbnail_analysis,
             })
+            channel_count += 1
+
+        print(f"{channel_count}/{len(videos)} analyzed")
+
+    if skipped_no_videos:
+        print(f"  Skipped {skipped_no_videos} channels with no videos")
+    if skipped_no_analysis:
+        print(f"  Skipped {skipped_no_analysis} videos with no analysis")
 
     return all_videos
 
@@ -171,7 +229,7 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
     """Save insights to Firestore."""
     try:
         db = get_db()
-        db.collection('insights').document(insight_type).set(data, merge=True)
+        db.collection('insights').document(insight_type).set(data)
     except Exception as e:
         print(f"Error saving insights for {insight_type}: {e}")
         raise

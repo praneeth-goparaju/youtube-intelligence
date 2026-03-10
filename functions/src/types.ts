@@ -29,7 +29,7 @@ export interface RecommendationResponse {
   tags: TagRecommendations;
   posting: PostingRecommendation;
   prediction: PerformancePrediction;
-  content: ContentRecommendations;
+  production: ProductionToolkit;
   metadata: ResponseMetadata;
 }
 
@@ -136,14 +136,34 @@ export interface PerformancePrediction {
   riskFactors: string[];
 }
 
-export interface ContentRecommendations {
+export interface HookScriptLine {
+  visual: string;
+  dialogue: string;
+  duration: string;
+}
+
+export interface VideoSegment {
+  startTime: string;
+  endTime: string;
+  title: string;
+  description: string;
+  tips?: string;
+}
+
+export interface Shot {
+  type: string;
+  description: string;
+  timing: string;
+}
+
+export interface ProductionToolkit {
   optimalDuration: string;
-  mustInclude: string[];
-  hooks: string[];
-  description: {
-    template: string;
-    mustInclude: string[];
-  };
+  hookScript: HookScriptLine[];
+  segments: VideoSegment[];
+  shotList: Shot[];
+  pinnedComment: string;
+  seoDescription: string;
+  endScreenScript: string;
 }
 
 export interface ResponseMetadata {
@@ -246,6 +266,8 @@ export interface ContentGapInsights {
   generatedAt: string;
   highOpportunity: ContentGap[];
   saturatedTopics: SaturatedTopic[];
+  keywordGaps?: { highValueKeywords: KeywordOpportunity[] };
+  formatGaps?: { formatPerformance: FormatPerformance[]; recommendedFormats: FormatPerformance[] };
 }
 
 export interface ContentGap {
@@ -258,4 +280,38 @@ export interface ContentGap {
 export interface SaturatedTopic {
   topic: string;
   competition: string;
+}
+
+export interface KeywordOpportunity {
+  keyword: string;
+  avgViewsPerSubscriber: number;
+  viewsMultiplier: number;
+  usageCount: number;
+  usageRate: number;
+}
+
+export interface FormatPerformance {
+  format: string;
+  avgViewsPerSubscriber: number;
+  viewsMultiplier: number;
+  count: number;
+  usagePercent: number;
+}
+
+// ============================================
+// Idea Generation Types
+// ============================================
+
+export interface VideoIdea {
+  topic: string;
+  angle: string;
+  whyItWorks: string;
+  opportunityScore: number;
+  suggestedType: ContentType;
+  keywords: string[];
+}
+
+export interface IdeaGenerationResponse {
+  ideas: VideoIdea[];
+  metadata: ResponseMetadata;
 }

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Claude Code status line - minimal black/white/blue brand style
+# Receives JSON on stdin, outputs a single-line status string
+
+input=$(cat)
+
+# Extract fields from JSON
+model=$(echo "$input" | jq -r '.model.display_name // empty')
+used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+ctx_size=$(echo "$input" | jq -r '.context_window.context_window_size // empty')
+cwd=$(echo "$input" | jq -r '.cwd // empty')
+
+# ANSI color codes (no background colors)
+RESET='\033[0m'
+GRAY='\033[38;5;245m'
+WHITE='\033[38;5;255m'
+BLUE='\033[38;2;25;118;210m'
+DIM='\033[2m'
+
+# Separator
+SEP="${GRAY} │ ${RESET}"
+
+# Build status parts
+parts=()
+
+# Model name - blue highlight
+if [ -n "$model" ]; then
+    parts+=("$(printf "${BLUE}%s${RESET}" "$model")")
+fi
+
+# Token count - format as "12k/200k", bright white when context > 80%
+# Use used_percentage * ctx_size to get cumulative tokens in context (not just last call)
+if [ -n "$used_pct" ] && [ -n "$ctx_size" ] && [ "$ctx_size" -gt 0 ] 2>/dev/null; then
+    # Format a raw number as e.g. "12k" or "1.2m"
+    fmt_k() {
+        local n=$1
+        if [ "$n" -ge 1000000 ] 2>/dev/null; then
+            awk "BEGIN { printf \"%.1fm\", $n/1000000 }"
+        elif [ "$n" -ge 1000 ] 2>/dev/null; then
+            awk "BEGIN { printf \"%.0fk\", $n/1000 }"
+        else
+            echo "$n"
+        fi
+    }
+    # Derive used tokens from the pre-calculated percentage and total context size
+    used_tokens=$(awk "BEGIN { printf \"%d\", ($used_pct / 100) * $ctx_size }")
+    used_fmt=$(fmt_k "$used_tokens")
+    total_fmt=$(fmt_k "$ctx_size")
+    token_str="${used_fmt}/${total_fmt}"
+    pct_int=${used_pct%.*}
+    if [ "${pct_int:-0}" -ge 80 ] 2>/dev/null; then
+        parts+=("$(printf "${WHITE}%s${RESET}" "$token_str")")
+    else
+        parts+=("$(printf "${GRAY}%s${RESET}" "$token_str")")
+    fi
+fi
+
+# Project name - basename of cwd
+if [ -n "$cwd" ]; then
+    project=$(basename "$cwd")
+    parts+=("$(printf "${GRAY}%s${RESET}" "$project")")
+fi
+
+# Git branch with dirty indicator - check using cwd from JSON
+if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+    branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
+    if [ -z "$branch" ]; then
+        branch=$(git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
+    fi
+    if [ -n "$branch" ]; then
+        # Count uncommitted files by type
+        porcelain=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null)
+        staged=$(echo "$porcelain" | grep -c '^[MADRC]' 2>/dev/null || echo 0)
+        modified=$(echo "$porcelain" | grep -c '^.[MD]' 2>/dev/null || echo 0)
+        untracked=$(echo "$porcelain" | grep -c '^??' 2>/dev/null || echo 0)
+
+        GREEN='\033[38;5;114m'
+        YELLOW='\033[38;5;220m'
+        RED='\033[38;5;203m'
+
+        dirty_parts=""
+        [ "$staged" -gt 0 ] 2>/dev/null && dirty_parts="${GREEN}+${staged}${RESET}"
+        [ "$modified" -gt 0 ] 2>/dev/null && dirty_parts="${dirty_parts:+$dirty_parts }${YELLOW}M${modified}${RESET}"
+        [ "$untracked" -gt 0 ] 2>/dev/null && dirty_parts="${dirty_parts:+$dirty_parts }${RED}U${untracked}${RESET}"
+
+        if [ -n "$dirty_parts" ]; then
+            parts+=("$(printf "${GRAY}%s ${RESET}%b" "$branch" "$dirty_parts")")
+        else
+            parts+=("$(printf "${GRAY}%s${RESET}" "$branch")")
+        fi
+    fi
+fi
+
+# Join parts with separator
+output=""
+for i in "${!parts[@]}"; do
+    if [ "$i" -eq 0 ]; then
+        output="${parts[$i]}"
+    else
+        output="${output}$(printf "${GRAY} │ ${RESET}")${parts[$i]}"
+    fi
+done
+
+printf "%b" "$output"

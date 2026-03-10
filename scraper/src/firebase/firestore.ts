@@ -1,5 +1,5 @@
 import { getDb } from './client.js';
-import { Channel, Video, ScrapeProgress, UnresolvedChannel } from '../types/index.js';
+import { Channel, Video, CalculatedMetrics, ScrapeProgress, UnresolvedChannel } from '../types/index.js';
 import { Timestamp } from 'firebase-admin/firestore';
 
 // Collection names
@@ -256,6 +256,66 @@ export async function updateChannelStats(
     ...stats,
     lastUpdatedAt: Timestamp.now(),
   });
+}
+
+/**
+ * Get all video IDs for a channel (ID-only query, no field data transferred).
+ */
+export async function getAllVideoIdsForChannel(channelId: string): Promise<string[]> {
+  const db = getDb();
+  const snapshot = await db
+    .collection(CHANNELS_COLLECTION)
+    .doc(channelId)
+    .collection(VIDEOS_SUBCOLLECTION)
+    .select()
+    .get();
+  return snapshot.docs.map((doc) => doc.id);
+}
+
+/**
+ * Batch-update video stats and calculated metrics only.
+ * Uses merge:true to avoid overwriting immutable fields (title, description, thumbnails, etc.).
+ */
+export async function updateVideoStatsBatch(
+  channelId: string,
+  updates: Array<{
+    videoId: string;
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    calculated: CalculatedMetrics;
+    statsRefreshedAt: Timestamp;
+  }>
+): Promise<void> {
+  if (updates.length === 0) return;
+
+  const db = getDb();
+
+  for (let i = 0; i < updates.length; i += MAX_BATCH_SIZE) {
+    const chunk = updates.slice(i, i + MAX_BATCH_SIZE);
+    const batch = db.batch();
+
+    for (const update of chunk) {
+      const ref = db
+        .collection(CHANNELS_COLLECTION)
+        .doc(channelId)
+        .collection(VIDEOS_SUBCOLLECTION)
+        .doc(update.videoId);
+      batch.set(ref, {
+        viewCount: update.viewCount,
+        likeCount: update.likeCount,
+        commentCount: update.commentCount,
+        calculated: update.calculated,
+        statsRefreshedAt: update.statsRefreshedAt,
+      }, { merge: true });
+    }
+
+    try {
+      await batch.commit();
+    } catch (error) {
+      throw new Error(`Failed to update video stats for channel ${channelId} (chunk ${Math.floor(i / MAX_BATCH_SIZE) + 1}): ${(error as Error).message}`);
+    }
+  }
 }
 
 // ===== Unresolved Channels =====

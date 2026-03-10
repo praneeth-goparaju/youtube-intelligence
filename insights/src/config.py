@@ -13,18 +13,24 @@ PROJECT_ROOT = load_env_file(__file__)
 
 
 class Config:
-    """Application configuration."""
+    """Application configuration. Firebase credentials are loaded lazily."""
 
-    # Firebase
-    FIREBASE_PROJECT_ID: str = get_env('FIREBASE_PROJECT_ID')
-    FIREBASE_CLIENT_EMAIL: str = get_env('FIREBASE_CLIENT_EMAIL')
-    FIREBASE_PRIVATE_KEY: str = get_env('FIREBASE_PRIVATE_KEY').replace('\\n', '\n')
-    FIREBASE_STORAGE_BUCKET: str = get_env('FIREBASE_STORAGE_BUCKET')
-
-    # Paths
+    # Paths (always available)
     PROJECT_ROOT: Path = PROJECT_ROOT
     OUTPUTS_DIR: Path = Path(__file__).parent.parent / 'outputs'
 
+    # Firebase (populated by initialize())
+    FIREBASE_PROJECT_ID: str = ''
+    FIREBASE_CLIENT_EMAIL: str = ''
+    FIREBASE_PRIVATE_KEY: str = ''
+    FIREBASE_STORAGE_BUCKET: str = ''
+
+    def initialize(self) -> None:
+        """Load Firebase credentials from environment. Call before using Firebase."""
+        self.FIREBASE_PROJECT_ID = get_env('FIREBASE_PROJECT_ID')
+        self.FIREBASE_CLIENT_EMAIL = get_env('FIREBASE_CLIENT_EMAIL')
+        self.FIREBASE_PRIVATE_KEY = get_env('FIREBASE_PRIVATE_KEY').replace('\\n', '\n')
+        self.FIREBASE_STORAGE_BUCKET = get_env('FIREBASE_STORAGE_BUCKET')
 
 
 config = Config()

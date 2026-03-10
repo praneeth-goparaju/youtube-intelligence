@@ -247,6 +247,26 @@ export async function updateProgressForUpdate(
 }
 
 /**
+ * Update progress after a stats refresh of a completed channel.
+ * Records when the refresh happened and how many videos were updated.
+ */
+export async function updateProgressForRefresh(
+  channelId: string,
+  videosUpdated: number
+): Promise<void> {
+  const progress = await getProgress(channelId);
+  if (!progress) return;
+
+  progress.lastRefreshAt = Timestamp.now();
+  progress.lastRefreshVideosUpdated = videosUpdated;
+  progress.lastProcessedAt = Timestamp.now();
+  progress.quotaUsed = getQuotaUsed();
+  progress.quotaDate = getPacificDate();
+
+  await saveProgress(progress);
+}
+
+/**
  * Check if a channel is already completed
  */
 export async function isChannelCompleted(channelId: string): Promise<boolean> {

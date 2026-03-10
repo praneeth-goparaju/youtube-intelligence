@@ -82,3 +82,5 @@ data/batch/
 data/channels-review.csv
 data/old-channels-review.csv
 data/channels-review.csv
+functions/.env*
+functions/outputs/

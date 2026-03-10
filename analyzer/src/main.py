@@ -370,8 +370,8 @@ def main():
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=680,
-        help='Maximum requests per batch job (default: 680 for Tier 1, use 50000 for Tier 2+)'
+        default=25,
+        help='Maximum requests per batch job (default: 25 for Tier 1, use 50000 for Tier 2+)'
     )
     parser.add_argument(
         '--poll-interval',

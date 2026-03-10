@@ -103,7 +103,12 @@ class GapAnalyzer:
             if primary:
                 keyword_performance[primary.lower()].append(vps)
 
-            for kw in keywords.get('secondaryKeywords', []):
+            secondary = keywords.get('secondaryKeywords', '')
+            if isinstance(secondary, str):
+                secondary_list = [kw.strip() for kw in secondary.split(',') if kw.strip()]
+            else:
+                secondary_list = secondary or []
+            for kw in secondary_list:
                 if kw:
                     keyword_performance[kw.lower()].append(vps)
 

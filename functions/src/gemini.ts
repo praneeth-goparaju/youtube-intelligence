@@ -26,7 +26,7 @@ function getModel(): GenerativeModel {
       generationConfig: {
         temperature: 0.7,  // Higher for creative suggestions
         topP: 0.95,
-        maxOutputTokens: 4096,
+        maxOutputTokens: 16384,
       },
     });
   }

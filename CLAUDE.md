@@ -52,6 +52,8 @@ cd ../functions && npm install
 cd scraper
 npm start                       # Run scraper (full initial scrape)
 npm start -- --update           # Incremental update (fetch only new videos for completed channels)
+npm start -- --refresh          # Refresh stats (views, likes, comments) for all existing videos
+npm start -- --update --refresh # Find new videos AND refresh all existing video stats
 npm start -- --ignore-quota     # Ignore quota checks (use with caution)
 npm test                        # Run vitest tests
 npx tsx scripts/validate.ts     # Test API connections
