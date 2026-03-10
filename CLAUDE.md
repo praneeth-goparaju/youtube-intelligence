@@ -22,9 +22,9 @@ Four-phase system with separate technology stacks:
 ## Project Structure
 
 ```
-config/channels.json    # Input channel list (URL, category, priority, optional analysis_note)
+config/channels.json    # Input channel list (URL, category, priority)
 data/batch/             # Batch mode JSONL request/result files (gitignored)
-data/channels-review.csv
+data/channels-review.csv.example
 shared/                 # Python shared utilities (config, constants, firebase_utils, gemini_utils)
 scraper/                # Phase 1 - TypeScript
 analyzer/               # Phase 2 - Python (src/, tests/, scripts/)
@@ -32,7 +32,7 @@ insights/               # Phase 3 - Python (src/, tests/)
 functions/              # Phase 4 - TypeScript (Firebase Functions)
 ```
 
-`config/channels.json` defines all target channels with `url`, `category`, `priority` (1-3), and optional `analysis_note`. The `settings` block controls `maxVideosPerChannel`, `includeShorts`, `includePrivate`, and `skipShortThumbnails`.
+`config/channels.json` defines all target channels with `url`, `category`, `priority` (1-3). The `settings` block controls `maxVideosPerChannel`, `includeShorts`, `includePrivate`, and `skipShortThumbnails`.
 
 ## Setup
 
@@ -85,6 +85,9 @@ python3 -m src.main --mode batch --phase import --type thumbnail               #
 python3 -m src.main --mode batch --phase status                                # Show all batch job statuses
 python3 -m src.main --mode batch --channel UCxxx --type thumbnail              # Single channel
 python3 -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch
+python3 -m src.main --mode batch --type thumbnail --loop                           # Loop until all videos analyzed
+python3 -m src.main --mode batch --phase poll --job-name JOB_NAME                  # Poll specific job
+python3 -m src.main --mode batch --phase poll --poll-interval 120                  # Custom poll interval (seconds)
 
 python3 -m pytest tests/                                                       # Run tests
 ```
@@ -106,12 +109,21 @@ npm install
 # CLI usage
 npm run recommend -- --topic "Hyderabadi Biryani" --type recipe
 npm run recommend -- --topic "Biryani" --angle "Restaurant secret" --output recommendation.json
+npm run recommend -- --topic "Biryani" --audience "Home cooks"    # Custom target audience
+npm run recommend -- --topic "Biryani" --no-thumbnail             # Skip AI thumbnail generation
+npm run recommend -- --ideas                                      # Generate data-backed video ideas
 
 # API usage (local emulator)
 npm run serve
 curl -X POST http://localhost:5001/PROJECT/us-central1/recommend \
   -H "Content-Type: application/json" \
   -d '{"topic": "Biryani", "type": "recipe"}'
+
+# Additional API endpoints
+# POST /ideas              - Generate video ideas
+# POST /generations-save   - Save a generation result
+# GET  /generations-list   - List saved generations
+# GET  /health             - Health check
 
 # Deploy to Firebase
 npm run deploy
@@ -134,7 +146,7 @@ firebase functions:secrets:set ALLOWED_ORIGINS       # Optional: Comma-separated
 ```
 
 API Authentication:
-- All `/recommend` endpoint calls require `Authorization: Bearer <API_KEY>` header
+- All `/recommend` and `/ideas` endpoint calls require `Authorization: Bearer <API_KEY>` header
 - Rate limiting: 100 requests per hour per API key
 - Firestore rules require Firebase Authentication for client reads
 
@@ -188,9 +200,9 @@ Text analysis fields (titleLength, hasEmoji, etc.) are computed by the analyzer'
 
 All analysis uses Gemini 2.5 Flash (`gemini-2.5-flash`) with 2 API calls per video:
 
-1. **Thumbnail** (vision call): Composition, colors, text, food, graphics, psychology (~109 fields, 100% Gemini)
-2. **Title + Description** (hybrid local + LLM): ~134 total fields per video
-   - **75 Gemini fields** (semantic): pattern recognition, transliteration, code-switching, power words, triggers, keywords, niche classification, content signals, recipe detection, SEO assessment, comment question
+1. **Thumbnail** (vision call): Composition, colors, text, food, graphics, psychology (~132 fields, 100% Gemini)
+2. **Title + Description** (hybrid local + LLM): ~135 total fields per video
+   - **76 Gemini fields** (semantic): pattern recognition, transliteration, code-switching, power words, triggers, keywords, niche classification, content signals, recipe detection, SEO assessment, comment question
    - **59 local fields** (`local_text_features.py`): formatting (20), structure counts (8), language detection (8), hooks basics (3), desc structure/timestamps/hashtags/CTAs/links/monetization (20)
    - Local fields are computed via regex/Unicode detection (no API cost, no hallucination)
    - Both are merged into a single analysis document in Firestore

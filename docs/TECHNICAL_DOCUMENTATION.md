@@ -290,17 +290,10 @@ interface CalculatedMetrics {
   likeRatio: number;           // likes / views * 100
   commentRatio: number;        // comments / views * 100
   viewsPerSubscriber: number;  // views / channel subscribers
-  daysSincePublish: number;    // days since video published
   viewsPerDay: number;         // views / days since publish
   publishDayOfWeek: string;    // "Monday", "Tuesday", etc.
   publishHourIST: number;      // Hour in IST timezone (0-23)
-  titleLength: number;
-  descriptionLength: number;
   tagCount: number;
-  hasNumberInTitle: boolean;
-  hasEmojiInTitle: boolean;
-  hasTeluguInTitle: boolean;   // Telugu script detection
-  hasEnglishInTitle: boolean;
 }
 ```
 
@@ -345,7 +338,7 @@ Storage structure:
 
 The analyzer processes scraped data using Google Gemini 2.5 Flash with **2 API calls per video**:
 
-- **Thumbnail Analysis** (vision call): Composition, colors, human presence, text, food, graphics, psychology (~109 fields)
+- **Thumbnail Analysis** (vision call): Composition, colors, human presence, text, food, graphics, psychology (~132 fields)
 - **Title + Description Analysis** (combined text call): Single call analyzing both together
   - Title: Structure, language mix, hooks, keywords, content signals, Telugu-specific patterns (~120 fields)
   - Description (lean): Structure, timestamps, recipe content, hashtags, CTAs, SEO (~20 fields)
@@ -424,7 +417,7 @@ Retry logic handles specific error types:
 - `JSONDecodeError`: no retry (response format issue)
 - General `Exception`: logged with type info, linear backoff
 
-### Thumbnail Analysis Schema (~109 fields)
+### Thumbnail Analysis Schema (~132 fields)
 
 Defined as a Pydantic model in `src/batch_api/schemas.py`:
 
@@ -515,7 +508,7 @@ Key sections (examples of values):
 }
 ```
 
-### Title + Description Analysis Schema (~140 fields)
+### Title + Description Analysis Schema (~135 fields)
 
 Defined as a Pydantic model in `src/batch_api/schemas.py`:
 
@@ -718,16 +711,16 @@ PREPARE → SUBMIT → POLL → IMPORT
 
 ```bash
 # Run all phases sequentially
-python -m src.main --mode batch --type thumbnail
+python3 -m src.main --mode batch --type thumbnail
 
 # Or run phases individually
-python -m src.main --mode batch --phase prepare --type thumbnail
-python -m src.main --mode batch --phase submit --type thumbnail
-python -m src.main --mode batch --phase poll --type thumbnail
-python -m src.main --mode batch --phase import --type thumbnail
+python3 -m src.main --mode batch --phase prepare --type thumbnail
+python3 -m src.main --mode batch --phase submit --type thumbnail
+python3 -m src.main --mode batch --phase poll --type thumbnail
+python3 -m src.main --mode batch --phase import --type thumbnail
 
 # Check status of all jobs
-python -m src.main --mode batch --phase status
+python3 -m src.main --mode batch --phase status
 ```
 
 #### Batch Request Key Format
@@ -1091,17 +1084,10 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
     likeRatio: 2.81,
     commentRatio: 0.075,
     viewsPerSubscriber: 3.25,
-    daysSincePublish: 365,
     viewsPerDay: 43836,
     publishDayOfWeek: "Saturday",
     publishHourIST: 18,
-    titleLength: 52,
-    descriptionLength: 2450,
-    tagCount: 28,
-    hasNumberInTitle: false,
-    hasEmojiInTitle: false,
-    hasTeluguInTitle: true,
-    hasEnglishInTitle: true
+    tagCount: 28
   }
 }
 ```
@@ -1514,15 +1500,15 @@ npm start  # Run scraper
 
 # Phase 2: Analyzer (after scraping completes)
 cd ../analyzer
-pip install -r ../requirements.txt
-python -m src.main --validate              # Test connections
-python -m src.main                          # Sync mode (all types)
-python -m src.main --mode batch --type all  # Batch mode (50% cheaper)
+pip3 install -r ../requirements.txt
+python3 -m src.main --validate              # Test connections
+python3 -m src.main                          # Sync mode (all types)
+python3 -m src.main --mode batch --type all  # Batch mode (50% cheaper)
 
 # Phase 3: Insights (after analysis completes)
 cd ../insights
-pip install -r requirements.txt
-python -m src.main
+pip3 install -r requirements.txt
+python3 -m src.main
 
 # Phase 4: Recommender
 cd ../functions

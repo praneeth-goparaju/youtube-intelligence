@@ -38,6 +38,8 @@ npm run recommend -- --help
 | `--angle, -a` | Unique positioning angle | - |
 | `--audience` | Target audience | Telugu audience |
 | `--output, -o` | Save to JSON file | stdout |
+| `--no-thumbnail` | Skip AI thumbnail generation | false |
+| `--ideas, -i` | Generate data-backed video ideas | false |
 
 ### Environment Variables
 
@@ -101,6 +103,22 @@ npm run deploy
 # Or from project root
 firebase deploy --only functions
 ```
+
+## Authentication
+
+All API endpoints (except `/health`) require authentication:
+
+```bash
+# Required header
+Authorization: Bearer YOUR_API_KEY
+```
+
+Set the API key as a Firebase secret:
+```bash
+firebase functions:secrets:set RECOMMEND_API_KEY
+```
+
+Rate limiting: 100 requests per hour per API key.
 
 ## API Endpoints
 
@@ -177,6 +195,7 @@ Generate video recommendations.
 ```bash
 curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
     "topic": "Chicken Biryani",
     "type": "recipe",
@@ -184,6 +203,25 @@ curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
     "audience": "Telugu home cooks"
   }'
 ```
+
+### POST /ideas
+
+Generate data-backed video ideas.
+
+**Request:**
+```json
+{
+  "type": "recipe"
+}
+```
+
+### POST /generations-save
+
+Save a generation result.
+
+### GET /generations-list
+
+List saved generations.
 
 ### GET /health
 
@@ -234,13 +272,17 @@ print(result.data);
 ```
 functions/
 ├── src/
-│   ├── cli.ts           # CLI entry point (local usage)
-│   ├── index.ts         # Firebase Function definitions (API)
-│   ├── engine.ts        # Recommendation engine (shared)
-│   ├── firebase.ts      # Firestore client for insights
-│   ├── gemini.ts        # Gemini AI client
-│   ├── templates.ts     # Fallback templates
-│   └── types.ts         # TypeScript interfaces
+│   ├── cli.ts                  # CLI entry point (local usage)
+│   ├── index.ts                # Firebase Function definitions (API)
+│   ├── engine.ts               # Recommendation engine (API)
+│   ├── recommendation-core.ts  # Shared recommendation logic
+│   ├── firebase.ts             # Firestore client for insights
+│   ├── gemini.ts               # Gemini AI client
+│   ├── templates.ts            # Fallback templates
+│   ├── types.ts                # TypeScript interfaces
+│   ├── rate-limiter.ts         # Firestore-based distributed rate limiting
+│   ├── formatter.ts            # Output formatting
+│   └── thumbnail-gen.ts        # AI thumbnail generation
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -301,7 +343,9 @@ CORS is enabled for the HTTP endpoint to allow web clients.
 | Status | Meaning |
 |--------|---------|
 | 400 | Invalid request (missing topic, invalid type) |
+| 401 | Unauthorized (missing or invalid API key) |
 | 405 | Method not allowed (use POST) |
+| 429 | Rate limit exceeded (100 requests/hour) |
 | 500 | Internal error (AI failed, Firebase error) |
 
 ### Callable Errors
@@ -329,9 +373,10 @@ npm test
 # Health check
 curl http://localhost:5001/PROJECT_ID/us-central1/health
 
-# Generate recommendation
+# Generate recommendation (auth required even on emulator)
 curl -X POST http://localhost:5001/PROJECT_ID/us-central1/recommend \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{"topic": "Test Recipe"}'
 ```
 
@@ -422,7 +467,10 @@ const API_URL = 'https://us-central1-PROJECT.cloudfunctions.net/recommend';
 export async function getRecommendation(topic: string, type: string = 'recipe') {
   const response = await fetch(API_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.RECOMMEND_API_KEY}`,
+    },
     body: JSON.stringify({ topic, type }),
   });
 
@@ -439,11 +487,13 @@ export async function getRecommendation(topic: string, type: string = 'recipe') 
 ```python
 import requests
 
-def get_recommendation(topic: str, content_type: str = 'recipe'):
+def get_recommendation(topic: str, content_type: str = 'recipe', api_key: str = ''):
     url = 'https://us-central1-PROJECT.cloudfunctions.net/recommend'
     response = requests.post(url, json={
         'topic': topic,
         'type': content_type,
+    }, headers={
+        'Authorization': f'Bearer {api_key}',
     })
     response.raise_for_status()
     return response.json()

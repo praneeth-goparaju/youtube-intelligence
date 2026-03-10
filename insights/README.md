@@ -15,14 +15,14 @@ Output is raw statistical data — the recommender's LLM handles interpretation 
 
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Generate all insights
-python -m src.main
+python3 -m src.main
 
 # Generate specific insight type
-python -m src.main --type profiles
-python -m src.main --type gaps
+python3 -m src.main --type profiles
+python3 -m src.main --type gaps
 ```
 
 ## Architecture
@@ -37,7 +37,8 @@ insights/
 │   ├── config.py            # Configuration
 │   ├── firebase_client.py   # Firebase operations
 │   ├── profiler.py          # Feature profiling (all vs top 10%)
-│   └── gaps.py              # Content gap analysis
+│   ├── gaps.py              # Content gap analysis
+│   └── recommender_bridge.py # Bridge insights for recommender
 │
 └── outputs/                  # Generated reports (JSON)
 ```
@@ -122,7 +123,7 @@ Uses viewsPerSubscriber (not raw view count) to find opportunities:
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--type` | Insight type: `all`, `profiles`, `gaps` | `all` |
+| `--type` | Insight type: `all`, `profiles`, `gaps`, `bridge` | `all` |
 
 ## Configuration
 
@@ -146,5 +147,7 @@ FIREBASE_STORAGE_BUCKET=your-project.appspot.com
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `numpy` | >=1.26.0 | Numerical operations |
+| `pandas` | >=2.2.0 | Data manipulation |
+| `scipy` | >=1.12.0 | Statistical analysis |
 | `firebase-admin` | >=6.4.0 | Firebase SDK |
 | `python-dotenv` | >=1.0.1 | Environment config |

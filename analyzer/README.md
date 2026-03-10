@@ -4,33 +4,33 @@ A Python-based AI analysis system that processes YouTube video data using Google
 
 Supports two processing modes:
 - **Sync mode** (default): Per-video API calls with structured output via `response_schema`
-- **Batch mode**: Gemini Batch API for 50% cost savings (requires Tier 2+)
+- **Batch mode**: Gemini Batch API for 50% cost savings (works on all paid tiers)
 
 ## Overview
 
 | Type | Model | Input | Output |
 |------|-------|-------|--------|
-| **Thumbnail** | Gemini 2.5 Flash (Vision) | Image | ~109 composition/color/food/psychology attributes |
-| **Title + Description** | Gemini 2.5 Flash (Text) | Title + Description text | ~140 structure/language/hooks/keywords/content signals + description SEO fields |
+| **Thumbnail** | Gemini 2.5 Flash (Vision) | Image | ~132 composition/color/food/psychology attributes |
+| **Title + Description** | Gemini 2.5 Flash (Text) | Title + Description text | ~135 structure/language/hooks/keywords/content signals + description SEO fields |
 
 ## Quick Start
 
 ```bash
 # Install dependencies (from project root)
-pip install -r requirements.txt   # run from project root, or ../requirements.txt from analyzer/
+pip3 install -r requirements.txt   # run from project root, or ../requirements.txt from analyzer/
 
 # Validate connections
-python -m src.main --validate
+python3 -m src.main --validate
 
 # Sync mode (default)
-python -m src.main                                          # All analysis types
-python -m src.main --type thumbnail                         # Thumbnail only
-python -m src.main --type title_description --channel UCxxx --limit 50
+python3 -m src.main                                          # All analysis types
+python3 -m src.main --type thumbnail                         # Thumbnail only
+python3 -m src.main --type title_description --channel UCxxx --limit 50
 
 # Batch mode (50% cost savings)
-python -m src.main --mode batch --type thumbnail            # Full pipeline
-python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Test batch
-python -m src.main --mode batch --phase status              # Check job statuses
+python3 -m src.main --mode batch --type thumbnail            # Full pipeline
+python3 -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Test batch
+python3 -m src.main --mode batch --phase status              # Check job statuses
 ```
 
 ## Architecture
@@ -87,8 +87,8 @@ Both sync and batch modes use:
 - **User prompts**: Shorter analysis instructions (no JSON template needed since schema enforces structure)
 
 ```bash
-python -m src.main --type thumbnail
-python -m src.main --type title_description --channel UCxxx --limit 50
+python3 -m src.main --type thumbnail
+python3 -m src.main --type title_description --channel UCxxx --limit 50
 ```
 
 ### Batch Mode (Gemini Batch API)
@@ -115,15 +115,15 @@ PREPARE → SUBMIT → POLL → IMPORT
 
 ```bash
 # Run all phases sequentially (blocks during poll)
-python -m src.main --mode batch --type thumbnail
+python3 -m src.main --mode batch --type thumbnail
 
 # Or run phases individually (recommended for production)
-python -m src.main --mode batch --phase prepare --type thumbnail
-python -m src.main --mode batch --phase submit --type thumbnail
+python3 -m src.main --mode batch --phase prepare --type thumbnail
+python3 -m src.main --mode batch --phase submit --type thumbnail
 # ... go do something else, come back later ...
-python -m src.main --mode batch --phase status
-python -m src.main --mode batch --phase poll --type thumbnail
-python -m src.main --mode batch --phase import --type thumbnail
+python3 -m src.main --mode batch --phase status
+python3 -m src.main --mode batch --phase poll --type thumbnail
+python3 -m src.main --mode batch --phase import --type thumbnail
 ```
 
 #### Batch API Limits
@@ -154,9 +154,10 @@ Job state is tracked in Firestore `batch_jobs` collection. If interrupted during
 | `--validate` | Test connections only | False |
 | `--mode`, `-m` | Processing mode: `sync`, `batch` | `sync` |
 | `--phase` | Batch phase: `all`, `prepare`, `submit`, `poll`, `import`, `status` | `all` |
-| `--batch-size` | Max requests per batch job | `50000` |
+| `--batch-size` | Max requests per batch job | `25` |
 | `--poll-interval` | Seconds between poll checks | `60` |
 | `--job-name` | Specific batch job name to poll/import | Auto-detect latest |
+| `--loop` | Loop batch jobs until all videos analyzed | False |
 
 ## Data Storage
 

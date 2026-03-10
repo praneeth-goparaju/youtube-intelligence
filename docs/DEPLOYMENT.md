@@ -80,13 +80,13 @@ npm install
 
 # Analyzer (Python)
 cd ../analyzer
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Insights (Python)
 cd ../insights
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Recommender (TypeScript)
 cd ../functions
@@ -102,7 +102,7 @@ npx tsx scripts/validate.ts
 
 # Test Gemini API
 cd ../analyzer
-python -m src.main --validate
+python3 -m src.main --validate
 ```
 
 ### 5. Run the Pipeline
@@ -114,11 +114,11 @@ npm start
 
 # Phase 2: Analyze (after scraping)
 cd ../analyzer
-python -m src.main
+python3 -m src.main
 
 # Phase 3: Generate insights
 cd ../insights
-python -m src.main
+python3 -m src.main
 
 # Phase 4: Get recommendations
 cd ../functions
@@ -196,8 +196,8 @@ git clone https://github.com/praneeth-goparaju/youtube-intelligence.git .
 
 # Install dependencies
 cd scraper && npm install --production
-cd ../analyzer && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
-cd ../insights && pip install -r requirements.txt
+cd ../analyzer && python3.11 -m venv venv && source venv/bin/activate && pip3 install -r requirements.txt
+cd ../insights && pip3 install -r requirements.txt
 cd ../functions && npm install --production
 ```
 
@@ -273,10 +273,10 @@ crontab -e
 0 1 * * * cd /opt/youtube-intelligence/scraper && npm start >> /var/log/yt-scraper.log 2>&1
 
 # Analyzer: Daily at 6 AM
-0 6 * * * cd /opt/youtube-intelligence/analyzer && source ../venv/bin/activate && python -m src.main >> /var/log/yt-analyzer.log 2>&1
+0 6 * * * cd /opt/youtube-intelligence/analyzer && source ../venv/bin/activate && python3 -m src.main >> /var/log/yt-analyzer.log 2>&1
 
 # Insights: Weekly on Sunday at noon
-0 12 * * 0 cd /opt/youtube-intelligence/insights && source ../venv/bin/activate && python -m src.main >> /var/log/yt-insights.log 2>&1
+0 12 * * 0 cd /opt/youtube-intelligence/insights && source ../venv/bin/activate && python3 -m src.main >> /var/log/yt-insights.log 2>&1
 ```
 
 ---
@@ -416,7 +416,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip3 install -r requirements.txt
 
       - name: Run analyzer
         env:
@@ -425,7 +425,7 @@ jobs:
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-        run: cd analyzer && python -m src.main
+        run: cd analyzer && python3 -m src.main
 
   insights:
     needs: analyzer
@@ -440,14 +440,14 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip3 install -r requirements.txt
 
       - name: Generate insights
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-        run: cd insights && python -m src.main
+        run: cd insights && python3 -m src.main
 ```
 
 ---
@@ -531,7 +531,7 @@ Set `LOG_LEVEL` environment variable:
 firebase firestore:get scrape_progress --project=YOUR_PROJECT
 
 # Check analysis progress
-python -c "
+python3 -c "
 from src.firebase_client import get_analysis_progress
 print(get_analysis_progress())
 "
@@ -637,7 +637,7 @@ firebase firestore:delete scrape_progress --recursive --project=YOUR_PROJECT
 
 ```bash
 # Re-run analyzer for a specific channel
-cd analyzer && python -m src.main --type thumbnail --channel CHANNEL_ID
+cd analyzer && python3 -m src.main --type thumbnail --channel CHANNEL_ID
 ```
 
 ---

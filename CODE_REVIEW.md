@@ -256,7 +256,7 @@ Both `engine.ts` and `cli.ts` now import from this shared module.
 | Severity | Count | Issues | Status |
 |----------|-------|--------|--------|
 | Medium | 3 | S2, A1, F1 | All Fixed |
-| Low | 7 | S1, S3, A2, A3, A4, I1, F2, SH1 | All Fixed |
+| Low | 8 | S1, S3, A2, A3, A4, I1, F2, SH1 | All Fixed |
 | Informational | 2 | F3, R1 | No Change Needed |
 
 All actionable issues have been resolved.
