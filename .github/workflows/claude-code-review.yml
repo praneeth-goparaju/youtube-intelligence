@@ -2,16 +2,11 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    types: [opened, synchronize, ready_for_review, reopened, labeled]
 
 jobs:
   claude-review:
+    if: contains(github.event.pull_request.labels.*.name, 'claude-review')
     runs-on: ubuntu-latest
     permissions:
       contents: read
