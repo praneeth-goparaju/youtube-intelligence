@@ -22,6 +22,8 @@ def initialize_firebase() -> None:
     if _app is not None:
         return
 
+    config.initialize()
+
     try:
         cred = credentials.Certificate({
             'type': 'service_account',
