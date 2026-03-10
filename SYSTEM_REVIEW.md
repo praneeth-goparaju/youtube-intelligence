@@ -63,7 +63,7 @@ firebase functions:secrets:set ALLOWED_ORIGINS       # CORS whitelist
 
 ### Security Features Implemented
 
-1. **API Authentication**: Bearer token required for all `/recommend` calls
+1. **API Authentication**: Bearer token required for all `/recommend` and `/ideas` calls
 2. **Rate Limiting**: 100 requests/hour per API key
 3. **Input Sanitization**: Control chars removed, length limits enforced
 4. **Prompt Escaping**: User input escaped before Gemini calls
@@ -129,7 +129,7 @@ firebase functions:secrets:set ALLOWED_ORIGINS       # CORS whitelist
 
 | Item | Status | Priority |
 |------|--------|----------|
-| `package-lock.json` | ❌ Missing | Low |
+| `package-lock.json` | ✅ Present | - |
 | `.eslintrc` | ❌ Missing | Low |
 | GitHub Actions CI | ❌ Missing | Medium |
 | Pre-commit hooks | ❌ Missing | Low |

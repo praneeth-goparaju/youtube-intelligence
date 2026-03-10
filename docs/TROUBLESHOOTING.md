@@ -173,15 +173,15 @@ Error: Thumbnail not found at path: thumbnails/UCxxx/videoId.jpg
 **Solution:**
 1. Process smaller batches:
    ```bash
-   cd analyzer && python -m src.main --type thumbnail --limit 100
+   cd analyzer && python3 -m src.main --type thumbnail --limit 100
    ```
 2. Process one channel at a time:
    ```bash
-   cd analyzer && python -m src.main --channel UCxxx --limit 50
+   cd analyzer && python3 -m src.main --channel UCxxx --limit 50
    ```
 3. Consider using batch mode for large volumes (50% cheaper, no per-video rate limits):
    ```bash
-   cd analyzer && python -m src.main --mode batch --type thumbnail
+   cd analyzer && python3 -m src.main --mode batch --type thumbnail
    ```
 
 ### Memory Error
@@ -234,12 +234,12 @@ Warning: Not enough videos for meaningful profiling
    ```
 2. Re-run insights with verbose mode:
    ```bash
-   LOG_LEVEL=DEBUG python -m src.main
+   LOG_LEVEL=DEBUG python3 -m src.main
    ```
 3. Run specific insight type:
    ```bash
-   python -m src.main --type profiles  # Per-content-type profiles only
-   python -m src.main --type gaps      # Content gap analysis only
+   python3 -m src.main --type profiles  # Per-content-type profiles only
+   python3 -m src.main --type gaps      # Content gap analysis only
    ```
 
 ---
@@ -258,7 +258,7 @@ Warning: No insights found, using template-based generation
 **Solution:**
 1. Run Phase 3 first:
    ```bash
-   cd insights && python -m src.main
+   cd insights && python3 -m src.main
    ```
 2. Verify insights in Firestore:
    ```bash
@@ -494,7 +494,7 @@ Error: YouTube Data API v3 has not been used in project XXX
 node --version  # Should be 18+
 
 # Verify Python
-python --version  # Should be 3.11+
+python3 --version  # Should be 3.11+
 
 # Check environment variables
 echo $YOUTUBE_API_KEY
@@ -519,7 +519,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GOOGLE_API_KE
 cd scraper && npx tsx scripts/validate.ts
 
 # Analyzer progress
-cd analyzer && python -c "from src.firebase_client import get_progress; print(get_progress())"
+cd analyzer && python3 -c "from src.firebase_client import get_progress; print(get_progress())"
 ```
 
 ### View Logs
@@ -564,7 +564,7 @@ gsutil -m rm -r gs://YOUR_BUCKET/**
 
 # 3. Reinstall dependencies
 cd scraper && rm -rf node_modules && npm install
-cd ../analyzer && rm -rf venv && python -m venv venv && pip install -r requirements.txt
+cd ../analyzer && rm -rf venv && python3 -m venv venv && pip3 install -r requirements.txt
 
 # 4. Start fresh
 cd ../scraper && npm start

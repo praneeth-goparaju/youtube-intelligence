@@ -185,17 +185,10 @@ interface CalculatedMetrics {
   likeRatio: number;           // likes / views * 100
   commentRatio: number;        // comments / views * 100
   viewsPerSubscriber: number;  // views / channel subscribers
-  daysSincePublish: number;
   viewsPerDay: number;
   publishDayOfWeek: string;    // "Monday", "Tuesday", etc.
   publishHourIST: number;      // 0-23 in IST timezone
-  titleLength: number;
-  descriptionLength: number;
   tagCount: number;
-  hasNumberInTitle: boolean;
-  hasEmojiInTitle: boolean;
-  hasTeluguInTitle: boolean;
-  hasEnglishInTitle: boolean;
 }
 ```
 
@@ -270,6 +263,8 @@ Quality setting: `mqdefault` (320x180) for storage efficiency.
 ```bash
 npm start                          # Full initial scrape
 npm start -- --update              # Incremental update (new videos only for completed channels)
+npm start -- --refresh             # Refresh stats (views, likes, comments) for all existing videos
+npm start -- --update --refresh    # Find new videos AND refresh all existing video stats
 npm start -- --ignore-quota        # Ignore quota checks
 ```
 

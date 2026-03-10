@@ -236,7 +236,7 @@ result = analyzer.analyze(video_data)
 **Parameters:**
 - `video_data`: Dict with `thumbnailStoragePath`
 
-**Returns:** Dict with ~109 attributes (composition, humanPresence, textElements, colors, food, graphics, branding, psychology, technicalQuality, scores)
+**Returns:** Dict with ~132 attributes (composition, humanPresence, textElements, colors, food, graphics, branding, psychology, technicalQuality)
 
 #### `TitleDescriptionAnalyzer`
 
@@ -250,7 +250,7 @@ result = analyzer.analyze(video_data)
 **Parameters:**
 - `video_data`: Dict with `title` and `description`
 
-**Returns:** Dict with ~140 attributes covering title analysis (structure, language, hooks, keywords, contentSignals, teluguAnalysis) and lean description analysis (structure, timestamps, recipeContent, hashtags, ctas, seo)
+**Returns:** Dict with ~135 attributes covering title analysis (structure, language, hooks, keywords, contentSignals) and lean description analysis (structure, recipeContent, ctas, seo) plus 59 locally-computed fields (formatting, language detection, description links/monetization/timestamps)
 
 ### Batch Processor
 
@@ -418,9 +418,10 @@ npm run recommend -- \
 ### HTTP API
 
 ```bash
-# POST request
+# POST request (Authorization header required)
 curl -X POST https://us-central1-PROJECT.cloudfunctions.net/recommend \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
     "topic": "Hyderabadi Biryani",
     "type": "recipe",
@@ -601,17 +602,10 @@ const teluguWords = POWER_WORDS.telugu;
     likeRatio: number,
     commentRatio: number,
     viewsPerSubscriber: number,
-    daysSincePublish: number,
     viewsPerDay: number,
     publishDayOfWeek: string,
     publishHourIST: number,
-    titleLength: number,
-    descriptionLength: number,
-    tagCount: number,
-    hasNumberInTitle: boolean,
-    hasEmojiInTitle: boolean,
-    hasTeluguInTitle: boolean,
-    hasEnglishInTitle: boolean
+    tagCount: number
   }
 }
 ```
