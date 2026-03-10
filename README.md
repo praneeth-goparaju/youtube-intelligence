@@ -65,8 +65,8 @@ The platform processes 100+ Telugu YouTube channels to extract actionable insigh
 
 ```bash
 # Clone the repository
-git clone https://github.com/praneeth-goparaju/youtube_channel_analysis.git
-cd youtube_channel_analysis
+git clone https://github.com/praneeth-goparaju/youtube-intelligence.git
+cd youtube-intelligence
 
 # Configure environment
 cp .env.example .env
@@ -115,7 +115,7 @@ curl -X POST https://us-central1-YOUR_PROJECT.cloudfunctions.net/recommend \
 ## Project Structure
 
 ```
-youtube_channel_analysis/
+youtube-intelligence/
 ├── README.md                    # This file
 ├── CONTRIBUTING.md              # Contribution guidelines
 ├── CLAUDE.md                    # AI assistant guidance
