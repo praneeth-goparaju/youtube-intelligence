@@ -23,3 +23,5 @@ This policy covers the code in this repository, including:
 - **Rotate API keys** regularly and after any suspected exposure
 - **Configure `RECOMMEND_API_KEY`** before deploying Firebase Functions — the API rejects all requests if this is not set
 - **Set `ALLOWED_ORIGINS`** to restrict CORS in production deployments
+
+See [Deployment Guide](docs/DEPLOYMENT.md) for full environment variable reference.

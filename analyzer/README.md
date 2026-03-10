@@ -10,8 +10,8 @@ Supports two processing modes:
 
 | Type | Model | Input | Output |
 |------|-------|-------|--------|
-| **Thumbnail** | Gemini 2.5 Flash (Vision) | Image | ~132 composition/color/food/psychology attributes |
-| **Title + Description** | Gemini 2.5 Flash (Text) | Title + Description text | ~135 structure/language/hooks/keywords/content signals + description SEO fields |
+| **Thumbnail** | Gemini 2.5 Flash (Vision) | Image | ~109 composition/color/food/psychology attributes |
+| **Title + Description** | Gemini 2.5 Flash (Text) | Title + Description text | ~134 structure/language/hooks/keywords/content signals + description SEO fields |
 
 ## Quick Start
 
@@ -178,17 +178,9 @@ Legacy analysis types (`title`, `description`, `tags`, `content_structure`) may 
 
 ### Environment Variables
 
-```bash
-GOOGLE_API_KEY=your_gemini_api_key
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk@your-project.iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+Requires `GOOGLE_API_KEY`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, and `FIREBASE_STORAGE_BUCKET`. Optional: `BATCH_SIZE` (default: 10), `BATCH_POLL_INTERVAL` (default: 60s).
 
-# Optional
-BATCH_SIZE=10                    # Videos per sync processing batch (default: 10)
-BATCH_POLL_INTERVAL=60           # Seconds between batch job poll checks (default: 60)
-```
+See [Deployment Guide](../docs/DEPLOYMENT.md) for full environment variable reference.
 
 ## Testing
 
@@ -209,3 +201,10 @@ pytest tests/ --cov=src
 | `Pillow` | >=10.2.0 | Image processing |
 | `tqdm` | >=4.66.2 | Progress bars |
 | `python-dotenv` | >=1.0.1 | Environment configuration |
+
+## Related Documentation
+
+- [Deployment Guide](../docs/DEPLOYMENT.md) — Environment setup and configuration
+- [Technical Documentation](../docs/TECHNICAL_DOCUMENTATION.md) — Firestore schemas and data structures
+- [Troubleshooting](../docs/TROUBLESHOOTING.md#phase-2-analyzer-issues) — Common analyzer issues
+- [CLAUDE.md](../CLAUDE.md) — Full command reference
