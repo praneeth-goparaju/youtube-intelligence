@@ -75,9 +75,8 @@ cp .env.example .env
 # Install Phase 1 (Scraper)
 cd scraper && npm install && cd ..
 
-# Install Phase 2-3 (Python modules)
-cd analyzer && pip install -r requirements.txt && cd ..
-cd insights && pip install -r requirements.txt && cd ..
+# Install Phase 2-3 (Python modules — shared requirements)
+pip install -r requirements.txt
 
 # Install Phase 4 (Recommender)
 cd functions && npm install && cd ..
@@ -119,10 +118,19 @@ youtube_channel_analysis/
 ├── README.md                    # This file
 ├── CONTRIBUTING.md              # Contribution guidelines
 ├── CLAUDE.md                    # AI assistant guidance
+├── LICENSE                      # MIT License
+├── SECURITY.md                  # Security policy
 ├── .env.example                 # Environment template
+├── requirements.txt             # Shared Python dependencies (analyzer + insights)
+├── firebase.json                # Firebase project configuration
+├── firestore.rules              # Firestore security rules
+├── storage.rules                # Firebase Storage security rules
 │
 ├── config/
-│   └── channels.json            # Input: YouTube channel URLs
+│   └── channels.json.example    # Template for YouTube channel URLs
+│
+├── data/
+│   └── channels-review.csv.example  # Template for channel review data
 │
 ├── scraper/                     # Phase 1: TypeScript YouTube Scraper
 │   ├── README.md
@@ -132,20 +140,20 @@ youtube_channel_analysis/
 │   │   ├── firebase/            # Firebase operations
 │   │   ├── scraper/             # Core scraping logic
 │   │   └── utils/               # Utilities
+│   ├── scripts/                 # Utility scripts (validate, reset, status, etc.)
 │   └── tests/
 │
 ├── analyzer/                    # Phase 2: Python AI Analyzer
 │   ├── README.md
-│   ├── requirements.txt
 │   ├── src/
 │   │   ├── analyzers/           # Analysis modules (thumbnail, title_description)
 │   │   ├── processors/          # Batch processing
+│   │   ├── batch_api/           # Gemini Batch API handling
 │   │   └── prompts/             # AI prompts
 │   └── tests/
 │
 ├── insights/                    # Phase 3: Per-Content-Type Profiling
 │   ├── README.md
-│   ├── requirements.txt
 │   └── src/
 │       ├── profiler.py          # Feature profiling (all vs top 10%)
 │       └── gaps.py              # Content gap analysis
@@ -163,6 +171,11 @@ youtube_channel_analysis/
 │       ├── cli.ts               # CLI entry point
 │       ├── index.ts             # Firebase Function definitions
 │       ├── engine.ts            # Recommendation engine
+│       ├── recommendation-core.ts  # Core recommendation logic
+│       ├── gemini.ts            # Gemini AI integration
+│       ├── firebase.ts          # Firebase client
+│       ├── rate-limiter.ts      # API rate limiting
+│       ├── types.ts             # TypeScript type definitions
 │       └── templates.ts         # Fallback templates
 │
 └── docs/
@@ -198,18 +211,22 @@ QUOTA_WARNING_THRESHOLD=500
 
 ### Channel Configuration
 
-Edit `config/channels.json` to specify channels to analyze:
+Copy the example template and edit it with your target channels:
+
+```bash
+cp config/channels.json.example config/channels.json
+```
 
 ```json
 {
   "channels": [
     {
-      "url": "https://www.youtube.com/@VismaiFood",
+      "url": "https://www.youtube.com/@YourChannel1",
       "category": "cooking",
       "priority": 1
     },
     {
-      "url": "https://www.youtube.com/@MyVillageShow",
+      "url": "https://www.youtube.com/@YourChannel2",
       "category": "entertainment",
       "priority": 1
     }
@@ -235,8 +252,8 @@ Edit `config/channels.json` to specify channels to analyze:
 - Calculated metrics (engagement rate, views per day, etc.)
 
 ### Phase 2: AI Analysis (2 Gemini calls per video)
-- **Thumbnail Analysis** (vision): Composition, colors, human presence, text, food presentation, psychological triggers (~109 fields)
-- **Title + Description Analysis** (combined text): Structure, language mix, hooks, keywords, Telugu-specific patterns, description structure, recipe content, CTAs, SEO (~140 fields)
+- **Thumbnail Analysis** (vision): Composition, colors, human presence, text, food presentation, psychological triggers (~141 fields)
+- **Title + Description Analysis** (combined text): Structure, language mix, hooks, keywords, Telugu-specific patterns, description structure, recipe content, CTAs, SEO (~175 fields)
 
 ### Phase 3: Per-Content-Type Profiling
 - Group videos by content type (recipe, vlog, tutorial, etc.)
