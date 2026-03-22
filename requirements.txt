@@ -2,7 +2,7 @@
 
 # Firebase & Core
 firebase-admin==7.1.0
-python-dotenv==1.2.1
+python-dotenv==1.2.2
 
 # Analyzer (Phase 2) - Gemini AI & Image Processing
 google-generativeai==0.8.6
