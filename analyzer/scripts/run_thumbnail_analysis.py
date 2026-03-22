@@ -15,9 +15,9 @@ from src.processors.batch import BatchProcessor
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run thumbnail analysis')
-    parser.add_argument('--limit', '-l', type=int, help='Limit videos per channel')
-    parser.add_argument('--channel', '-c', type=str, help='Process single channel')
+    parser = argparse.ArgumentParser(description="Run thumbnail analysis")
+    parser.add_argument("--limit", "-l", type=int, help="Limit videos per channel")
+    parser.add_argument("--channel", "-c", type=str, help="Process single channel")
     args = parser.parse_args()
 
     print("\n" + "=" * 60)
@@ -36,7 +36,7 @@ def main():
         sys.exit(1)
     print("Gemini API connected\n")
 
-    processor = BatchProcessor('thumbnail')
+    processor = BatchProcessor("thumbnail")
 
     if args.channel:
         stats = processor.process_channel(args.channel, limit=args.limit)
@@ -46,5 +46,5 @@ def main():
     print(f"\nCompleted: {stats['successful']} success, {stats['failed']} failed, {stats['skipped']} skipped")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

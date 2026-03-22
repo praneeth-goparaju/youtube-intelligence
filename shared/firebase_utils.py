@@ -25,13 +25,15 @@ def get_firebase_credentials(config) -> credentials.Certificate:
     Returns:
         Firebase Certificate credentials
     """
-    return credentials.Certificate({
-        'type': 'service_account',
-        'project_id': config.FIREBASE_PROJECT_ID,
-        'client_email': config.FIREBASE_CLIENT_EMAIL,
-        'private_key': config.FIREBASE_PRIVATE_KEY,
-        'token_uri': 'https://oauth2.googleapis.com/token',
-    })
+    return credentials.Certificate(
+        {
+            "type": "service_account",
+            "project_id": config.FIREBASE_PROJECT_ID,
+            "client_email": config.FIREBASE_CLIENT_EMAIL,
+            "private_key": config.FIREBASE_PRIVATE_KEY,
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    )
 
 
 def initialize_firebase_app(config, options: Optional[Dict[str, Any]] = None) -> firebase_admin.App:
@@ -62,8 +64,8 @@ def initialize_firebase_app(config, options: Optional[Dict[str, Any]] = None) ->
             cred = get_firebase_credentials(config)
             init_options = options or {}
 
-            if hasattr(config, 'FIREBASE_STORAGE_BUCKET') and config.FIREBASE_STORAGE_BUCKET:
-                init_options.setdefault('storageBucket', config.FIREBASE_STORAGE_BUCKET)
+            if hasattr(config, "FIREBASE_STORAGE_BUCKET") and config.FIREBASE_STORAGE_BUCKET:
+                init_options.setdefault("storageBucket", config.FIREBASE_STORAGE_BUCKET)
 
             _app = firebase_admin.initialize_app(cred, init_options)
             _db = firestore.client()
@@ -107,7 +109,7 @@ def fetch_document(collection: str, doc_id: str) -> Optional[Dict[str, Any]]:
         db = get_firestore_client()
         doc = db.collection(collection).document(doc_id).get()
         if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
+            return {"id": doc.id, **doc.to_dict()}
         return None
     except Exception as e:
         print(f"Error fetching document {collection}/{doc_id}: {e}")
@@ -130,17 +132,14 @@ def fetch_collection(collection: str, limit: Optional[int] = None) -> List[Dict[
         if limit:
             query = query.limit(limit)
         docs = query.stream()
-        return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+        return [{"id": doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
         print(f"Error fetching collection {collection}: {e}")
         return []
 
 
 def fetch_subcollection(
-    parent_collection: str,
-    parent_id: str,
-    subcollection: str,
-    limit: Optional[int] = None
+    parent_collection: str, parent_id: str, subcollection: str, limit: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """Fetch documents from a subcollection.
 
@@ -155,24 +154,17 @@ def fetch_subcollection(
     """
     try:
         db = get_firestore_client()
-        query = (db.collection(parent_collection)
-                 .document(parent_id)
-                 .collection(subcollection))
+        query = db.collection(parent_collection).document(parent_id).collection(subcollection)
         if limit:
             query = query.limit(limit)
         docs = query.stream()
-        return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+        return [{"id": doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
         print(f"Error fetching subcollection {parent_collection}/{parent_id}/{subcollection}: {e}")
         return []
 
 
-def save_document(
-    collection: str,
-    doc_id: str,
-    data: Dict[str, Any],
-    merge: bool = True
-) -> bool:
+def save_document(collection: str, doc_id: str, data: Dict[str, Any], merge: bool = True) -> bool:
     """Save a document to Firestore.
 
     Args:

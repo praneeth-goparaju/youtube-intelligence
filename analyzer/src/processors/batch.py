@@ -2,7 +2,7 @@
 
 import os
 import time
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, Optional, Callable
 from tqdm import tqdm
 
 from ..firebase_client import get_all_channels, get_unanalyzed_videos_paginated
@@ -16,7 +16,7 @@ from shared.constants import ANALYSIS_TYPES
 
 
 # Default limit configurable via DEFAULT_VIDEO_LIMIT env var (default: 10000)
-DEFAULT_VIDEO_LIMIT = int(os.environ.get('DEFAULT_VIDEO_LIMIT', '10000'))
+DEFAULT_VIDEO_LIMIT = int(os.environ.get("DEFAULT_VIDEO_LIMIT", "10000"))
 
 
 class BatchProcessor:
@@ -34,8 +34,8 @@ class BatchProcessor:
 
         # Initialize appropriate analyzer
         analyzers = {
-            'thumbnail': ThumbnailAnalyzer(),
-            'title_description': TitleDescriptionAnalyzer(),
+            "thumbnail": ThumbnailAnalyzer(),
+            "title_description": TitleDescriptionAnalyzer(),
         }
 
         if analysis_type not in analyzers:
@@ -43,8 +43,9 @@ class BatchProcessor:
 
         self.analyzer = analyzers[analysis_type]
 
-    def process_all_channels(self, limit: Optional[int] = None,
-                            channel_filter: Optional[Callable[[Dict], bool]] = None) -> Dict[str, Any]:
+    def process_all_channels(
+        self, limit: Optional[int] = None, channel_filter: Optional[Callable[[Dict], bool]] = None
+    ) -> Dict[str, Any]:
         """
         Process all channels.
 
@@ -60,10 +61,10 @@ class BatchProcessor:
         if channel_filter:
             channels = [c for c in channels if channel_filter(c)]
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  {self.analysis_type.upper()} ANALYSIS")
         print(f"  Processing {len(channels)} channels")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         total_processed = 0
         total_successful = 0
@@ -71,25 +72,25 @@ class BatchProcessor:
         total_skipped = 0
 
         for channel in channels:
-            channel_id = channel['id']
-            channel_title = channel.get('channelTitle', channel_id)
+            channel_id = channel["id"]
+            channel_title = channel.get("channelTitle", channel_id)
 
             print(f"\nChannel: {channel_title}")
-            print(f"-" * 40)
+            print("-" * 40)
 
             stats = self.process_channel(channel_id, limit=limit)
 
-            total_processed += stats['processed']
-            total_successful += stats['successful']
-            total_failed += stats['failed']
-            total_skipped += stats['skipped']
+            total_processed += stats["processed"]
+            total_successful += stats["successful"]
+            total_failed += stats["failed"]
+            total_skipped += stats["skipped"]
 
         return {
-            'channels': len(channels),
-            'processed': total_processed,
-            'successful': total_successful,
-            'failed': total_failed,
-            'skipped': total_skipped,
+            "channels": len(channels),
+            "processed": total_processed,
+            "successful": total_successful,
+            "failed": total_failed,
+            "skipped": total_skipped,
         }
 
     def process_channel(self, channel_id: str, limit: Optional[int] = None) -> Dict[str, Any]:
@@ -110,13 +111,13 @@ class BatchProcessor:
         videos = get_unanalyzed_videos_paginated(channel_id, self.analysis_type, effective_limit)
 
         if not videos:
-            print(f"  No unanalyzed videos found")
-            return {'processed': 0, 'successful': 0, 'failed': 0, 'skipped': 0}
+            print("  No unanalyzed videos found")
+            return {"processed": 0, "successful": 0, "failed": 0, "skipped": 0}
 
         self.progress.start(len(videos))
 
         for video in tqdm(videos, desc=f"  Analyzing {self.analysis_type}s"):
-            video_id = video['id']
+            video_id = video["id"]
 
             try:
                 result = self._analyze_video(channel_id, video)
@@ -155,10 +156,10 @@ class BatchProcessor:
         print(f"  Completed: {stats['successful']} success, {stats['failed']} failed, {stats['skipped']} skipped")
 
         return {
-            'processed': stats['processed'],
-            'successful': stats['successful'],
-            'failed': stats['failed'],
-            'skipped': stats['skipped'],
+            "processed": stats["processed"],
+            "successful": stats["successful"],
+            "failed": stats["failed"],
+            "skipped": stats["skipped"],
         }
 
     def _analyze_video(self, channel_id: str, video: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -172,22 +173,22 @@ class BatchProcessor:
         Returns:
             Analysis result or None if skipped/failed
         """
-        video_id = video['id']
+        video_id = video["id"]
 
-        if self.analysis_type == 'thumbnail':
-            thumbnail_path = video.get('thumbnailStoragePath', '')
+        if self.analysis_type == "thumbnail":
+            thumbnail_path = video.get("thumbnailStoragePath", "")
             if not thumbnail_path:
                 # Try to construct from video ID
-                thumbnails = video.get('thumbnails', {})
-                thumbnail_url = thumbnails.get('medium', thumbnails.get('default', ''))
+                thumbnails = video.get("thumbnails", {})
+                thumbnail_url = thumbnails.get("medium", thumbnails.get("default", ""))
                 if thumbnail_url:
                     return self.analyzer.analyze_from_url(channel_id, video_id, thumbnail_url)
                 return None
             return self.analyzer.analyze(channel_id, video_id, thumbnail_path)
 
-        elif self.analysis_type == 'title_description':
-            title = video.get('title', '')
-            description = video.get('description', '')
+        elif self.analysis_type == "title_description":
+            title = video.get("title", "")
+            description = video.get("description", "")
             return self.analyzer.analyze(channel_id, video_id, title, description)
 
         return None
@@ -206,17 +207,17 @@ def run_all_analysis(limit_per_channel: Optional[int] = None) -> Dict[str, Any]:
     results = {}
 
     for analysis_type in ANALYSIS_TYPES:
-        print(f"\n\n{'#'*60}")
+        print(f"\n\n{'#' * 60}")
         print(f"  STARTING {analysis_type.upper()} ANALYSIS")
-        print(f"{'#'*60}")
+        print(f"{'#' * 60}")
 
         processor = BatchProcessor(analysis_type)
         results[analysis_type] = processor.process_all_channels(limit=limit_per_channel)
 
     # Print summary
-    print(f"\n\n{'='*60}")
+    print(f"\n\n{'=' * 60}")
     print("  ANALYSIS COMPLETE - SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for analysis_type, stats in results.items():
         print(f"\n{analysis_type.upper()}:")

@@ -21,14 +21,13 @@ def setup_logging(level: int = logging.INFO) -> logging.Logger:
     Returns:
         Configured logger instance
     """
-    logger = logging.getLogger('analyzer')
+    logger = logging.getLogger("analyzer")
 
     # Avoid adding handlers multiple times
     if not logger.handlers:
         handler = logging.StreamHandler()
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -50,14 +49,14 @@ class Config:
     _loaded: bool = False
 
     # Google Gemini API
-    GOOGLE_API_KEY: str = ''
+    GOOGLE_API_KEY: str = ""
     GEMINI_MODEL: str = GEMINI_MODEL  # Use shared constant
 
     # Firebase
-    FIREBASE_PROJECT_ID: str = ''
-    FIREBASE_CLIENT_EMAIL: str = ''
-    FIREBASE_PRIVATE_KEY: str = ''
-    FIREBASE_STORAGE_BUCKET: str = ''
+    FIREBASE_PROJECT_ID: str = ""
+    FIREBASE_CLIENT_EMAIL: str = ""
+    FIREBASE_PRIVATE_KEY: str = ""
+    FIREBASE_STORAGE_BUCKET: str = ""
 
     # Processing settings
     BATCH_SIZE: int = 10
@@ -66,7 +65,7 @@ class Config:
     REQUEST_DELAY: float = 0.5  # Delay between API requests
 
     # Batch API settings
-    GCS_BUCKET_URI: str = ''
+    GCS_BUCKET_URI: str = ""
     BATCH_POLL_INTERVAL: int = 60
     BATCH_MAX_REQUESTS: int = 680  # Tier 1 enqueued token limit (~3M / ~4.4K tokens per request)
 
@@ -79,25 +78,25 @@ class Config:
         if cls._loaded:
             return
 
-        cls.GOOGLE_API_KEY = get_env('GOOGLE_API_KEY')
-        cls.FIREBASE_PROJECT_ID = get_env('FIREBASE_PROJECT_ID')
-        cls.FIREBASE_CLIENT_EMAIL = get_env('FIREBASE_CLIENT_EMAIL')
-        cls.FIREBASE_PRIVATE_KEY = get_env('FIREBASE_PRIVATE_KEY').replace('\\n', '\n')
-        cls.FIREBASE_STORAGE_BUCKET = get_env('FIREBASE_STORAGE_BUCKET')
-        cls.BATCH_SIZE = int(get_env('BATCH_SIZE', False, '10'))
+        cls.GOOGLE_API_KEY = get_env("GOOGLE_API_KEY")
+        cls.FIREBASE_PROJECT_ID = get_env("FIREBASE_PROJECT_ID")
+        cls.FIREBASE_CLIENT_EMAIL = get_env("FIREBASE_CLIENT_EMAIL")
+        cls.FIREBASE_PRIVATE_KEY = get_env("FIREBASE_PRIVATE_KEY").replace("\\n", "\n")
+        cls.FIREBASE_STORAGE_BUCKET = get_env("FIREBASE_STORAGE_BUCKET")
+        cls.BATCH_SIZE = int(get_env("BATCH_SIZE", False, "10"))
         cls.GCS_BUCKET_URI = f"gs://{cls.FIREBASE_STORAGE_BUCKET}"
-        cls.BATCH_POLL_INTERVAL = int(get_env('BATCH_POLL_INTERVAL', False, '60'))
+        cls.BATCH_POLL_INTERVAL = int(get_env("BATCH_POLL_INTERVAL", False, "60"))
         cls._loaded = True
 
 
 def validate_config() -> bool:
     """Validate all required configuration is present."""
     required = [
-        'GOOGLE_API_KEY',
-        'FIREBASE_PROJECT_ID',
-        'FIREBASE_CLIENT_EMAIL',
-        'FIREBASE_PRIVATE_KEY',
-        'FIREBASE_STORAGE_BUCKET',
+        "GOOGLE_API_KEY",
+        "FIREBASE_PROJECT_ID",
+        "FIREBASE_CLIENT_EMAIL",
+        "FIREBASE_PRIVATE_KEY",
+        "FIREBASE_STORAGE_BUCKET",
     ]
 
     missing = [var for var in required if not os.getenv(var)]

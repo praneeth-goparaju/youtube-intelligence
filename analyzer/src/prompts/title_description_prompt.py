@@ -45,7 +45,7 @@ TITLE_DESC_USER_PROMPT = (
 
 # --- Original monolithic prompt (kept for backward compatibility with sync mode) ---
 
-TITLE_DESCRIPTION_ANALYSIS_PROMPT = '''Analyze this YouTube video title AND description together, and return a detailed JSON analysis.
+TITLE_DESCRIPTION_ANALYSIS_PROMPT = """Analyze this YouTube video title AND description together, and return a detailed JSON analysis.
 
 IMPORTANT: Return ONLY valid JSON, no markdown formatting or explanation text.
 
@@ -173,4 +173,4 @@ Return this exact JSON structure:
       "internalLinking": "none|minimal|good|excellent"
     }
   }
-}'''
+}"""

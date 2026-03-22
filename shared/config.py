@@ -5,7 +5,6 @@ This module provides common configuration loading patterns used across all phase
 
 import os
 from pathlib import Path
-from typing import Optional
 from dotenv import load_dotenv
 
 
@@ -20,12 +19,12 @@ def load_env_file(module_path: str) -> Path:
     """
     # Navigate up to project root (assuming module is at phase/src/config.py)
     project_root = Path(module_path).parent.parent.parent
-    env_path = project_root / '.env'
+    env_path = project_root / ".env"
     load_dotenv(env_path)
     return project_root
 
 
-def get_env(name: str, required: bool = True, default: str = '') -> str:
+def get_env(name: str, required: bool = True, default: str = "") -> str:
     """Get environment variable with optional requirement check.
 
     Args:
@@ -50,18 +49,19 @@ class BaseFirebaseConfig:
 
     All phases that use Firebase should inherit from this.
     """
-    FIREBASE_PROJECT_ID: str = ''
-    FIREBASE_CLIENT_EMAIL: str = ''
-    FIREBASE_PRIVATE_KEY: str = ''
-    FIREBASE_STORAGE_BUCKET: str = ''
+
+    FIREBASE_PROJECT_ID: str = ""
+    FIREBASE_CLIENT_EMAIL: str = ""
+    FIREBASE_PRIVATE_KEY: str = ""
+    FIREBASE_STORAGE_BUCKET: str = ""
 
     @classmethod
     def load_firebase_config(cls) -> None:
         """Load Firebase configuration from environment."""
-        cls.FIREBASE_PROJECT_ID = get_env('FIREBASE_PROJECT_ID')
-        cls.FIREBASE_CLIENT_EMAIL = get_env('FIREBASE_CLIENT_EMAIL')
-        cls.FIREBASE_PRIVATE_KEY = get_env('FIREBASE_PRIVATE_KEY').replace('\\n', '\n')
-        cls.FIREBASE_STORAGE_BUCKET = get_env('FIREBASE_STORAGE_BUCKET')
+        cls.FIREBASE_PROJECT_ID = get_env("FIREBASE_PROJECT_ID")
+        cls.FIREBASE_CLIENT_EMAIL = get_env("FIREBASE_CLIENT_EMAIL")
+        cls.FIREBASE_PRIVATE_KEY = get_env("FIREBASE_PRIVATE_KEY").replace("\\n", "\n")
+        cls.FIREBASE_STORAGE_BUCKET = get_env("FIREBASE_STORAGE_BUCKET")
 
 
 class BaseGeminiConfig(BaseFirebaseConfig):
@@ -69,10 +69,11 @@ class BaseGeminiConfig(BaseFirebaseConfig):
 
     Phases that use Gemini API should inherit from this.
     """
-    GOOGLE_API_KEY: str = ''
+
+    GOOGLE_API_KEY: str = ""
 
     @classmethod
     def load_gemini_config(cls) -> None:
         """Load Gemini configuration from environment."""
         cls.load_firebase_config()
-        cls.GOOGLE_API_KEY = get_env('GOOGLE_API_KEY')
+        cls.GOOGLE_API_KEY = get_env("GOOGLE_API_KEY")

@@ -19,11 +19,11 @@ from .local_text_features import extract_local_features, deep_merge
 class TitleDescriptionAnalyzer:
     """Combined analyzer for YouTube video titles and descriptions."""
 
-    ANALYSIS_TYPE = 'title_description'
+    ANALYSIS_TYPE = "title_description"
 
-    def analyze(self, channel_id: str, video_id: str,
-                title: str, description: str,
-                force: bool = False) -> Optional[Dict[str, Any]]:
+    def analyze(
+        self, channel_id: str, video_id: str, title: str, description: str, force: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         Analyze a video title and description together.
 
@@ -50,7 +50,8 @@ class TitleDescriptionAnalyzer:
 
             # Analyze with Gemini (single API call, uses response_schema when available)
             gemini_result = analyze_text(
-                TITLE_DESCRIPTION_ANALYSIS_PROMPT, input_text,
+                TITLE_DESCRIPTION_ANALYSIS_PROMPT,
+                input_text,
                 analysis_type=self.ANALYSIS_TYPE,
             )
 
@@ -63,11 +64,11 @@ class TitleDescriptionAnalyzer:
             result = deep_merge(gemini_result, local_result)
 
             # Add metadata
-            result['analyzedAt'] = datetime.utcnow().isoformat()
-            result['modelUsed'] = config.GEMINI_MODEL
-            result['analysisVersion'] = '2.0'
-            result['rawTitle'] = title
-            result['hasDescription'] = bool(description and description.strip())
+            result["analyzedAt"] = datetime.utcnow().isoformat()
+            result["modelUsed"] = config.GEMINI_MODEL
+            result["analysisVersion"] = "2.0"
+            result["rawTitle"] = title
+            result["hasDescription"] = bool(description and description.strip())
 
             # Save to Firestore
             save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)

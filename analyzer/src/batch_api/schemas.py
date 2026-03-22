@@ -24,6 +24,7 @@ from pydantic import BaseModel
 # Thumbnail Analysis Schema
 # =============================================================================
 
+
 class ThumbnailScene(BaseModel):
     settingType: str
     location: str
@@ -196,6 +197,7 @@ class ThumbnailTechnicalQuality(BaseModel):
 
 class ThumbnailAnalysisSchema(BaseModel):
     """Complete thumbnail analysis schema."""
+
     scene: ThumbnailScene
     composition: ThumbnailComposition
     humanPresence: ThumbnailHumanPresence
@@ -224,6 +226,7 @@ class ThumbnailAnalysisSchema(BaseModel):
 # - TitleFormatting removed entirely (all deterministic)
 # - DescTimestamps, DescHashtags, DescLinks, DescMonetization removed (deterministic)
 # =============================================================================
+
 
 class TitleStructure(BaseModel):
     pattern: str
@@ -311,6 +314,7 @@ class TitleContentSignals(BaseModel):
 
 # Description sub-schemas (Gemini-only semantic fields)
 
+
 class DescStructure(BaseModel):
     wellOrganized: bool
     firstLineHook: bool
@@ -347,6 +351,7 @@ class TitleDescriptionAnalysisSchema(BaseModel):
     Deterministic fields (formatting, counts, links, timestamps, hashtags,
     monetization) are computed locally and merged post-analysis.
     """
+
     structure: TitleStructure
     language: TitleLanguage
     hooks: TitleHooks

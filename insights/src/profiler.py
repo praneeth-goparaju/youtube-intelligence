@@ -14,8 +14,12 @@ import numpy as np
 
 # Metadata fields to skip during profiling
 SKIP_FIELDS = {
-    'analyzedAt', 'modelUsed', 'analysisVersion', 'rawTitle',
-    'hasDescription', 'inputMetadata',
+    "analyzedAt",
+    "modelUsed",
+    "analysisVersion",
+    "rawTitle",
+    "hasDescription",
+    "inputMetadata",
 }
 
 # String fields with too many unique values are not useful as categories
@@ -30,13 +34,13 @@ _MAX_KEY_BYTES = 200
 
 def _safe_key(key: str) -> str:
     """Truncate a string used as a Firestore field key to stay within path limits."""
-    if len(key.encode('utf-8')) <= _MAX_KEY_BYTES:
+    if len(key.encode("utf-8")) <= _MAX_KEY_BYTES:
         return key
     # Truncate by chars until under byte limit
     truncated = key
-    while len(truncated.encode('utf-8')) > _MAX_KEY_BYTES - 3:
+    while len(truncated.encode("utf-8")) > _MAX_KEY_BYTES - 3:
         truncated = truncated[:-1]
-    return truncated + '...'
+    return truncated + "..."
 
 
 def compute_confidence(sample_size: int) -> str:
@@ -46,10 +50,10 @@ def compute_confidence(sample_size: int) -> str:
         'low' (<10), 'medium' (10-50), 'high' (50+)
     """
     if sample_size < 10:
-        return 'low'
+        return "low"
     if sample_size < 50:
-        return 'medium'
-    return 'high'
+        return "medium"
+    return "high"
 
 
 def is_significant(all_rate: float, top_rate: float, threshold: float = 0.05) -> bool:
@@ -74,7 +78,7 @@ def compute_recency_weight(published_at: str, half_life_days: float = 365.0) -> 
     try:
         if isinstance(published_at, str):
             # Handle both Z and +00:00 suffixes
-            dt_str = published_at.replace('Z', '+00:00')
+            dt_str = published_at.replace("Z", "+00:00")
             pub_date = datetime.fromisoformat(dt_str)
         else:
             return 1.0  # Default weight if not a string
@@ -89,10 +93,12 @@ def compute_recency_weight(published_at: str, half_life_days: float = 365.0) -> 
         return 1.0
 
 
-def compute_feature_profile(all_analyses: List[Dict],
-                            top_analyses: List[Dict],
-                            all_weights: Optional[List[float]] = None,
-                            top_weights: Optional[List[float]] = None) -> Dict[str, Any]:
+def compute_feature_profile(
+    all_analyses: List[Dict],
+    top_analyses: List[Dict],
+    all_weights: Optional[List[float]] = None,
+    top_weights: Optional[List[float]] = None,
+) -> Dict[str, Any]:
     """
     Compare feature distributions between all and top performing videos.
 
@@ -151,12 +157,12 @@ def compute_timing_profile(videos: List[Dict], get_vps) -> Dict[str, Any]:
     hour_views = defaultdict(list)
 
     for video_data in videos:
-        video = video_data['video']
+        video = video_data["video"]
         vps = get_vps(video_data)
-        calculated = video.get('calculated', {})
+        calculated = video.get("calculated", {})
 
-        day = calculated.get('publishDayOfWeek')
-        hour = calculated.get('publishHourIST')
+        day = calculated.get("publishDayOfWeek")
+        hour = calculated.get("publishHourIST")
 
         if day and vps > 0:
             day_views[day].append(vps)
@@ -168,35 +174,38 @@ def compute_timing_profile(videos: List[Dict], get_vps) -> Dict[str, Any]:
     for day, vps_list in day_views.items():
         if len(vps_list) < 5:
             continue
-        best_days.append({
-            'day': day,
-            'avgViewsPerSubscriber': round(float(np.mean(vps_list)), 2),
-            'videoCount': len(vps_list),
-        })
-    best_days.sort(key=lambda x: x['avgViewsPerSubscriber'], reverse=True)
+        best_days.append(
+            {
+                "day": day,
+                "avgViewsPerSubscriber": round(float(np.mean(vps_list)), 2),
+                "videoCount": len(vps_list),
+            }
+        )
+    best_days.sort(key=lambda x: x["avgViewsPerSubscriber"], reverse=True)
 
     # Compute hour stats
     best_hours = []
     for hour, vps_list in hour_views.items():
         if len(vps_list) < 5:
             continue
-        best_hours.append({
-            'hour': hour,
-            'avgViewsPerSubscriber': round(float(np.mean(vps_list)), 2),
-            'videoCount': len(vps_list),
-        })
-    best_hours.sort(key=lambda x: x['avgViewsPerSubscriber'], reverse=True)
+        best_hours.append(
+            {
+                "hour": hour,
+                "avgViewsPerSubscriber": round(float(np.mean(vps_list)), 2),
+                "videoCount": len(vps_list),
+            }
+        )
+    best_hours.sort(key=lambda x: x["avgViewsPerSubscriber"], reverse=True)
 
     return {
-        'bestDays': best_days,
-        'bestHours': best_hours,
+        "bestDays": best_days,
+        "bestHours": best_hours,
     }
 
 
-def compute_feature_correlations(all_analyses: List[Dict],
-                                 top_analyses: List[Dict],
-                                 top_n_features: int = 20,
-                                 top_n_pairs: int = 10) -> List[Dict[str, Any]]:
+def compute_feature_correlations(
+    all_analyses: List[Dict], top_analyses: List[Dict], top_n_features: int = 20, top_n_pairs: int = 10
+) -> List[Dict[str, Any]]:
     """Compute pairwise boolean co-occurrence for top-performing features.
 
     Finds the boolean features with the highest lift (top10_rate / all_rate),
@@ -268,16 +277,18 @@ def compute_feature_correlations(all_analyses: List[Dict],
 
             lift = top_rate / all_rate if all_rate > 0.01 else 0
 
-            pairs.append({
-                'pair': [f1, f2],
-                'coOccurrence': {
-                    'all': round(all_rate, 3),
-                    'top10': round(top_rate, 3),
-                },
-                'lift': round(lift, 2),
-            })
+            pairs.append(
+                {
+                    "pair": [f1, f2],
+                    "coOccurrence": {
+                        "all": round(all_rate, 3),
+                        "top10": round(top_rate, 3),
+                    },
+                    "lift": round(lift, 2),
+                }
+            )
 
-    pairs.sort(key=lambda x: x['lift'], reverse=True)
+    pairs.sort(key=lambda x: x["lift"], reverse=True)
     return pairs[:top_n_pairs]
 
 
@@ -285,7 +296,7 @@ def _collect_values(analyses: List[Dict]) -> Dict[str, List]:
     """Collect all values per dot-path key across analyses."""
     collected = defaultdict(list)
     for analysis in analyses:
-        _traverse(analysis, '', collected)
+        _traverse(analysis, "", collected)
     return collected
 
 
@@ -318,9 +329,12 @@ def _traverse(obj: Any, prefix: str, collected: Dict[str, List]):
         collected[prefix].append(obj)
 
 
-def _compute_stats(all_values: List, top_values: List,
-                   all_weights: Optional[List[float]] = None,
-                   top_weights: Optional[List[float]] = None) -> Optional[Dict]:
+def _compute_stats(
+    all_values: List,
+    top_values: List,
+    all_weights: Optional[List[float]] = None,
+    top_weights: Optional[List[float]] = None,
+) -> Optional[Dict]:
     """Compute appropriate stats based on detected value type."""
     all_clean = [v for v in all_values if v is not None]
     top_clean = [v for v in top_values if v is not None]
@@ -357,16 +371,16 @@ def _bool_stats(all_vals: List[bool], top_vals: List[bool]) -> Dict:
     all_rate = sum(1 for v in all_vals if v) / len(all_vals) if all_vals else 0
     top_rate = sum(1 for v in top_vals if v) / len(top_vals) if top_vals else 0
     return {
-        'all': round(all_rate, 3),
-        'top10': round(top_rate, 3),
-        'confidence': compute_confidence(len(all_vals)),
-        'significant': is_significant(all_rate, top_rate),
+        "all": round(all_rate, 3),
+        "top10": round(top_rate, 3),
+        "confidence": compute_confidence(len(all_vals)),
+        "significant": is_significant(all_rate, top_rate),
     }
 
 
-def _numeric_stats(all_vals: List, top_vals: List,
-                   all_weights: Optional[List[float]] = None,
-                   top_weights: Optional[List[float]] = None) -> Dict:
+def _numeric_stats(
+    all_vals: List, top_vals: List, all_weights: Optional[List[float]] = None, top_weights: Optional[List[float]] = None
+) -> Dict:
     """Numeric feature: average in all vs top 10%."""
     if all_weights and len(all_weights) == len(all_vals):
         all_avg = float(np.average(all_vals, weights=all_weights))
@@ -379,9 +393,9 @@ def _numeric_stats(all_vals: List, top_vals: List,
         top_avg = float(np.mean(top_vals)) if top_vals else 0
 
     return {
-        'all_avg': round(all_avg, 2),
-        'top10_avg': round(top_avg, 2),
-        'confidence': compute_confidence(len(all_vals)),
+        "all_avg": round(all_avg, 2),
+        "top10_avg": round(top_avg, 2),
+        "confidence": compute_confidence(len(all_vals)),
     }
 
 
@@ -399,14 +413,13 @@ def _categorical_stats(all_vals: List[str], top_vals: List[str]) -> Optional[Dic
 
     all_dist = {_safe_key(k): round(v / all_total, 3) for k, v in Counter(all_vals).items() if k}
     top_dist = (
-        {_safe_key(k): round(v / top_total, 3) for k, v in Counter(top_vals).items() if k}
-        if top_total > 0 else {}
+        {_safe_key(k): round(v / top_total, 3) for k, v in Counter(top_vals).items() if k} if top_total > 0 else {}
     )
 
     return {
-        'all': all_dist,
-        'top10': top_dist,
-        'confidence': compute_confidence(all_total),
+        "all": all_dist,
+        "top10": top_dist,
+        "confidence": compute_confidence(all_total),
     }
 
 
@@ -416,18 +429,16 @@ def _list_stats(all_vals: List[List], top_vals: List[List]) -> Dict:
     top_avg_len = float(np.mean([len(v) for v in top_vals])) if top_vals else 0
 
     result = {
-        'all_avg_count': round(all_avg_len, 2),
-        'top10_avg_count': round(top_avg_len, 2),
-        'confidence': compute_confidence(len(all_vals)),
+        "all_avg_count": round(all_avg_len, 2),
+        "top10_avg_count": round(top_avg_len, 2),
+        "confidence": compute_confidence(len(all_vals)),
     }
 
     # Item frequency for string items
-    all_items = [item for sublist in all_vals for item in sublist
-                 if isinstance(item, str)]
+    all_items = [item for sublist in all_vals for item in sublist if isinstance(item, str)]
 
     if all_items and len(set(all_items)) <= 50:
-        top_items = [item for sublist in top_vals for item in sublist
-                     if isinstance(item, str)]
+        top_items = [item for sublist in top_vals for item in sublist if isinstance(item, str)]
         all_total = len(all_vals)  # Number of videos, not items
         top_total = len(top_vals)
         all_counter = Counter(all_items)
@@ -438,18 +449,17 @@ def _list_stats(all_vals: List[List], top_vals: List[List]) -> Dict:
             if not item:
                 continue  # Skip empty strings — invalid as Firestore keys
             items[_safe_key(item)] = {
-                'all': round(count / all_total, 3),
-                'top10': round(top_counter.get(item, 0) / top_total, 3)
-                         if top_total > 0 else 0,
+                "all": round(count / all_total, 3),
+                "top10": round(top_counter.get(item, 0) / top_total, 3) if top_total > 0 else 0,
             }
-        result['topItems'] = items
+        result["topItems"] = items
 
     return result
 
 
 def _get_nested(d: Dict, path: str) -> Any:
     """Get a value from a nested dict using dot-path notation."""
-    keys = path.split('.')
+    keys = path.split(".")
     current = d
     for key in keys:
         if not isinstance(current, dict) or key not in current:
@@ -460,7 +470,7 @@ def _get_nested(d: Dict, path: str) -> Any:
 
 def _set_nested(d: Dict, path: str, value: Any):
     """Set a value in a nested dict using dot-path notation."""
-    keys = path.split('.')
+    keys = path.split(".")
     current = d
     for key in keys[:-1]:
         if key not in current:

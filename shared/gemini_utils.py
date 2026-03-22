@@ -8,7 +8,7 @@ import json
 import time
 from typing import Dict, Any, Callable, TypeVar
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def extract_json_from_response(response_text: str) -> str:
@@ -23,11 +23,11 @@ def extract_json_from_response(response_text: str) -> str:
     text = response_text.strip()
 
     # Handle markdown code blocks
-    if text.startswith('```json'):
+    if text.startswith("```json"):
         text = text[7:]
-    elif text.startswith('```'):
+    elif text.startswith("```"):
         text = text[3:]
-    if text.endswith('```'):
+    if text.endswith("```"):
         text = text[:-3]
 
     return text.strip()
@@ -50,10 +50,7 @@ def parse_json_response(response_text: str) -> Dict[str, Any]:
 
 
 def call_with_retry(
-    func: Callable[[], T],
-    retries: int = 3,
-    retry_delay: float = 1.0,
-    error_message: str = "Operation failed"
+    func: Callable[[], T], retries: int = 3, retry_delay: float = 1.0, error_message: str = "Operation failed"
 ) -> T:
     """Execute a function with retry logic and exponential backoff.
 
@@ -97,7 +94,7 @@ def validate_gemini_response(response) -> str:
     """
     if not response:
         raise RuntimeError("Empty response from Gemini API")
-    if not hasattr(response, 'text'):
+    if not hasattr(response, "text"):
         raise RuntimeError("Response has no text attribute")
     if not response.text:
         raise RuntimeError("Response text is empty")
