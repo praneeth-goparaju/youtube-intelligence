@@ -1,7 +1,7 @@
 # YouTube Intelligence System - Python Dependencies
 
 # Firebase & Core
-firebase-admin==7.1.0
+firebase-admin==7.3.0
 python-dotenv==1.2.1
 
 # Analyzer (Phase 2) - Gemini AI & Image Processing
