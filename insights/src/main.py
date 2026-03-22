@@ -110,12 +110,14 @@ def remove_outliers(
         cap = float(np.percentile(vps_values, cap_percentile))
         winsorized_count = sum(1 for vps in vps_values if vps > cap)
 
-        # Cap the calculated VPS in-place
-        for v in filtered:
+        # Cap VPS on copies to avoid mutating original video objects
+        for i, v in enumerate(filtered):
             calculated = v.get("video", {}).get("calculated", {})
             vps = calculated.get("viewsPerSubscriber")
             if vps and vps > cap:
-                calculated["viewsPerSubscriber"] = cap
+                capped_calculated = {**calculated, "viewsPerSubscriber": cap}
+                capped_video = {**v.get("video", {}), "calculated": capped_calculated}
+                filtered[i] = {**v, "video": capped_video}
     else:
         cap = 0
         winsorized_count = 0

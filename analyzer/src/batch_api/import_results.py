@@ -6,18 +6,22 @@ data to the appropriate Firestore subcollection.
 
 import json
 import os
+import re
 from datetime import datetime
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, FrozenSet
 
 from ..config import config, logger
 from ..firebase_client import (
     save_analysis,
-    get_video,
+    get_channel_video_texts,
+    get_all_channels_unfiltered,
     get_batch_job as get_batch_job_record,
     get_latest_batch_job,
     update_batch_job,
 )
 from ..analyzers.local_text_features import extract_local_features, deep_merge
+
+_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 from .client import (
     get_batch_job as get_batch_job_status,
     download_result_file,
@@ -79,8 +83,17 @@ def import_batch_results(
     if not output_path:
         return {"error": "Could not download results"}
 
+    # Load valid channel IDs for validation
+    print("  Loading channel list for validation...")
+    all_channels = get_all_channels_unfiltered()
+    valid_channel_ids = frozenset(ch["id"] for ch in all_channels)
+    print(f"  Validating against {len(valid_channel_ids)} known channels")
+
     # Process results
-    stats = _process_result_file(output_path, analysis_type)
+    stats = _process_result_file(output_path, analysis_type, valid_channel_ids)
+
+    if stats.get("aborted"):
+        print(f"\n  IMPORT ABORTED: {stats.get('abortReason', 'Unknown reason')}")
 
     # Update job record
     update_batch_job(
@@ -96,6 +109,8 @@ def import_batch_results(
     print(f"    Successful imports:  {stats['imported']}")
     print(f"    Failed imports:      {stats['failed']}")
     print(f"    Parse errors:        {stats['parseErrors']}")
+    if stats.get("invalidKeys", 0) > 0:
+        print(f"    Invalid keys:        {stats['invalidKeys']}")
     if stats.get("localFeaturesMerged", 0) > 0:
         print(f"    Local features:      {stats['localFeaturesMerged']} merged (title_description)")
 
@@ -159,7 +174,12 @@ def _serialize_response(resp) -> Dict[str, Any]:
     return {"raw": str(resp)}
 
 
-def _process_result_file(file_path: str, analysis_type: str) -> Dict[str, Any]:
+def _process_result_file(
+    file_path: str,
+    analysis_type: str,
+    valid_channel_ids: FrozenSet[str],
+    failure_threshold: float = 0.2,
+) -> Dict[str, Any]:
     """Process a JSONL result file and import each result to Firestore.
 
     Each line in the JSONL is expected to have:
@@ -174,62 +194,84 @@ def _process_result_file(file_path: str, analysis_type: str) -> Dict[str, Any]:
         "imported": 0,
         "failed": 0,
         "parseErrors": 0,
+        "invalidKeys": 0,
         "localFeaturesMerged": 0,
+        "aborted": False,
     }
 
-    # Count total lines for progress display
+    # Read all lines once (avoids double file read)
     with open(file_path, "r") as f:
-        total_lines = sum(1 for line in f if line.strip())
+        lines = [line for line in f if line.strip()]
+    total_lines = len(lines)
 
     current_channel = None
+    # Cache video texts per channel to avoid N+1 Firestore reads
+    video_text_cache: Dict[str, Dict[str, str]] = {}
+    cached_channel: Optional[str] = None
 
-    with open(file_path, "r") as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
+    for line_num, line in enumerate(lines, 1):
+        stats["total"] += 1
 
-            stats["total"] += 1
+        try:
+            result = json.loads(line.strip())
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parse error on line {line_num}: {e}")
+            stats["parseErrors"] += 1
+            continue
 
-            try:
-                result = json.loads(line)
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON parse error on line {line_num}: {e}")
-                stats["parseErrors"] += 1
-                continue
+        # Track channel changes for progress display and cache refresh
+        key = result.get("key", "")
+        if key and len(key) >= 24 and key[0:2] == "UC":
+            ch_id = key[:24]
+            if ch_id != current_channel:
+                current_channel = ch_id
+                # Pre-fetch all video texts for this channel (batch read)
+                if analysis_type == "title_description" and ch_id != cached_channel:
+                    video_text_cache = get_channel_video_texts(ch_id)
+                    cached_channel = ch_id
 
-            # Track channel changes for progress display
-            key = result.get("key", "")
-            if key and len(key) >= 24 and key[0:2] == "UC":
-                ch_id = key[:24]
-                if ch_id != current_channel:
-                    current_channel = ch_id
+        try:
+            merged_local = _import_single_result(result, analysis_type, valid_channel_ids, video_text_cache)
+            stats["imported"] += 1
+            if merged_local:
+                stats["localFeaturesMerged"] += 1
+        except Exception as e:
+            logger.error(f"Import error on line {line_num}: {e}")
+            stats["failed"] += 1
 
-            try:
-                merged_local = _import_single_result(result, analysis_type)
-                stats["imported"] += 1
-                if merged_local:
-                    stats["localFeaturesMerged"] += 1
-            except Exception as e:
-                logger.error(f"Import error on line {line_num}: {e}")
-                stats["failed"] += 1
-
-            # Progress logging every 100 results
-            if stats["total"] % 100 == 0:
-                ch_display = current_channel or "?"
-                print(
-                    f"  [{stats['total']:>{len(str(total_lines))}}/{total_lines}]  {ch_display} — "
-                    f"{stats['imported']} imported, {stats['failed']} failed"
+        # Abort if failure rate exceeds threshold (after minimum sample)
+        if stats["total"] >= 10:
+            failure_rate = stats["failed"] / stats["total"]
+            if failure_rate > failure_threshold:
+                logger.error(
+                    f"Failure rate {failure_rate:.1%} exceeds threshold "
+                    f"{failure_threshold:.0%} after {stats['total']} results. Aborting."
                 )
+                stats["aborted"] = True
+                stats["abortReason"] = f"Failure rate {failure_rate:.1%} exceeded {failure_threshold:.0%} threshold"
+                break
+
+        # Progress logging every 100 results
+        if stats["total"] % 100 == 0:
+            ch_display = current_channel or "?"
+            print(
+                f"  [{stats['total']:>{len(str(total_lines))}}/{total_lines}]  {ch_display} — "
+                f"{stats['imported']} imported, {stats['failed']} failed"
+            )
 
     return stats
 
 
-def _import_single_result(result: Dict[str, Any], analysis_type: str) -> bool:
+def _import_single_result(
+    result: Dict[str, Any],
+    analysis_type: str,
+    valid_channel_ids: FrozenSet[str],
+    video_text_cache: Dict[str, Dict[str, str]],
+) -> bool:
     """Import a single batch result into Firestore.
 
-    Parses the key to extract channelId and videoId, then extracts
-    the JSON response text and saves it as analysis data.
+    Parses the key to extract channelId and videoId, validates them,
+    then extracts the JSON response text and saves it as analysis data.
 
     Returns:
         True if local features were merged, False otherwise.
@@ -242,22 +284,27 @@ def _import_single_result(result: Dict[str, Any], analysis_type: str) -> bool:
     channel_id, video_id = _parse_result_key(key, analysis_type)
 
     if not channel_id or not video_id:
-        raise ValueError(f"Could not parse key: {key}")
+        logger.debug(f"Unparseable key: {key}")
+        raise ValueError("Could not parse result key")
+
+    # Validate channel exists in Firestore
+    if channel_id not in valid_channel_ids:
+        logger.warning(f"Unknown channel ID in batch result: {channel_id}")
+        raise ValueError("Unknown channel ID in batch result")
 
     # Extract response text from Gemini response structure
     analysis_data = _extract_analysis_data(response)
 
     if not analysis_data:
-        raise ValueError(f"No analysis data in response for key: {key}")
+        logger.debug(f"Empty response for key: {key}")
+        raise ValueError("No analysis data in response")
 
     # For title_description, merge locally-computed deterministic features
     merged_local = False
     if analysis_type == "title_description":
-        video_doc = get_video(channel_id, video_id)
-        if video_doc:
-            title = video_doc.get("title", "")
-            description = video_doc.get("description", "")
-            local_features = extract_local_features(title, description)
+        video_texts = video_text_cache.get(video_id)
+        if video_texts:
+            local_features = extract_local_features(video_texts["title"], video_texts["description"])
             analysis_data = deep_merge(analysis_data, local_features)
             merged_local = True
 
@@ -289,13 +336,13 @@ def _parse_result_key(key: str, analysis_type: str) -> Tuple[str, str]:
     if len(key) >= 36 and key[0:2] == "UC" and key[24] == "_":
         channel_id = key[:24]
         video_id = key[25:]
+        # Validate video ID format (11 chars, alphanumeric + dash + underscore)
+        if not _VIDEO_ID_RE.match(video_id):
+            logger.warning(f"Invalid video ID format in batch key: {video_id}")
+            return "", ""
         return channel_id, video_id
 
-    # Fallback: split on underscore, first part is channel, rest is video
-    parts = key.split("_", 1)
-    if len(parts) == 2:
-        return parts[0], parts[1]
-
+    logger.warning(f"Batch key does not match expected format: {key[:40]}")
     return "", ""
 
 

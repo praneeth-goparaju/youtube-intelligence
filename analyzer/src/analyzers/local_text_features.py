@@ -29,10 +29,11 @@ _EMOJI_RE = re.compile(
     "\U0001f900-\U0001f9ff"  # supplemental symbols
     "\U0001fa00-\U0001fa6f"  # chess symbols
     "\U0001fa70-\U0001faff"  # symbols extended-A
-    "\U00002702-\U000027b0"  # dingbats
-    "\U000024c2-\U0001f251"  # enclosed chars
+    "\U00002600-\U000026ff"  # misc symbols (sun, cloud, etc.)
+    "\U00002702-\U000027bf"  # dingbats
     "\U0000200d"  # ZWJ
     "\U0000fe0f"  # variation selector
+    "\U0001f200-\U0001f251"  # enclosed ideographic supplement
     "]+",
     flags=re.UNICODE,
 )

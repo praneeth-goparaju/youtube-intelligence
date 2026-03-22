@@ -4,6 +4,8 @@ Handles uploading JSONL files, creating batch jobs, and recording
 job metadata in the batch_jobs Firestore collection.
 """
 
+import random
+import re
 from datetime import datetime
 from typing import Optional, Dict, Any
 
@@ -40,9 +42,17 @@ def submit_batch(
     if not jsonl_path:
         raise ValueError("No JSONL file path provided")
 
-    # Generate display name
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    display_name = job_name or f"batch_{analysis_type}_{timestamp}"
+    # Validate user-provided job name format
+    if job_name and not re.match(r"^[A-Za-z0-9_-]{1,128}$", job_name):
+        raise ValueError("Invalid job name. Use alphanumeric, dash, underscore only (max 128 chars).")
+
+    # Generate display name with nonce to avoid timestamp collisions
+    if job_name:
+        display_name = job_name
+    else:
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        nonce = random.randint(1000, 9999)
+        display_name = f"batch_{analysis_type}_{timestamp}_{nonce}"
 
     print("\nSubmitting batch job...")
     print(f"  File: {jsonl_path}")

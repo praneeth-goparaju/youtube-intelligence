@@ -1,28 +1,5 @@
 import { describe, it, expect } from 'vitest';
-
-// Re-implement parseChannelUrl for testing without importing from source
-// (to avoid config dependencies)
-interface UrlPattern {
-  regex: RegExp;
-  type: 'handle' | 'channelId' | 'customUrl' | 'user';
-}
-
-const URL_PATTERNS: UrlPattern[] = [
-  { regex: /@([^\/\?]+)/, type: 'handle' },
-  { regex: /\/channel\/(UC[a-zA-Z0-9_-]{22})/, type: 'channelId' },
-  { regex: /\/c\/([^\/\?]+)/, type: 'customUrl' },
-  { regex: /\/user\/([^\/\?]+)/, type: 'user' },
-];
-
-function parseChannelUrl(url: string): { identifier: string; type: UrlPattern['type'] } | null {
-  for (const pattern of URL_PATTERNS) {
-    const match = url.match(pattern.regex);
-    if (match) {
-      return { identifier: match[1], type: pattern.type };
-    }
-  }
-  return null;
-}
+import { parseChannelUrl } from '../../src/youtube/url-parser.js';
 
 describe('parseChannelUrl', () => {
   it('should parse @handle URLs', () => {

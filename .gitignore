@@ -73,14 +73,14 @@ insights/outputs/*.csv
 # Research data (use .example versions as templates)
 config/channels.json
 data/channels-review.csv
+data/old-channels-review.csv
+data/batch/
 
 # Temporary files
 *.tmp
 *.temp
 .cache/
-data/batch/
-data/channels-review.csv
-data/old-channels-review.csv
-data/channels-review.csv
+
+# Functions
 functions/.env*
 functions/outputs/
