@@ -5,7 +5,7 @@ Uses the Gemini Developer API (not Vertex AI).
 """
 
 import time
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Any
 
 from google import genai
 from google.genai import types
@@ -15,9 +15,9 @@ from ..config import config, logger
 
 # Terminal states for batch jobs
 COMPLETED_STATES = {
-    'JOB_STATE_SUCCEEDED',
-    'JOB_STATE_FAILED',
-    'JOB_STATE_CANCELLED',
+    "JOB_STATE_SUCCEEDED",
+    "JOB_STATE_FAILED",
+    "JOB_STATE_CANCELLED",
 }
 
 # Client singleton
@@ -30,7 +30,7 @@ def _state_str(state) -> str:
     The google-genai SDK returns JobState enums where str() gives
     'JobState.JOB_STATE_SUCCEEDED' but we need 'JOB_STATE_SUCCEEDED'.
     """
-    if hasattr(state, 'value'):
+    if hasattr(state, "value"):
         return state.value
     return str(state)
 
@@ -56,7 +56,7 @@ def upload_jsonl_file(file_path: str, display_name: str) -> str:
     client = get_client()
     uploaded = client.files.upload(
         file=file_path,
-        config=types.UploadFileConfig(display_name=display_name, mime_type='application/jsonl'),
+        config=types.UploadFileConfig(display_name=display_name, mime_type="application/jsonl"),
     )
     logger.info(f"Uploaded {file_path} as {uploaded.name}")
     return uploaded.name
@@ -94,8 +94,7 @@ def get_batch_job(job_name: str) -> Any:
     return client.batches.get(name=job_name)
 
 
-def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440,
-                   max_retries: int = 5) -> Any:
+def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440, max_retries: int = 5) -> Any:
     """Poll a batch job until it reaches a terminal state.
 
     Args:
@@ -128,7 +127,7 @@ def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440
             logger.warning(f"Poll error ({consecutive_errors}/{max_retries}): {e}")
             print(f"  Network error (attempt {consecutive_errors}/{max_retries}), retrying...")
             if consecutive_errors >= max_retries:
-                logger.error(f"Too many consecutive poll errors, giving up")
+                logger.error("Too many consecutive poll errors, giving up")
                 raise
 
     if _state_str(job.state) not in COMPLETED_STATES:
@@ -182,7 +181,7 @@ def download_result_file(file_name: str, output_path: str) -> str:
     client = get_client()
     # Download the file content
     response = client.files.download(file=file_name)
-    with open(output_path, 'wb') as f:
+    with open(output_path, "wb") as f:
         f.write(response)
     logger.info(f"Downloaded results to {output_path}")
     return output_path

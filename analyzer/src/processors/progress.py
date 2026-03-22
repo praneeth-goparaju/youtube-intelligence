@@ -69,15 +69,15 @@ class ProgressTracker:
             elapsed = (datetime.utcnow() - self.start_time).total_seconds()
 
         return {
-            'analysisType': self.analysis_type,
-            'totalVideos': self.total_videos,
-            'processed': self.processed,
-            'successful': self.successful,
-            'failed': self.failed,
-            'skipped': self.skipped,
-            'progress': self.get_progress(),
-            'elapsedSeconds': elapsed,
-            'startTime': self.start_time.isoformat() if self.start_time else None,
+            "analysisType": self.analysis_type,
+            "totalVideos": self.total_videos,
+            "processed": self.processed,
+            "successful": self.successful,
+            "failed": self.failed,
+            "skipped": self.skipped,
+            "progress": self.get_progress(),
+            "elapsedSeconds": elapsed,
+            "startTime": self.start_time.isoformat() if self.start_time else None,
         }
 
     def _save(self, force: bool = False) -> None:
@@ -95,28 +95,28 @@ class ProgressTracker:
         """
         data = get_analysis_progress(self.analysis_type)
         if data:
-            self.total_videos = data.get('totalVideos', 0)
-            self.processed = data.get('processed', 0)
-            self.successful = data.get('successful', 0)
-            self.failed = data.get('failed', 0)
-            self.skipped = data.get('skipped', 0)
-            if data.get('startTime'):
-                self.start_time = datetime.fromisoformat(data['startTime'])
+            self.total_videos = data.get("totalVideos", 0)
+            self.processed = data.get("processed", 0)
+            self.successful = data.get("successful", 0)
+            self.failed = data.get("failed", 0)
+            self.skipped = data.get("skipped", 0)
+            if data.get("startTime"):
+                self.start_time = datetime.fromisoformat(data["startTime"])
             return True
         return False
 
     def print_status(self) -> None:
         """Print current status to console."""
         stats = self.get_stats()
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Analysis: {stats['analysisType'].upper()}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Progress: {stats['progress']:.1f}% ({stats['processed']}/{stats['totalVideos']})")
         print(f"Successful: {stats['successful']}")
         print(f"Failed: {stats['failed']}")
         print(f"Skipped: {stats['skipped']}")
-        if stats['elapsedSeconds']:
-            minutes = int(stats['elapsedSeconds'] // 60)
-            seconds = int(stats['elapsedSeconds'] % 60)
+        if stats["elapsedSeconds"]:
+            minutes = int(stats["elapsedSeconds"] // 60)
+            seconds = int(stats["elapsedSeconds"] % 60)
             print(f"Elapsed: {minutes}m {seconds}s")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")

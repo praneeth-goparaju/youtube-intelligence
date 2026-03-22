@@ -1,0 +1,31 @@
+[project]
+name = "youtube-intelligence"
+version = "1.0.0"
+description = "Multi-phase analytics platform for YouTube channel intelligence"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["analyzer/tests", "insights/tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+]
+ignore = [
+    "E501", # line too long (handled by formatter)
+    "E402", # module-level import not at top (scripts use sys.path manipulation)
+    "F841", # local variable assigned but unused (acceptable in scripts)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["shared", "src"]
+
+[tool.ruff.format]
+quote-style = "double"

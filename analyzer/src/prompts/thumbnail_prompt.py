@@ -31,7 +31,7 @@ THUMBNAIL_USER_PROMPT = (
 
 # --- Original monolithic prompt (kept for backward compatibility with sync mode) ---
 
-THUMBNAIL_ANALYSIS_PROMPT = '''Analyze this YouTube video thumbnail image and return a detailed JSON analysis.
+THUMBNAIL_ANALYSIS_PROMPT = """Analyze this YouTube video thumbnail image and return a detailed JSON analysis.
 
 IMPORTANT: Return ONLY valid JSON, no markdown formatting or explanation text.
 
@@ -205,4 +205,4 @@ Return this exact JSON structure:
     "framing": "poor|acceptable|good|excellent",
     "exposure": "underexposed|correct|overexposed"
   }
-}'''
+}"""

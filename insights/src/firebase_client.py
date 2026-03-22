@@ -8,7 +8,7 @@ from shared.constants import ANALYSIS_TYPE_THUMBNAIL, ANALYSIS_TYPE_TITLE_DESCRI
 from .config import config
 
 # Legacy fallback type for channels analyzed before title_description was introduced
-_LEGACY_TITLE_TYPE = 'title'
+_LEGACY_TITLE_TYPE = "title"
 
 
 _app: Optional[firebase_admin.App] = None
@@ -25,17 +25,17 @@ def initialize_firebase() -> None:
     config.initialize()
 
     try:
-        cred = credentials.Certificate({
-            'type': 'service_account',
-            'project_id': config.FIREBASE_PROJECT_ID,
-            'client_email': config.FIREBASE_CLIENT_EMAIL,
-            'private_key': config.FIREBASE_PRIVATE_KEY,
-            'token_uri': 'https://oauth2.googleapis.com/token',
-        })
+        cred = credentials.Certificate(
+            {
+                "type": "service_account",
+                "project_id": config.FIREBASE_PROJECT_ID,
+                "client_email": config.FIREBASE_CLIENT_EMAIL,
+                "private_key": config.FIREBASE_PRIVATE_KEY,
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
 
-        _app = firebase_admin.initialize_app(cred, {
-            'storageBucket': config.FIREBASE_STORAGE_BUCKET
-        })
+        _app = firebase_admin.initialize_app(cred, {"storageBucket": config.FIREBASE_STORAGE_BUCKET})
 
         _db = firestore.client()
     except ValueError as e:
@@ -65,8 +65,8 @@ def get_all_channels() -> List[Dict[str, Any]]:
     """
     try:
         db = get_db()
-        docs = db.collection('channels').stream()
-        return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+        docs = db.collection("channels").stream()
+        return [{"id": doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
         raise RuntimeError(f"Failed to fetch channels from Firestore: {e}") from e
 
@@ -85,8 +85,8 @@ def get_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
     """
     try:
         db = get_db()
-        docs = db.collection('channels').document(channel_id).collection('videos').stream()
-        return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+        docs = db.collection("channels").document(channel_id).collection("videos").stream()
+        return [{"id": doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
         raise RuntimeError(f"Failed to fetch videos for channel {channel_id}: {e}") from e
 
@@ -109,19 +109,19 @@ def _batch_get_analyses_for_channel(
         Dict mapping video_id -> {analysis_type: data}.
     """
     db = get_db()
-    channel_ref = db.collection('channels').document(channel_id)
+    channel_ref = db.collection("channels").document(channel_id)
 
     # Build all document references
     refs = []
     for video_id in video_ids:
-        video_ref = channel_ref.collection('videos').document(video_id)
+        video_ref = channel_ref.collection("videos").document(video_id)
         for atype in analysis_types:
-            refs.append(video_ref.collection('analysis').document(atype))
+            refs.append(video_ref.collection("analysis").document(atype))
 
     # Fetch in batches
     results: Dict[str, Dict[str, Any]] = {}
     for i in range(0, len(refs), batch_size):
-        batch_refs = refs[i:i + batch_size]
+        batch_refs = refs[i : i + batch_size]
         snapshots = db.get_all(batch_refs)
 
         for snapshot in snapshots:
@@ -156,11 +156,11 @@ def get_all_videos_with_analyses(channel_id: Optional[str] = None) -> List[Dict[
     """
     if channel_id:
         db = get_db()
-        doc = db.collection('channels').document(channel_id).get()
+        doc = db.collection("channels").document(channel_id).get()
         if not doc.exists:
             print(f"  Channel {channel_id} not found in Firestore")
             return []
-        channels = [{'id': doc.id, **doc.to_dict()}]
+        channels = [{"id": doc.id, **doc.to_dict()}]
     else:
         channels = get_all_channels()
     print(f"  Found {len(channels)} channel{'s' if len(channels) != 1 else ''}")
@@ -170,9 +170,9 @@ def get_all_videos_with_analyses(channel_id: Optional[str] = None) -> List[Dict[
     skipped_no_analysis = 0
 
     for i, channel in enumerate(channels, 1):
-        channel_id = channel['id']
-        channel_name = channel.get('title', channel_id)
-        print(f"  [{i}/{len(channels)}] {channel_name}...", end=' ', flush=True)
+        channel_id = channel["id"]
+        channel_name = channel.get("title", channel_id)
+        print(f"  [{i}/{len(channels)}] {channel_name}...", end=" ", flush=True)
 
         videos = get_channel_videos(channel_id)
 
@@ -181,13 +181,12 @@ def get_all_videos_with_analyses(channel_id: Optional[str] = None) -> List[Dict[
             skipped_no_videos += 1
             continue
 
-        video_ids = [v['id'] for v in videos]
-        video_map = {v['id']: v for v in videos}
+        video_ids = [v["id"] for v in videos]
+        video_map = {v["id"]: v for v in videos}
 
         # Batch fetch all analyses (include legacy 'title' as fallback)
         analyses = _batch_get_analyses_for_channel(
-            channel_id, video_ids,
-            [ANALYSIS_TYPE_TITLE_DESCRIPTION, _LEGACY_TITLE_TYPE, ANALYSIS_TYPE_THUMBNAIL]
+            channel_id, video_ids, [ANALYSIS_TYPE_TITLE_DESCRIPTION, _LEGACY_TITLE_TYPE, ANALYSIS_TYPE_THUMBNAIL]
         )
 
         channel_count = 0
@@ -205,14 +204,16 @@ def get_all_videos_with_analyses(channel_id: Optional[str] = None) -> List[Dict[
 
             thumbnail_analysis = video_analyses.get(ANALYSIS_TYPE_THUMBNAIL)
 
-            all_videos.append({
-                'channel_id': channel_id,
-                'video_id': video_id,
-                'channel': channel,
-                'video': video_map[video_id],
-                'title_analysis': title_analysis,
-                'thumbnail_analysis': thumbnail_analysis,
-            })
+            all_videos.append(
+                {
+                    "channel_id": channel_id,
+                    "video_id": video_id,
+                    "channel": channel,
+                    "video": video_map[video_id],
+                    "title_analysis": title_analysis,
+                    "thumbnail_analysis": thumbnail_analysis,
+                }
+            )
             channel_count += 1
 
         print(f"{channel_count}/{len(videos)} analyzed")
@@ -229,7 +230,7 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
     """Save insights to Firestore."""
     try:
         db = get_db()
-        db.collection('insights').document(insight_type).set(data)
+        db.collection("insights").document(insight_type).set(data)
     except Exception as e:
         print(f"Error saving insights for {insight_type}: {e}")
         raise

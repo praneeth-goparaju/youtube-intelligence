@@ -27,7 +27,7 @@ def build_title_description_input(title: str, description: str) -> str:
     Returns:
         Formatted combined text with TITLE: and DESCRIPTION: sections
     """
-    desc = description or ''
+    desc = description or ""
     if len(desc) > MAX_DESCRIPTION_LENGTH:
         desc = desc[:MAX_DESCRIPTION_LENGTH]
 
@@ -38,12 +38,12 @@ def build_title_description_input(title: str, description: str) -> str:
 
 
 __all__ = [
-    'THUMBNAIL_ANALYSIS_PROMPT',
-    'THUMBNAIL_SYSTEM_INSTRUCTION',
-    'THUMBNAIL_USER_PROMPT',
-    'TITLE_DESCRIPTION_ANALYSIS_PROMPT',
-    'TITLE_DESC_SYSTEM_INSTRUCTION',
-    'TITLE_DESC_USER_PROMPT',
-    'MAX_DESCRIPTION_LENGTH',
-    'build_title_description_input',
+    "THUMBNAIL_ANALYSIS_PROMPT",
+    "THUMBNAIL_SYSTEM_INSTRUCTION",
+    "THUMBNAIL_USER_PROMPT",
+    "TITLE_DESCRIPTION_ANALYSIS_PROMPT",
+    "TITLE_DESC_SYSTEM_INSTRUCTION",
+    "TITLE_DESC_USER_PROMPT",
+    "MAX_DESCRIPTION_LENGTH",
+    "build_title_description_input",
 ]

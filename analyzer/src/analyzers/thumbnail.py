@@ -15,10 +15,11 @@ from ..config import config, logger
 class ThumbnailAnalyzer:
     """Analyzer for YouTube video thumbnails."""
 
-    ANALYSIS_TYPE = 'thumbnail'
+    ANALYSIS_TYPE = "thumbnail"
 
-    def analyze(self, channel_id: str, video_id: str,
-                thumbnail_path: str, force: bool = False) -> Optional[Dict[str, Any]]:
+    def analyze(
+        self, channel_id: str, video_id: str, thumbnail_path: str, force: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         Analyze a video thumbnail.
 
@@ -44,7 +45,8 @@ class ThumbnailAnalyzer:
 
             # Analyze with Gemini Vision (uses response_schema when available)
             result = analyze_image(
-                THUMBNAIL_ANALYSIS_PROMPT, image_data,
+                THUMBNAIL_ANALYSIS_PROMPT,
+                image_data,
                 analysis_type=self.ANALYSIS_TYPE,
             )
 
@@ -53,9 +55,9 @@ class ThumbnailAnalyzer:
                 return None
 
             # Add metadata
-            result['analyzedAt'] = datetime.utcnow().isoformat()
-            result['modelUsed'] = config.GEMINI_MODEL
-            result['analysisVersion'] = BATCH_ANALYSIS_VERSION
+            result["analyzedAt"] = datetime.utcnow().isoformat()
+            result["modelUsed"] = config.GEMINI_MODEL
+            result["analysisVersion"] = BATCH_ANALYSIS_VERSION
 
             # Save to Firestore
             save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
@@ -66,8 +68,9 @@ class ThumbnailAnalyzer:
             logger.error(f"Error analyzing thumbnail {video_id}: {e}")
             return None
 
-    def analyze_from_url(self, channel_id: str, video_id: str,
-                        thumbnail_url: str, force: bool = False) -> Optional[Dict[str, Any]]:
+    def analyze_from_url(
+        self, channel_id: str, video_id: str, thumbnail_url: str, force: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         Analyze a thumbnail from URL (for testing without storage).
 
@@ -92,7 +95,8 @@ class ThumbnailAnalyzer:
 
             # Analyze with Gemini Vision (uses response_schema when available)
             result = analyze_image(
-                THUMBNAIL_ANALYSIS_PROMPT, image_data,
+                THUMBNAIL_ANALYSIS_PROMPT,
+                image_data,
                 analysis_type=self.ANALYSIS_TYPE,
             )
 
@@ -101,9 +105,9 @@ class ThumbnailAnalyzer:
                 return None
 
             # Add metadata
-            result['analyzedAt'] = datetime.utcnow().isoformat()
-            result['modelUsed'] = config.GEMINI_MODEL
-            result['analysisVersion'] = BATCH_ANALYSIS_VERSION
+            result["analyzedAt"] = datetime.utcnow().isoformat()
+            result["modelUsed"] = config.GEMINI_MODEL
+            result["analysisVersion"] = BATCH_ANALYSIS_VERSION
 
             # Save to Firestore
             save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)

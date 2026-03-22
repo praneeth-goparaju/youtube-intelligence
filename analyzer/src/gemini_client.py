@@ -16,16 +16,19 @@ from shared.gemini_utils import parse_json_response
 
 class GeminiAPIError(Exception):
     """Custom exception for Gemini API errors."""
+
     pass
 
 
 class GeminiRateLimitError(GeminiAPIError):
     """Exception for rate limit errors."""
+
     pass
 
 
 class GeminiResponseError(GeminiAPIError):
     """Exception for invalid response errors."""
+
     pass
 
 
@@ -54,17 +57,17 @@ def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
                        for schema-aware model creation.
     """
     _ensure_configured()
-    cache_key = analysis_type or 'default'
+    cache_key = analysis_type or "default"
 
     if cache_key not in _models:
         model_kwargs = {
-            'model_name': config.GEMINI_MODEL,
+            "model_name": config.GEMINI_MODEL,
         }
         gen_config = {
-            'temperature': 0.1,
-            'top_p': 0.95,
-            'top_k': 40,
-            'max_output_tokens': 16384,
+            "temperature": 0.1,
+            "top_p": 0.95,
+            "top_k": 40,
+            "max_output_tokens": 16384,
         }
 
         # Try to use structured output for specific analysis types
@@ -72,15 +75,15 @@ def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
             try:
                 system_instruction, response_schema = _get_schema_config(analysis_type)
                 if system_instruction:
-                    model_kwargs['system_instruction'] = system_instruction
+                    model_kwargs["system_instruction"] = system_instruction
                 if response_schema:
-                    gen_config['response_mime_type'] = 'application/json'
-                    gen_config['response_schema'] = response_schema
+                    gen_config["response_mime_type"] = "application/json"
+                    gen_config["response_schema"] = response_schema
             except ImportError:
                 # Pydantic not available — fall back to default
                 pass
 
-        model_kwargs['generation_config'] = gen_config
+        model_kwargs["generation_config"] = gen_config
         _models[cache_key] = genai.GenerativeModel(**model_kwargs)
 
     return _models[cache_key]
@@ -101,9 +104,9 @@ def _get_schema_config(analysis_type: str):
         TitleDescriptionAnalysisSchema,
     )
 
-    if analysis_type == 'thumbnail':
+    if analysis_type == "thumbnail":
         return THUMBNAIL_SYSTEM_INSTRUCTION, ThumbnailAnalysisSchema
-    elif analysis_type == 'title_description':
+    elif analysis_type == "title_description":
         return TITLE_DESC_SYSTEM_INSTRUCTION, TitleDescriptionAnalysisSchema
     return None, None
 
@@ -134,12 +137,12 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
                 raise GeminiResponseError("Gemini returned None response")
 
             # Check for blocked responses
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                if hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
+            if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+                if hasattr(response.prompt_feedback, "block_reason") and response.prompt_feedback.block_reason:
                     raise GeminiResponseError(f"Response blocked: {response.prompt_feedback.block_reason}")
 
             # Validate response text exists
-            if not hasattr(response, 'text') or not response.text:
+            if not hasattr(response, "text") or not response.text:
                 raise GeminiResponseError("Gemini response has no text content")
 
             return parse_json_response(response.text)
@@ -154,7 +157,7 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
             logger.warning(f"Rate limit hit (attempt {attempt + 1}/{retries}): {e}")
             last_error = GeminiRateLimitError(str(e))
             if attempt < retries - 1:
-                wait_time = config.RETRY_DELAY * (2 ** attempt) * 2  # Longer wait for rate limits
+                wait_time = config.RETRY_DELAY * (2**attempt) * 2  # Longer wait for rate limits
                 logger.info(f"Waiting {wait_time}s before retry...")
                 time.sleep(wait_time)
 
@@ -176,7 +179,9 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
 
         except Exception as e:
             # Unexpected errors - log with full context
-            logger.error(f"Unexpected error during Gemini call (attempt {attempt + 1}/{retries}): {type(e).__name__}: {e}")
+            logger.error(
+                f"Unexpected error during Gemini call (attempt {attempt + 1}/{retries}): {type(e).__name__}: {e}"
+            )
             last_error = GeminiAPIError(f"Unexpected error: {type(e).__name__}: {e}")
             if attempt < retries - 1:
                 time.sleep(config.RETRY_DELAY * (attempt + 1))
@@ -184,8 +189,7 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
     raise last_error
 
 
-def analyze_text(prompt: str, text: str, retries: int = 3,
-                 analysis_type: Optional[str] = None) -> Dict[str, Any]:
+def analyze_text(prompt: str, text: str, retries: int = 3, analysis_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Analyze text using Gemini.
 
@@ -203,18 +207,17 @@ def analyze_text(prompt: str, text: str, retries: int = 3,
     # When using response_schema, use the concise user prompt
     if analysis_type:
         from .prompts import TITLE_DESC_USER_PROMPT
+
         full_prompt = f"{TITLE_DESC_USER_PROMPT}\n\nText to analyze:\n{text}"
     else:
         full_prompt = f"{prompt}\n\nText to analyze:\n{text}"
 
-    return _execute_with_retry(
-        lambda: model.generate_content(full_prompt),
-        retries
-    )
+    return _execute_with_retry(lambda: model.generate_content(full_prompt), retries)
 
 
-def analyze_image(prompt: str, image_data: Union[bytes, Image.Image], retries: int = 3,
-                  analysis_type: Optional[str] = None) -> Dict[str, Any]:
+def analyze_image(
+    prompt: str, image_data: Union[bytes, Image.Image], retries: int = 3, analysis_type: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Analyze an image using Gemini Vision.
 
@@ -243,14 +246,12 @@ def analyze_image(prompt: str, image_data: Union[bytes, Image.Image], retries: i
         # When using response_schema, use the concise user prompt
         if analysis_type:
             from .prompts import THUMBNAIL_USER_PROMPT
+
             effective_prompt = THUMBNAIL_USER_PROMPT
         else:
             effective_prompt = prompt
 
-        return _execute_with_retry(
-            lambda: model.generate_content([effective_prompt, image]),
-            retries
-        )
+        return _execute_with_retry(lambda: model.generate_content([effective_prompt, image]), retries)
     finally:
         # Clean up image resource if we created it
         if should_close and image is not None:
@@ -271,11 +272,11 @@ def test_connection() -> bool:
             logger.error("Gemini connection test failed: No response received")
             return False
 
-        if not hasattr(response, 'text') or not response.text:
+        if not hasattr(response, "text") or not response.text:
             logger.error("Gemini connection test failed: Response has no text")
             return False
 
-        return 'ok' in response.text.lower()
+        return "ok" in response.text.lower()
 
     except google_exceptions.GoogleAPIError as e:
         logger.error(f"Gemini connection test failed (API error): {e}")
