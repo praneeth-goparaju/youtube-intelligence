@@ -6,7 +6,7 @@ python-dotenv==1.2.1
 
 # Analyzer (Phase 2) - Gemini AI & Image Processing
 google-generativeai==0.8.6
-google-genai==1.47.0
+google-genai==1.68.0
 pydantic==2.12.5
 Pillow==11.3.0
 tqdm==4.67.1
