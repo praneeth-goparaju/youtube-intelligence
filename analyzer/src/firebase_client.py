@@ -170,6 +170,24 @@ def get_video(channel_id: str, video_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def get_channel_video_texts(channel_id: str) -> Dict[str, Dict[str, str]]:
+    """Fetch title and description for all videos in a channel.
+
+    Returns a dict keyed by video_id with {title, description} values.
+    Used by batch import to avoid N+1 individual video fetches.
+    """
+    db = get_db()
+    docs = db.collection("channels").document(channel_id).collection("videos").stream()
+    result = {}
+    for doc in docs:
+        data = doc.to_dict()
+        result[doc.id] = {
+            "title": data.get("title", ""),
+            "description": data.get("description", ""),
+        }
+    return result
+
+
 # ===== Analysis Operations =====
 
 

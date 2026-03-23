@@ -56,7 +56,11 @@ export async function checkRateLimit(
     return result;
   } catch (error) {
     // If Firestore fails, deny the request (fail-closed)
-    console.error('Rate limiter Firestore error (denying request):', error);
+    console.error('Rate limiter Firestore error (denying request):', {
+      hashedKey: docId.slice(0, 16),
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     return { allowed: false, remaining: 0 };
   }
 }

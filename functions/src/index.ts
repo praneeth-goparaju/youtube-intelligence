@@ -7,6 +7,7 @@
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineString } from 'firebase-functions/params';
+import { createHash } from 'crypto';
 import { RecommendationEngine } from './engine';
 import { checkRateLimit } from './rate-limiter';
 import { sanitizeInput, VALID_CONTENT_TYPES, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
@@ -43,10 +44,25 @@ function getAllowedOrigins(): string[] | boolean {
   const originsStr = allowedOriginsParam.value();
   if (!originsStr) {
     // If no origins configured, deny all cross-origin requests in production
-    // Return false to disable CORS entirely (same-origin only)
     return false;
   }
-  return originsStr.split(',').map((o) => o.trim()).filter((o) => o.length > 0);
+  const origins = originsStr.split(',').map((o) => o.trim()).filter((o) => o.length > 0);
+  const validated = origins.filter((origin) => {
+    if (origin === '*') {
+      console.warn('CORS: Wildcard origin "*" rejected. Configure specific origins.');
+      return false;
+    }
+    if (origin.startsWith('https://') || origin.startsWith('http://localhost')) {
+      return true;
+    }
+    console.warn(`CORS: Invalid origin "${origin}" rejected. Must start with https:// or http://localhost.`);
+    return false;
+  });
+  if (validated.length === 0) {
+    console.warn('CORS: No valid origins after filtering. Denying all cross-origin requests.');
+    return false;
+  }
+  return validated;
 }
 
 /**
@@ -62,12 +78,25 @@ function validateApiKey(authHeader: string | undefined): boolean {
   }
 
   if (!authHeader) {
+    console.warn('Auth failure: no authorization header provided');
     return false;
   }
 
-  // Support both "Bearer <key>" and raw key formats
-  const key = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-  return key === configuredKey;
+  const key = extractBearerKey(authHeader);
+  if (key !== configuredKey) {
+    const keyHash = createHash('sha256').update(key).digest('hex').slice(0, 8);
+    console.warn(`Auth failure: invalid key (hash prefix: ${keyHash})`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Extract the raw API key from an Authorization header.
+ */
+function extractBearerKey(authHeader: string | undefined): string {
+  if (!authHeader) return '';
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
 }
 
 function isValidContentType(type: string): type is ContentType {
@@ -112,7 +141,7 @@ export const recommend = onRequest(
     }
 
     // Check rate limit (use IP or API key as identifier, distributed via Firestore)
-    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
     const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
 
@@ -273,7 +302,7 @@ export const ideas = onRequest(
       return;
     }
 
-    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
     const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
 
@@ -384,7 +413,7 @@ export const generationsSave = onRequest(
       return;
     }
 
-    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
     const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
 
@@ -445,7 +474,7 @@ export const generationsList = onRequest(
       return;
     }
 
-    const rateLimitKey = req.headers.authorization || req.ip || 'anonymous';
+    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
     const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
 
