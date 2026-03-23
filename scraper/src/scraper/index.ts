@@ -628,44 +628,54 @@ export async function refreshChannel(
       return { success: true, channelId, videosRefreshed: 0 };
     }
 
-    // Step 5: Fetch current stats from YouTube API in batches of 50
+    // Step 5: Fetch current stats from YouTube API in batches of 50,
+    // running up to 5 concurrent requests per wave to speed up refresh
+    const CONCURRENT_BATCHES = 5;
     const videoChunks = chunk(allVideoIds, config.scraper.batchSize);
+    const waves = chunk(videoChunks, CONCURRENT_BATCHES);
     let videosRefreshed = 0;
 
-    for (let i = 0; i < videoChunks.length; i++) {
+    for (const wave of waves) {
       if (isQuotaLow()) {
         logger.warn('Quota running low, stopping refresh...');
         break;
       }
 
-      const batchIds = videoChunks[i];
-      const videoData = await getVideoDetails(batchIds);
+      const waveResults = await Promise.allSettled(
+        wave.map((batchIds) => getVideoDetails(batchIds))
+      );
 
-      // Build stats-only updates
-      const updates = videoData.map((data) => {
-        const viewCount = parseInt(data.statistics.viewCount, 10) || 0;
-        const likeCount = parseInt(data.statistics.likeCount, 10) || 0;
-        const commentCount = parseInt(data.statistics.commentCount, 10) || 0;
-        const publishedAt = new Date(data.snippet.publishedAt);
-        const tags = data.snippet.tags || [];
+      for (const result of waveResults) {
+        if (result.status === 'rejected') {
+          logger.warn(`Batch fetch failed: ${result.reason}`);
+          continue;
+        }
 
-        const calculated = calculateVideoMetrics(
-          { publishedAt, viewCount, likeCount, commentCount, tags },
-          subscriberCount
-        );
+        const updates = result.value.map((data) => {
+          const viewCount = parseInt(data.statistics.viewCount, 10) || 0;
+          const likeCount = parseInt(data.statistics.likeCount, 10) || 0;
+          const commentCount = parseInt(data.statistics.commentCount, 10) || 0;
+          const publishedAt = new Date(data.snippet.publishedAt);
+          const tags = data.snippet.tags || [];
 
-        return {
-          videoId: data.id,
-          viewCount,
-          likeCount,
-          commentCount,
-          calculated,
-          statsRefreshedAt: Timestamp.now(),
-        };
-      });
+          const calculated = calculateVideoMetrics(
+            { publishedAt, viewCount, likeCount, commentCount, tags },
+            subscriberCount
+          );
 
-      await updateVideoStatsBatch(channelId, updates);
-      videosRefreshed += updates.length;
+          return {
+            videoId: data.id,
+            viewCount,
+            likeCount,
+            commentCount,
+            calculated,
+            statsRefreshedAt: Timestamp.now(),
+          };
+        });
+
+        await updateVideoStatsBatch(channelId, updates);
+        videosRefreshed += updates.length;
+      }
 
       logger.info(`Refreshed ${videosRefreshed}/${allVideoIds.length} videos`);
       await delay(config.scraper.apiDelayMs);
