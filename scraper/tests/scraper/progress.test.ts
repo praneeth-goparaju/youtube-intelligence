@@ -1,23 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// Mock firebase-admin/firestore before any imports that use it
+// Mock the Firebase client module to prevent config.ts from loading env vars
+vi.mock('../../src/firebase/client.js', () => ({
+  getDb: vi.fn(),
+}));
+
+// Mock Timestamp used by createInitialProgress
 vi.mock('firebase-admin/firestore', () => ({
   Timestamp: {
     now: () => ({ seconds: 1234567890, nanoseconds: 0 }),
   },
-  FieldValue: {
-    serverTimestamp: () => ({ seconds: 0, nanoseconds: 0 }),
-  },
-}));
-
-vi.mock('firebase-admin', () => ({
-  default: {
-    initializeApp: vi.fn(),
-    credential: { cert: vi.fn() },
-    firestore: vi.fn(() => ({})),
-  },
-  initializeApp: vi.fn(),
-  credential: { cert: vi.fn() },
 }));
 
 import { createInitialProgress } from '../../src/firebase/firestore.js';
