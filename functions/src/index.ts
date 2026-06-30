@@ -8,8 +8,7 @@ import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineString } from 'firebase-functions/params';
 import { RecommendationEngine } from './engine';
-import { checkRateLimit } from './rate-limiter';
-import { withHttpGuards, parseAllowedOrigins, type RateLimitConfig } from './middleware';
+import { withHttpGuards, requireCallableAuth, parseAllowedOrigins, type RateLimitConfig } from './middleware';
 import { sanitizeInput, VALID_CONTENT_TYPES, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
 import { saveGeneration as saveGen, listGenerations as listGens } from './firebase';
 import type { RecommendationRequest, RecommendationResponse, ContentType, IdeaGenerationResponse } from './types';
@@ -134,26 +133,9 @@ export const recommend = onRequest(
  */
 export const getRecommendation = onCall<RecommendationRequest, Promise<RecommendationResponse>>(
   async (request) => {
-    // Require authentication
-    if (!request.auth) {
-      throw new HttpsError(
-        'unauthenticated',
-        'Authentication required. Please sign in to use this service.'
-      );
-    }
+    await requireCallableAuth(request, RATE_LIMIT);
 
     const { topic, type, angle, audience } = request.data;
-
-    // Check rate limit using auth UID (distributed via Firestore)
-    const rateLimitKey = request.auth.uid;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-
-    if (!rateLimit.allowed) {
-      throw new HttpsError(
-        'resource-exhausted',
-        'Rate limit exceeded. Please try again later.'
-      );
-    }
 
     // Sanitize inputs to prevent prompt injection
     const sanitizedTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
@@ -243,22 +225,7 @@ export const ideas = onRequest(
  */
 export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse>>(
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError(
-        'unauthenticated',
-        'Authentication required. Please sign in to use this service.'
-      );
-    }
-
-    const rateLimitKey = request.auth.uid;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-
-    if (!rateLimit.allowed) {
-      throw new HttpsError(
-        'resource-exhausted',
-        'Rate limit exceeded. Please try again later.'
-      );
-    }
+    await requireCallableAuth(request, RATE_LIMIT);
 
     const { type } = request.data;
 

@@ -10,7 +10,8 @@
  */
 
 import { createHash, timingSafeEqual } from 'crypto';
-import type { Request } from 'firebase-functions/v2/https';
+import { HttpsError } from 'firebase-functions/v2/https';
+import type { Request, CallableRequest } from 'firebase-functions/v2/https';
 import type { Response } from 'express';
 import { checkRateLimit } from './rate-limiter';
 
@@ -151,4 +152,29 @@ export function withHttpGuards(
 
     await handler(req, res);
   };
+}
+
+/**
+ * Enforce authentication and rate limiting for a callable function.
+ *
+ * The callable equivalent of withHttpGuards: callers must be signed in, and
+ * each authenticated UID is rate limited via the same distributed limiter.
+ * Throws HttpsError('unauthenticated') or HttpsError('resource-exhausted') on
+ * failure; returns the authenticated UID on success.
+ */
+export async function requireCallableAuth(
+  request: CallableRequest<unknown>,
+  rateLimit: RateLimitConfig
+): Promise<string> {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Authentication required. Please sign in to use this service.');
+  }
+
+  const uid = request.auth.uid;
+  const result = await checkRateLimit(uid, rateLimit.max, rateLimit.windowMs);
+  if (!result.allowed) {
+    throw new HttpsError('resource-exhausted', 'Rate limit exceeded. Please try again later.');
+  }
+
+  return uid;
 }

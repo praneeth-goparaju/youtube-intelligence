@@ -4,6 +4,7 @@ import {
   validateApiKey,
   parseAllowedOrigins,
   withHttpGuards,
+  requireCallableAuth,
 } from '../src/middleware';
 
 // Mock the Firestore-backed rate limiter so guard tests run without firebase-admin.
@@ -231,5 +232,34 @@ describe('withHttpGuards', () => {
     expect(handler).toHaveBeenCalledTimes(1);
     expect(res.statusCode).toBe(200);
     expect(res.headers['X-RateLimit-Remaining']).toBe('99');
+  });
+});
+
+// ============================================
+// requireCallableAuth
+// ============================================
+
+const callableRateLimit = { max: 100, windowMs: 1000 };
+
+describe('requireCallableAuth', () => {
+  it('throws unauthenticated when the request has no auth context', async () => {
+    await expect(
+      requireCallableAuth({ auth: undefined } as never, callableRateLimit)
+    ).rejects.toMatchObject({ code: 'unauthenticated' });
+    expect(mockCheckRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('throws resource-exhausted when the UID is rate limited', async () => {
+    mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0 });
+    await expect(
+      requireCallableAuth({ auth: { uid: 'user-1' } } as never, callableRateLimit)
+    ).rejects.toMatchObject({ code: 'resource-exhausted' });
+  });
+
+  it('returns the UID when authenticated and within the limit', async () => {
+    mockCheckRateLimit.mockResolvedValue({ allowed: true, remaining: 99 });
+    const uid = await requireCallableAuth({ auth: { uid: 'user-1' } } as never, callableRateLimit);
+    expect(uid).toBe('user-1');
+    expect(mockCheckRateLimit).toHaveBeenCalledWith('user-1', 100, 1000);
   });
 });
