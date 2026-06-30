@@ -1,11 +1,16 @@
 """Firebase client for insights module."""
 
+import logging
 from typing import Optional, Dict, Any, List
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import firestore
 
 from shared.constants import ANALYSIS_TYPE_THUMBNAIL, ANALYSIS_TYPE_TITLE_DESCRIPTION
+from shared.firebase_utils import get_firebase_credentials
 from .config import config
+
+
+logger = logging.getLogger(__name__)
 
 # Legacy fallback type for channels analyzed before title_description was introduced
 _LEGACY_TITLE_TYPE = "title"
@@ -25,25 +30,17 @@ def initialize_firebase() -> None:
     config.initialize()
 
     try:
-        cred = credentials.Certificate(
-            {
-                "type": "service_account",
-                "project_id": config.FIREBASE_PROJECT_ID,
-                "client_email": config.FIREBASE_CLIENT_EMAIL,
-                "private_key": config.FIREBASE_PRIVATE_KEY,
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }
-        )
+        cred = get_firebase_credentials(config)
 
         _app = firebase_admin.initialize_app(cred, {"storageBucket": config.FIREBASE_STORAGE_BUCKET})
 
         _db = firestore.client()
-    except ValueError as e:
+    except ValueError:
         # Firebase already initialized in another module
         _app = firebase_admin.get_app()
         _db = firestore.client()
     except Exception as e:
-        print(f"Error initializing Firebase: {e}")
+        logger.error(f"Error initializing Firebase: {e}")
         raise RuntimeError(f"Failed to initialize Firebase: {e}")
 
 
@@ -232,5 +229,5 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
         db = get_db()
         db.collection("insights").document(insight_type).set(data)
     except Exception as e:
-        print(f"Error saving insights for {insight_type}: {e}")
+        logger.error(f"Error saving insights for {insight_type}: {e}")
         raise

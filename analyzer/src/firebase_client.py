@@ -2,13 +2,14 @@
 
 from typing import Optional, Dict, Any, List
 import firebase_admin
-from firebase_admin import credentials, firestore, storage
+from firebase_admin import firestore, storage
 from google.cloud.firestore_v1 import FieldFilter
 
 from .config import config
 
 # shared module path is set up by config.py (imported above)
 from shared.constants import COLLECTION_BATCH_JOBS
+from shared.firebase_utils import get_firebase_credentials
 
 
 _app: Optional[firebase_admin.App] = None
@@ -23,15 +24,7 @@ def initialize_firebase() -> None:
     if _app is not None:
         return
 
-    cred = credentials.Certificate(
-        {
-            "type": "service_account",
-            "project_id": config.FIREBASE_PROJECT_ID,
-            "client_email": config.FIREBASE_CLIENT_EMAIL,
-            "private_key": config.FIREBASE_PRIVATE_KEY,
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    )
+    cred = get_firebase_credentials(config)
 
     _app = firebase_admin.initialize_app(cred, {"storageBucket": config.FIREBASE_STORAGE_BUCKET})
 
