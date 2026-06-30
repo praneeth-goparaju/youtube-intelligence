@@ -28,7 +28,7 @@ from .client import (
     _state_str,
 )
 
-from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
+from ..analysis_metadata import stamp_analysis_metadata
 
 
 def import_batch_results(
@@ -308,10 +308,8 @@ def _import_single_result(
             analysis_data = deep_merge(analysis_data, local_features)
             merged_local = True
 
-    # Add metadata
-    analysis_data["analyzedAt"] = datetime.utcnow().isoformat()
-    analysis_data["modelUsed"] = GEMINI_MODEL
-    analysis_data["analysisVersion"] = BATCH_ANALYSIS_VERSION
+    # Add provenance metadata (shared with the sync analyzers) plus batch marker
+    stamp_analysis_metadata(analysis_data)
     analysis_data["batchMode"] = True
 
     # Save to Firestore

@@ -1,15 +1,14 @@
 """Thumbnail analysis using Gemini Vision."""
 
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 import requests
 
 from ..gemini_client import analyze_image
 from ..firebase_client import download_thumbnail, save_analysis, has_analysis
 from ..prompts import THUMBNAIL_ANALYSIS_PROMPT
-from shared.constants import BATCH_ANALYSIS_VERSION
-from ..config import config, logger
+from ..analysis_metadata import stamp_analysis_metadata
+from ..config import logger
 
 
 class ThumbnailAnalyzer:
@@ -54,10 +53,8 @@ class ThumbnailAnalyzer:
                 logger.warning(f"Empty result from Gemini for thumbnail {video_id}")
                 return None
 
-            # Add metadata
-            result["analyzedAt"] = datetime.utcnow().isoformat()
-            result["modelUsed"] = config.GEMINI_MODEL
-            result["analysisVersion"] = BATCH_ANALYSIS_VERSION
+            # Add provenance metadata
+            stamp_analysis_metadata(result)
 
             # Save to Firestore
             save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
@@ -104,10 +101,8 @@ class ThumbnailAnalyzer:
                 logger.warning(f"Empty result from Gemini for thumbnail URL {video_id}")
                 return None
 
-            # Add metadata
-            result["analyzedAt"] = datetime.utcnow().isoformat()
-            result["modelUsed"] = config.GEMINI_MODEL
-            result["analysisVersion"] = BATCH_ANALYSIS_VERSION
+            # Add provenance metadata
+            stamp_analysis_metadata(result)
 
             # Save to Firestore
             save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)

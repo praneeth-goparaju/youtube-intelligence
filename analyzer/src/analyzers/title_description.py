@@ -7,12 +7,12 @@ Merges title and description into a single API call for:
 """
 
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 from ..gemini_client import analyze_text
 from ..firebase_client import save_analysis, has_analysis
 from ..prompts import TITLE_DESCRIPTION_ANALYSIS_PROMPT, build_title_description_input
-from ..config import config, logger
+from ..analysis_metadata import stamp_analysis_metadata
+from ..config import logger
 from .local_text_features import extract_local_features, deep_merge
 
 
@@ -63,10 +63,8 @@ class TitleDescriptionAnalyzer:
             local_result = extract_local_features(title, description)
             result = deep_merge(gemini_result, local_result)
 
-            # Add metadata
-            result["analyzedAt"] = datetime.utcnow().isoformat()
-            result["modelUsed"] = config.GEMINI_MODEL
-            result["analysisVersion"] = "2.0"
+            # Add provenance metadata (single-sourced version, no hardcoded string)
+            stamp_analysis_metadata(result)
             result["rawTitle"] = title
             result["hasDescription"] = bool(description and description.strip())
 
