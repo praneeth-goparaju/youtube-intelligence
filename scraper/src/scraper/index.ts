@@ -8,7 +8,7 @@ import { initializeFirebase } from '../firebase/client.js';
 import { saveChannel, saveVideosBatch, saveProgress, getProgress, getExistingVideoIds, getAllVideoIdsForChannel, updateVideoStatsBatch, saveUnresolvedChannel, getUnresolvedChannel } from '../firebase/firestore.js';
 import { resolveChannelUrl } from '../youtube/resolver.js';
 import { getChannelDetails, transformChannelData, getUploadsPlaylistId } from '../youtube/channels.js';
-import { getPlaylistVideos, getVideoDetails, transformVideoData, calculateVideoMetrics } from '../youtube/videos.js';
+import { getPlaylistVideos, getVideoDetails, calculateVideoMetrics } from '../youtube/videos.js';
 import { getQuotaUsed, getQuotaRemaining, isQuotaLow, setQuotaUsed, setIgnoreQuota } from '../youtube/client.js';
 import {
   getOrCreateProgress,
@@ -22,6 +22,7 @@ import {
   loadSavedQuota,
 } from './progress.js';
 import { processThumbnailBatch, processChannelThumbnail } from './thumbnail.js';
+import { transformAndFilterVideos, applyThumbnailPaths } from './video-processing.js';
 import { ChannelsConfig, ChannelInput, Channel, Video, ScrapeProgress, UnresolvedChannel } from '../types/index.js';
 
 /**
@@ -238,21 +239,7 @@ export async function processChannel(
         logger.warn(`${missing} video(s) in batch were not returned (possibly deleted/private)`);
       }
 
-      // Transform and filter
-      const videos: Video[] = [];
-      for (const data of videoData) {
-        const video = transformVideoData(data, channelId, channel.subscriberCount);
-
-        // Filter shorts if needed
-        if (!settings.includeShorts && video.isShort) {
-          continue;
-        }
-
-        videos.push({
-          ...video,
-          thumbnailStoragePath: '', // Will be updated later
-        });
-      }
+      const videos = transformAndFilterVideos(videoData, channelId, channel.subscriberCount, settings.includeShorts);
 
       allVideos.push(...videos);
       videosProcessed += videos.length;
@@ -293,16 +280,7 @@ export async function processChannel(
     await updateProgressThumbnails(channelId, thumbnailsDownloaded);
 
     // Update videos with thumbnail paths
-    const thumbnailPathMap = new Map(
-      thumbnailResults.filter((r) => r.success).map((r) => [r.videoId, r.storagePath!])
-    );
-
-    for (const video of videosForThumbnails) {
-      const path = thumbnailPathMap.get(video.videoId);
-      if (path) {
-        video.thumbnailStoragePath = path;
-      }
-    }
+    applyThumbnailPaths(videosForThumbnails, thumbnailResults);
 
     // Save updated videos with thumbnail paths
     await saveVideosBatch(channelId, videosForThumbnails);
@@ -477,19 +455,7 @@ export async function updateChannel(
         logger.warn(`${missing} video(s) not returned (possibly deleted/private)`);
       }
 
-      const videos: Video[] = [];
-      for (const data of videoData) {
-        const video = transformVideoData(data, channelId, channel.subscriberCount);
-
-        if (!settings.includeShorts && video.isShort) {
-          continue;
-        }
-
-        videos.push({
-          ...video,
-          thumbnailStoragePath: '',
-        });
-      }
+      const videos = transformAndFilterVideos(videoData, channelId, channel.subscriberCount, settings.includeShorts);
 
       allNewVideos.push(...videos);
       await saveVideosBatch(channelId, videos);
@@ -524,16 +490,7 @@ export async function updateChannel(
         thumbnailsDownloaded = thumbnailResults.filter((r) => r.success).length;
 
         // Update videos with thumbnail paths
-        const thumbnailPathMap = new Map(
-          thumbnailResults.filter((r) => r.success).map((r) => [r.videoId, r.storagePath!])
-        );
-
-        for (const video of newVideosForThumbnails) {
-          const path = thumbnailPathMap.get(video.videoId);
-          if (path) {
-            video.thumbnailStoragePath = path;
-          }
-        }
+        applyThumbnailPaths(newVideosForThumbnails, thumbnailResults);
 
         await saveVideosBatch(channelId, newVideosForThumbnails);
       }

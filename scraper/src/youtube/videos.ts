@@ -61,7 +61,7 @@ export async function getPlaylistVideos(
   });
 }
 
-interface YouTubeVideoData {
+export interface YouTubeVideoData {
   id: string;
   snippet: {
     title: string;
