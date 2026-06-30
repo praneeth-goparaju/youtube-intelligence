@@ -7,9 +7,9 @@
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineString } from 'firebase-functions/params';
-import { createHash } from 'crypto';
 import { RecommendationEngine } from './engine';
 import { checkRateLimit } from './rate-limiter';
+import { withHttpGuards, parseAllowedOrigins, type RateLimitConfig } from './middleware';
 import { sanitizeInput, VALID_CONTENT_TYPES, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
 import { saveGeneration as saveGen, listGenerations as listGens } from './firebase';
 import type { RecommendationRequest, RecommendationResponse, ContentType, IdeaGenerationResponse } from './types';
@@ -36,67 +36,16 @@ const allowedOriginsParam = defineString('ALLOWED_ORIGINS', {
 // Rate limiting configuration (distributed via Firestore)
 const RATE_LIMIT_MAX = 100; // requests per window
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT: RateLimitConfig = { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS };
+
+/** Read the configured API key at request time (Firebase params resolve at runtime). */
+const getApiKey = (): string => apiKeyParam.value();
 
 /**
- * Get allowed origins for CORS
+ * Get allowed origins for CORS from the configured ALLOWED_ORIGINS param.
  */
 function getAllowedOrigins(): string[] | boolean {
-  const originsStr = allowedOriginsParam.value();
-  if (!originsStr) {
-    // If no origins configured, deny all cross-origin requests in production
-    return false;
-  }
-  const origins = originsStr.split(',').map((o) => o.trim()).filter((o) => o.length > 0);
-  const validated = origins.filter((origin) => {
-    if (origin === '*') {
-      console.warn('CORS: Wildcard origin "*" rejected. Configure specific origins.');
-      return false;
-    }
-    if (origin.startsWith('https://') || origin.startsWith('http://localhost')) {
-      return true;
-    }
-    console.warn(`CORS: Invalid origin "${origin}" rejected. Must start with https:// or http://localhost.`);
-    return false;
-  });
-  if (validated.length === 0) {
-    console.warn('CORS: No valid origins after filtering. Denying all cross-origin requests.');
-    return false;
-  }
-  return validated;
-}
-
-/**
- * Validate API key from request header
- */
-function validateApiKey(authHeader: string | undefined): boolean {
-  const configuredKey = apiKeyParam.value();
-
-  // Reject all requests if API key is not configured
-  if (!configuredKey) {
-    console.error('RECOMMEND_API_KEY not configured. All API requests will be rejected.');
-    return false;
-  }
-
-  if (!authHeader) {
-    console.warn('Auth failure: no authorization header provided');
-    return false;
-  }
-
-  const key = extractBearerKey(authHeader);
-  if (key !== configuredKey) {
-    const keyHash = createHash('sha256').update(key).digest('hex').slice(0, 8);
-    console.warn(`Auth failure: invalid key (hash prefix: ${keyHash})`);
-    return false;
-  }
-  return true;
-}
-
-/**
- * Extract the raw API key from an Authorization header.
- */
-function extractBearerKey(authHeader: string | undefined): string {
-  if (!authHeader) return '';
-  return authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  return parseAllowedOrigins(allowedOriginsParam.value());
 }
 
 function isValidContentType(type: string): type is ContentType {
@@ -124,35 +73,7 @@ export const recommend = onRequest(
   {
     cors: getAllowedOrigins(),  // Restricted CORS - configure ALLOWED_ORIGINS
   },
-  async (req, res) => {
-    // Only allow POST requests
-    if (req.method !== 'POST') {
-      res.status(405).json({ error: 'Method not allowed. Use POST.' });
-      return;
-    }
-
-    // Validate API key
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
-      return;
-    }
-
-    // Check rate limit (use IP or API key as identifier, distributed via Firestore)
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
-
+  withHttpGuards({ method: 'POST', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
       // Parse and validate request
       const { topic, type, angle, audience } = req.body as Partial<RecommendationRequest>;
@@ -195,7 +116,7 @@ export const recommend = onRequest(
         message: 'Failed to generate recommendation',  // Don't leak internal error details
       });
     }
-  }
+  })
 );
 
 // ============================================
@@ -288,32 +209,7 @@ export const ideas = onRequest(
   {
     cors: getAllowedOrigins(),
   },
-  async (req, res) => {
-    if (req.method !== 'POST') {
-      res.status(405).json({ error: 'Method not allowed. Use POST.' });
-      return;
-    }
-
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
-      return;
-    }
-
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
-
+  withHttpGuards({ method: 'POST', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
       const { type } = req.body as { type?: string };
 
@@ -335,7 +231,7 @@ export const ideas = onRequest(
         message: 'Failed to generate ideas',
       });
     }
-  }
+  })
 );
 
 // ============================================
@@ -399,32 +295,7 @@ export const generationsSave = onRequest(
   {
     cors: getAllowedOrigins(),
   },
-  async (req, res) => {
-    if (req.method !== 'POST') {
-      res.status(405).json({ error: 'Method not allowed. Use POST.' });
-      return;
-    }
-
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
-      return;
-    }
-
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
-
+  withHttpGuards({ method: 'POST', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
       const { type, request, response } = req.body as {
         type?: string;
@@ -448,7 +319,7 @@ export const generationsSave = onRequest(
       console.error('Save generation error:', error);
       res.status(500).json({ error: 'Failed to save generation' });
     }
-  }
+  })
 );
 
 /**
@@ -460,32 +331,7 @@ export const generationsList = onRequest(
   {
     cors: getAllowedOrigins(),
   },
-  async (req, res) => {
-    if (req.method !== 'GET') {
-      res.status(405).json({ error: 'Method not allowed. Use GET.' });
-      return;
-    }
-
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
-      return;
-    }
-
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
-
+  withHttpGuards({ method: 'GET', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
       const typeParam = req.query.type as string | undefined;
       let type: 'ideas' | 'recommendation' | undefined;
@@ -499,7 +345,7 @@ export const generationsList = onRequest(
       console.error('List generations error:', error);
       res.status(500).json({ error: 'Failed to list generations' });
     }
-  }
+  })
 );
 
 // ============================================
