@@ -19,6 +19,8 @@ Four-phase system with separate technology stacks:
 
 **Shared code**: `shared/` Python package provides base config classes (`BaseFirebaseConfig`, `BaseGeminiConfig`), env loading utilities, Firestore collection/analysis type constants, and Gemini model config. Used by both analyzer and insights phases.
 
+**Recommender bridge**: `insights/src/recommender_bridge.py` hands insight output to the recommender.
+
 ## Project Structure
 
 ```
@@ -38,7 +40,7 @@ functions/              # Phase 4 - TypeScript (Firebase Functions)
 
 ```bash
 # Python dependencies (analyzer + insights)
-pip3 install -r requirements.txt
+pip install -r requirements.txt
 
 # TypeScript dependencies
 cd scraper && npm install
@@ -68,37 +70,40 @@ npx tsx scripts/migrate-unresolved.ts      # Retry unresolved channel URLs
 cd analyzer
 
 # Sync mode (default — per-video API calls)
-python3 -m src.main --type thumbnail                                 # Thumbnail vision analysis only
-python3 -m src.main --type title_description                         # Combined title+description text analysis only
-python3 -m src.main --type title_description --channel CHANNEL_ID    # Specific channel
-python3 -m src.main --limit 50                                       # Limit videos per channel
-python3 -m src.main --validate                                       # Test connections only
+python -m src.main --type thumbnail                                 # Thumbnail vision analysis only
+python -m src.main --type title_description                         # Combined title+description text analysis only
+python -m src.main --type title_description --channel CHANNEL_ID    # Specific channel
+python -m src.main --limit 50                                       # Limit videos per channel
+python -m src.main --validate                                       # Test connections only
 
 # Batch mode (Gemini Batch API — 50% cost savings, works on all tiers)
-python3 -m src.main --mode batch --type thumbnail                              # Full: prepare → submit → poll → import
-python3 -m src.main --mode batch --type all                                    # Both analysis types
-python3 -m src.main --mode batch --type title_description                      # Title+desc only (auto-picks all channels)
-python3 -m src.main --mode batch --phase prepare --type thumbnail              # Only build JSONL file
-python3 -m src.main --mode batch --phase submit --type thumbnail               # Submit prepared JSONL
-python3 -m src.main --mode batch --phase poll --type thumbnail                 # Poll running job until done
-python3 -m src.main --mode batch --phase import --type thumbnail               # Import completed results to Firestore
-python3 -m src.main --mode batch --phase status                                # Show all batch job statuses
-python3 -m src.main --mode batch --channel UCxxx --type thumbnail              # Single channel
-python3 -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch
-python3 -m src.main --mode batch --type thumbnail --loop                           # Loop until all videos analyzed
-python3 -m src.main --mode batch --phase poll --job-name JOB_NAME                  # Poll specific job
-python3 -m src.main --mode batch --phase poll --poll-interval 120                  # Custom poll interval (seconds)
+python -m src.main --mode batch --type thumbnail                              # Full: prepare → submit → poll → import
+python -m src.main --mode batch --type all                                    # Both analysis types
+python -m src.main --mode batch --type title_description                      # Title+desc only (auto-picks all channels)
+python -m src.main --mode batch --phase prepare --type thumbnail              # Only build JSONL file
+python -m src.main --mode batch --phase submit --type thumbnail               # Submit prepared JSONL
+python -m src.main --mode batch --phase poll --type thumbnail                 # Poll running job until done
+python -m src.main --mode batch --phase import --type thumbnail               # Import completed results to Firestore
+python -m src.main --mode batch --phase status                                # Show all batch job statuses
+python -m src.main --mode batch --channel UCxxx --type thumbnail              # Single channel
+python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch
+python -m src.main --mode batch --type thumbnail --loop                           # Loop until all videos analyzed
+python -m src.main --mode batch --phase poll --job-name JOB_NAME                  # Poll specific job
+python -m src.main --mode batch --phase poll --poll-interval 120                  # Custom poll interval (seconds)
 
-python3 -m pytest tests/                                                       # Run tests
+python -m pytest tests/                                                       # Run tests
 ```
 
 ### Insights (Phase 3)
 ```bash
 cd insights
-python3 -m src.main                    # Generate all insights (profiles + gaps)
-python3 -m src.main --type profiles    # Per-content-type profiles only
-python3 -m src.main --type gaps        # Content gap analysis only
-python3 -m pytest tests/
+python -m src.main                    # Generate all insights (profiles + gaps + bridge)
+python -m src.main --type profiles    # Per-content-type profiles only
+python -m src.main --type gaps         # Content gap analysis only
+python -m src.main --type bridge       # Recommender bridge documents only
+python -m src.main --channel UCxxx     # Single channel (dry run — no Firestore writes)
+python -m src.main --dry-run           # Skip Firestore writes, local files only
+python -m pytest tests/
 ```
 
 ### Recommender (Phase 4)
@@ -124,6 +129,10 @@ curl -X POST http://localhost:5001/PROJECT/us-central1/recommend \
 # POST /generations-save   - Save a generation result
 # GET  /generations-list   - List saved generations
 # GET  /health             - Health check
+
+# Callable functions (Firebase SDK httpsCallable, functions/src/index.ts)
+# getRecommendation        - Generate a recommendation (auth required)
+# getIdeas                 - Generate data-backed video ideas (auth required)
 
 # Deploy to Firebase
 npm run deploy
@@ -167,9 +176,24 @@ API Authentication:
 ## Testing
 
 - **Scraper**: Vitest — `cd scraper && npm test` (tests in `scraper/tests/`)
-- **Analyzer**: pytest — `cd analyzer && python3 -m pytest tests/` (fixtures in `conftest.py`)
-- **Insights**: pytest — `cd insights && python3 -m pytest tests/` (fixtures in `conftest.py`)
-- No linting/formatting tools are configured in this project
+- **Analyzer**: pytest — `cd analyzer && python -m pytest tests/` (fixtures in `conftest.py`)
+- **Insights**: pytest — `cd insights && python -m pytest tests/` (fixtures in `conftest.py`)
+
+## Lint & typecheck (CI-enforced)
+
+- Python: `ruff check analyzer/ insights/ shared/` and
+  `ruff format --check analyzer/ insights/ shared/` (config in
+  `pyproject.toml`: line-length 120, py311).
+- TypeScript: `npx tsc --noEmit` in `scraper/` and `functions/`.
+
+## Model routing
+
+- **opus** — Gemini prompt & schema engineering (`analyzer/src/prompts/`,
+  `batch_api/schemas.py` — response_schema budget ~13.5k chars),
+  batch-pipeline debugging (prepare→submit→poll→import), statistics work in
+  `insights/`.
+- **sonnet** — scraper features (TypeScript), CI fixes, tests, docs,
+  dependency maintenance.
 
 ## Firebase Collections
 
