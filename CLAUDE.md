@@ -17,7 +17,7 @@ Four-phase system with separate technology stacks:
 
 **Data Flow**: Scraper → Firestore → Analyzer → Firestore → Insights → Firestore → Recommender
 
-**Shared code**: `shared/` Python package provides base config classes (`BaseFirebaseConfig`, `BaseGeminiConfig`), env loading utilities, Firestore collection/analysis type constants, and Gemini model config. Used by both analyzer and insights phases.
+**Shared code**: `shared/` Python package provides env loading utilities, Firestore collection/analysis type constants, and Gemini model config. Used by both analyzer and insights phases.
 
 **Recommender bridge**: `insights/src/recommender_bridge.py` hands insight output to the recommender.
 
@@ -27,7 +27,7 @@ Four-phase system with separate technology stacks:
 config/channels.json    # Input channel list (URL, category, priority)
 data/batch/             # Batch mode JSONL request/result files (gitignored)
 data/channels-review.csv.example
-shared/                 # Python shared utilities (config, constants, firebase_utils, gemini_utils)
+shared/                 # Python shared utilities (config, constants, gemini_utils)
 scraper/                # Phase 1 - TypeScript
 analyzer/               # Phase 2 - Python (src/, tests/, scripts/)
 insights/               # Phase 3 - Python (src/, tests/)
@@ -86,7 +86,7 @@ python -m src.main --mode batch --phase poll --type thumbnail                 # 
 python -m src.main --mode batch --phase import --type thumbnail               # Import completed results to Firestore
 python -m src.main --mode batch --phase status                                # Show all batch job statuses
 python -m src.main --mode batch --channel UCxxx --type thumbnail              # Single channel
-python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch
+python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch (default: 680)
 python -m src.main --mode batch --type thumbnail --loop                           # Loop until all videos analyzed
 python -m src.main --mode batch --phase poll --job-name JOB_NAME                  # Poll specific job
 python -m src.main --mode batch --phase poll --poll-interval 120                  # Custom poll interval (seconds)
@@ -151,13 +151,18 @@ For Firebase Functions deployment, set these secrets:
 ```bash
 firebase functions:secrets:set GOOGLE_API_KEY        # Required: Gemini API key
 firebase functions:secrets:set RECOMMEND_API_KEY     # Required: API key for authentication
-firebase functions:secrets:set ALLOWED_ORIGINS       # Optional: Comma-separated allowed origins for CORS
 ```
+
+`ALLOWED_ORIGINS` (comma-separated CORS origins) is a plain param, not a secret: set it in
+`functions/.env` or at the deploy prompt. Empty means no cross-origin browser requests.
 
 API Authentication:
 - All `/recommend` and `/ideas` endpoint calls require `Authorization: Bearer <API_KEY>` header
-- Rate limiting: 100 requests per hour per API key
-- Firestore rules require Firebase Authentication for client reads
+- Rate limiting: 100 requests per hour per API key, per endpoint; failed auth is throttled per IP
+- Callables (`getRecommendation`, `getIdeas`) require Firebase Auth and App Check
+- Firestore client reads require the `admin` custom claim
+  (`admin.auth().setCustomUserClaims(uid, { admin: true })`); Storage allows `get` but not `list`
+- `GET /health` reports `geminiConfigured` (never the key)
 
 ## Key Technical Considerations
 
@@ -168,7 +173,10 @@ API Authentication:
 - Use `mqdefault` thumbnail quality for storage efficiency
 - Duration format is ISO 8601 (e.g., `PT15M33S`)
 - Both scraper and analyzer track progress in Firestore for resumable operations
-- Scraper supports `--update` mode for incremental fetching of new videos only
+- Scraper supports `--update` mode for incremental fetching of new videos only (stops at the first stored video)
+- Scraper resume is derived from Firestore: the playlist is re-paged and stored IDs skipped; missing thumbnails are backfilled
+- A real `quotaExceeded` from YouTube stops the run; failed channels are retried at most 3 times
+- Shorts: duration <= 180s plus heuristics (`isShortVideoDetailed`); publish day/hour are both in IST
 - Scraper skips short thumbnails when `skipShortThumbnails: true` in channels.json settings
 - Unresolved channel URLs are tracked in Firestore for retry
 - Recommender falls back to template-based generation if Gemini fails
@@ -201,10 +209,13 @@ API Authentication:
 - `channels/{channelId}/videos/{videoId}` - Video data with calculated metrics
 - `channels/{channelId}/videos/{videoId}/analysis/{type}` - AI analysis results (thumbnail, title_description)
 - `batch_jobs/{jobId}` - Batch API job tracking (state, request count, import status)
+- `batch_failures/{channelId}_{videoId}_{type}` - Per-video batch failure counts (excluded after 3)
+- `generations/{id}` - Saved recommender generations (functions only)
 - `scrape_progress/{channelId}` - Resume state for interrupted scrapes
 - `unresolved_channels/{id}` - Channel URLs that failed resolution (for retry)
 - `insights/{contentType}` - Per-content-type profiles (thumbnail + title features, all vs top 10%)
-- `insights/contentGaps` - Content gap and keyword opportunity analysis
+- `insights/contentGaps` - Content gap analysis in the recommender's shape (`highOpportunity`, `saturatedTopics`, `keywordGaps`, `formatGaps`; `usageRate` is a percent). Written only by the gaps step
+- `insights/thumbnails`, `insights/titles`, `insights/timing` - Recommender bridge docs (`--type bridge` rebuilds from stored profiles, never writes empty docs)
 - `insights/summary` - Overview of all content types and counts
 
 ## Calculated Video Metrics
@@ -238,14 +249,17 @@ All analysis uses Gemini 2.5 Flash (`gemini-2.5-flash`) with 2 API calls per vid
 
 ### Batch Mode Workflow
 
-1. **Prepare**: Scans Firestore for unanalyzed videos, writes JSONL to `data/batch/`
+A new batch is only prepared/submitted when no job for that type is active or awaiting import;
+errors in poll/import exit non-zero instead of starting a new batch.
+
+1. **Prepare**: Scans Firestore for unanalyzed videos (skipping videos that failed 3 times, tracked in `batch_failures`), writes JSONL to `data/batch/`
 2. **Submit**: Uploads JSONL via Files API, creates batch job, tracks in Firestore `batch_jobs`
 3. **Poll**: Checks job status every 60s until terminal state (can be interrupted and resumed)
-4. **Import**: Downloads result JSONL, parses each line, computes local features for title_description, merges, saves to Firestore analysis subcollections
+4. **Import**: Downloads result JSONL, parses every line, computes local features for title_description, merges, saves to Firestore analysis subcollections. Per-line failures go to `batch_failures`; `importedAt` is set only after the whole file. SUCCEEDED and PARTIALLY_SUCCEEDED jobs are importable; FAILED/CANCELLED/EXPIRED are terminal.
 
 Batch request key format: `{channelId}_{videoId}_{analysisType}` — parsed back using fixed-length channel IDs (24 chars starting with UC) and 11-char video IDs.
 
-Thumbnails use GCS URIs (`gs://{bucket}/thumbnails/UCxxx/videoId.jpg`) directly in batch requests since Firebase Storage is Google Cloud Storage.
+Thumbnails are downloaded from Storage and sent inline (base64) in batch requests; GCS URIs don't work because the Gemini service account can't read the Firebase bucket.
 
 ### Gemini API Tier Limits for Batch
 

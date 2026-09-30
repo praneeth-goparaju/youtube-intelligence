@@ -719,7 +719,7 @@ Keys follow the pattern `{channelId}_{videoId}_{analysisType}`. On import, keys 
 
 #### Thumbnail Batch Requests
 
-Thumbnails use GCS URIs directly (`gs://{bucket}/thumbnails/UCxxx/videoId.jpg`) since Firebase Storage is Google Cloud Storage.
+Thumbnails are downloaded from Storage and sent inline (base64); GCS URIs don't work because the Gemini service account can't read the Firebase bucket.
 
 ### Analysis Storage
 
@@ -1287,7 +1287,7 @@ generation_config = {
 }
 ```
 
-**Vision Input**: PIL Image objects (sync) or GCS URIs `gs://bucket/path` (batch)
+**Vision Input**: PIL Image objects (sync) or inline base64 image data (batch)
 
 **Rate Limits**: Varies by tier (free tier: 60 requests/minute)
 

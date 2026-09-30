@@ -692,27 +692,6 @@ INSIGHT_TYPE_SUMMARY = 'summary'
 GEMINI_MODEL = 'gemini-2.5-flash'
 ```
 
-### Firebase Utilities
-
-```python
-# shared/firebase_utils.py
-
-def initialize_firebase_app(config, options=None):
-    """Initialize Firebase Admin SDK."""
-
-def get_firestore_client():
-    """Get Firestore client instance."""
-
-def fetch_document(collection, doc_id):
-    """Fetch a single document."""
-
-def fetch_collection(collection, limit=None):
-    """Fetch all documents in a collection."""
-
-def save_document(collection, doc_id, data, merge=True):
-    """Save/update a document."""
-```
-
 ### Config Utilities
 
 ```python
@@ -723,12 +702,6 @@ def load_env_file(module_path):
 
 def get_env(name, required=True, default=None):
     """Get environment variable."""
-
-class BaseFirebaseConfig:
-    """Base config with Firebase credentials."""
-
-class BaseGeminiConfig(BaseFirebaseConfig):
-    """Extended config with Gemini API key."""
 ```
 
 ---
