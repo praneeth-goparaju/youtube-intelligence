@@ -5,6 +5,7 @@
 
 import chalk from 'chalk';
 import type { RecommendationResponse, IdeaGenerationResponse, ContentType } from './types';
+import { formatScore } from './recommendation-core';
 
 function formatViews(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -202,23 +203,44 @@ const TYPE_COLORS: Record<ContentType, (s: string) => string> = {
   challenge: chalk.yellow,
 };
 
+/**
+ * Rank-relative tier for an opportunity score among a set of scores.
+ *
+ * Scores come from different scales (AI ideas: 1-100; insights-derived gaps:
+ * avgViewsPerSubscriber / (videoCount + 1), typically ~0.01-2), so fixed
+ * thresholds are meaningless. Top third => 'high', middle third => 'medium',
+ * bottom third => 'low'. A single score (or all equal) is 'high'.
+ */
+export function scoreTier(score: number, allScores: number[]): 'high' | 'medium' | 'low' {
+  const finite = allScores.filter((s) => Number.isFinite(s));
+  if (finite.length <= 1 || !Number.isFinite(score)) return 'high';
+  if (Math.max(...finite) === Math.min(...finite)) return 'high';
+  const below = finite.filter((s) => s < score).length;
+  const percentile = below / (finite.length - 1);  // 0 = lowest, 1 = highest
+  if (percentile >= 2 / 3) return 'high';
+  if (percentile >= 1 / 3) return 'medium';
+  return 'low';
+}
+
 export function formatIdeas(response: IdeaGenerationResponse): string {
   const lines: string[] = [];
 
   lines.push(header('VIDEO IDEAS'));
   lines.push(`  ${chalk.dim(`${response.ideas.length} data-backed ideas`)}`);
+  const scores = response.ideas.map((idea) => idea.opportunityScore);
 
   for (let i = 0; i < response.ideas.length; i++) {
     const idea = response.ideas[i];
     const typeColor = TYPE_COLORS[idea.suggestedType] || chalk.white;
-    const scoreColor = idea.opportunityScore >= 70 ? chalk.green
-      : idea.opportunityScore >= 40 ? chalk.yellow
+    const tier = scoreTier(idea.opportunityScore, scores);
+    const scoreColor = tier === 'high' ? chalk.green
+      : tier === 'medium' ? chalk.yellow
       : chalk.red;
 
     lines.push('');
     lines.push(`  ${chalk.bold.white(`${i + 1}. ${idea.topic}`)}`);
     lines.push(`     ${chalk.italic(idea.angle)}`);
-    lines.push(`     ${typeColor(`[${idea.suggestedType}]`)} ${scoreColor(`Score: ${idea.opportunityScore}`)}`);
+    lines.push(`     ${typeColor(`[${idea.suggestedType}]`)} ${scoreColor(`Score: ${formatScore(idea.opportunityScore)}`)}`);
     if (idea.keywords.length > 0) {
       lines.push(`     Keywords: ${idea.keywords.map((k) => chalk.cyan(k)).join(', ')}`);
     }

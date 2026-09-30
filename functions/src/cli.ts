@@ -163,6 +163,7 @@ function getGeminiModel() {
       temperature: 0.7,
       topP: 0.95,
       maxOutputTokens: 16384,
+      responseMimeType: 'application/json',
     },
   });
   return _cachedModel;

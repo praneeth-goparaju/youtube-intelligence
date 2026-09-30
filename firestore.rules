@@ -1,32 +1,40 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper function to check if user is authenticated
-    function isAuthenticated() {
-      return request.auth != null;
+    // Client reads are restricted to allowlisted users carrying the `admin`
+    // custom claim. Grant it with the Admin SDK, e.g.:
+    //   admin.auth().setCustomUserClaims(uid, { admin: true })
+    // Being signed in alone is NOT enough (anyone can create an account).
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
     }
 
-    // Channels and videos - authenticated read only, write for admin SDK
+    // Channels and videos - admin-claim read only, write for admin SDK
     match /channels/{channelId} {
-      allow read: if isAuthenticated();
+      allow read: if isAdmin();
       allow write: if false;  // Only admin SDK can write
 
       match /videos/{videoId} {
-        allow read: if isAuthenticated();
+        allow read: if isAdmin();
         allow write: if false;
 
         match /analysis/{analysisType} {
-          allow read: if isAuthenticated();
+          allow read: if isAdmin();
           allow write: if false;
         }
       }
     }
 
-    // Insights - authenticated read only for clients
+    // Insights - admin-claim read only for clients
     // Note: Firebase Functions using Admin SDK bypass these rules
     match /insights/{insightType} {
-      allow read: if isAuthenticated();
+      allow read: if isAdmin();
       allow write: if false;
+    }
+
+    // Saved generations - managed by Cloud Functions only
+    match /generations/{docId} {
+      allow read, write: if false;
     }
 
     // Progress tracking - admin only (no client access)

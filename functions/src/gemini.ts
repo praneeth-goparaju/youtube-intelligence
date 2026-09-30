@@ -3,92 +3,99 @@
  */
 
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { defineString } from 'firebase-functions/params';
+import { defineSecret } from 'firebase-functions/params';
+import { readSecret } from './secrets';
+import { runWithRetries } from './retry';
 
-// Define the API key as a Firebase parameter (set via Firebase Console or CLI)
-const geminiApiKey = defineString('GOOGLE_API_KEY');
+/**
+ * Gemini API key, stored in Secret Manager:
+ *   firebase functions:secrets:set GOOGLE_API_KEY
+ * Every function that calls Gemini must list this in its `secrets` option.
+ */
+export const geminiApiKey = defineSecret('GOOGLE_API_KEY');
 
-let genAI: GoogleGenerativeAI | null = null;
 let model: GenerativeModel | null = null;
+
+/**
+ * Whether a Gemini API key is available to this function instance.
+ * Never exposes the key itself.
+ */
+export function isGeminiConfigured(): boolean {
+  return readSecret(geminiApiKey).length > 0;
+}
 
 /**
  * Initialize Gemini client (lazy initialization)
  */
 function getModel(): GenerativeModel {
   if (!model) {
-    const apiKey = geminiApiKey.value();
+    const apiKey = readSecret(geminiApiKey);
     if (!apiKey) {
-      throw new Error('GOOGLE_API_KEY not configured. Set it using: firebase functions:secrets:set GOOGLE_API_KEY');
+      // Log loudly on every attempt: without the key every request silently degrades to templates.
+      console.error(
+        'CONFIGURATION ERROR: GOOGLE_API_KEY secret is not available to this function. ' +
+        'All recommendations will use template fallback. Set it with ' +
+        '`firebase functions:secrets:set GOOGLE_API_KEY` and ensure the function declares it in `secrets`.'
+      );
+      throw new Error('GOOGLE_API_KEY not configured');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
+    const genAI = new GoogleGenerativeAI(apiKey);
     model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: {
         temperature: 0.7,  // Higher for creative suggestions
         topP: 0.95,
         maxOutputTokens: 16384,
+        responseMimeType: 'application/json',
       },
     });
   }
   return model;
 }
 
-// Retry configuration
+// Retry / deadline configuration.
+// Functions run with timeoutSeconds=120 (index.ts). The whole Gemini phase must
+// finish well before that so the template fallback can still run and respond.
+export const GEMINI_TOTAL_BUDGET_MS = 90_000;
+export const GEMINI_ATTEMPT_TIMEOUT_MS = 60_000;
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 
 /**
- * Delay helper
+ * Generate recommendation using Gemini with retry logic, a per-attempt timeout
+ * and an overall deadline. Throws once the budget is exhausted so callers fall
+ * back to templates before the Cloud Function times out.
  */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Generate recommendation using Gemini with retry logic
- */
-export async function generateWithGemini(prompt: string): Promise<string> {
+export async function generateWithGemini(
+  prompt: string,
+  options: { totalBudgetMs?: number; attemptTimeoutMs?: number } = {}
+): Promise<string> {
   const model = getModel();
-  let lastError: Error | undefined;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const result = await model.generateContent(prompt);
+  const text = await runWithRetries(
+    async (signal, timeoutMs) => {
+      const result = await model.generateContent(prompt, { signal, timeout: timeoutMs });
       const response = result.response;
-
-      // Validate response
       if (!response) {
         throw new Error('No response received from Gemini');
       }
-
       const text = response.text();
       if (!text) {
         throw new Error('Empty response text from Gemini');
       }
-
-      // Clean up the response (remove markdown code blocks if present)
-      return cleanJsonResponse(text);
-    } catch (error) {
-      lastError = error as Error;
-      const errorMessage = lastError.message || String(error);
-
-      // Check if it's a rate limit error (429) - wait longer
-      const isRateLimit = errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit');
-
-      if (attempt < MAX_RETRIES - 1) {
-        const waitTime = isRateLimit
-          ? BASE_DELAY_MS * Math.pow(2, attempt) * 2  // Longer wait for rate limits
-          : BASE_DELAY_MS * Math.pow(2, attempt);
-
-        console.warn(`Gemini attempt ${attempt + 1} failed: ${errorMessage}. Retrying in ${waitTime}ms...`);
-        await delay(waitTime);
-      } else {
-        console.error(`Gemini generation failed after ${MAX_RETRIES} attempts:`, error);
-      }
+      return text;
+    },
+    {
+      maxAttempts: MAX_RETRIES,
+      baseDelayMs: BASE_DELAY_MS,
+      totalBudgetMs: options.totalBudgetMs ?? GEMINI_TOTAL_BUDGET_MS,
+      attemptTimeoutMs: options.attemptTimeoutMs ?? GEMINI_ATTEMPT_TIMEOUT_MS,
+      label: 'Gemini',
     }
-  }
+  );
 
-  throw lastError || new Error('Gemini generation failed');
+  // Clean up the response (remove markdown code blocks if present)
+  return cleanJsonResponse(text);
 }
 
 /**
@@ -110,17 +117,4 @@ function cleanJsonResponse(text: string): string {
   }
 
   return cleaned.trim();
-}
-
-/**
- * Test Gemini connection
- */
-export async function testGeminiConnection(): Promise<boolean> {
-  try {
-    const model = getModel();
-    const result = await model.generateContent('Say "OK" if you can read this.');
-    return result.response.text().toLowerCase().includes('ok');
-  } catch {
-    return false;
-  }
 }

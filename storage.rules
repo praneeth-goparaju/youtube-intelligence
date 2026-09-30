@@ -1,14 +1,16 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Thumbnails - read-only for clients
+    // Thumbnails - public single-object reads only (no bucket listing)
     match /thumbnails/{allPaths=**} {
-      allow read: if true;
+      allow get: if true;
+      allow list: if false;
       allow write: if false;  // Only admin SDK can write
     }
 
     match /channel_thumbnails/{allPaths=**} {
-      allow read: if true;
+      allow get: if true;
+      allow list: if false;
       allow write: if false;
     }
   }

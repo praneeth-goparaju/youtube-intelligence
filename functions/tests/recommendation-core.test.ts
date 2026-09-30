@@ -13,6 +13,8 @@ import {
   validateAndFillResponse,
   buildContext,
   buildIdeasContext,
+  formatScore,
+  InputValidationError,
   MAX_TOPIC_LENGTH,
   VALID_CONTENT_TYPES,
 } from '../src/recommendation-core';
@@ -66,8 +68,8 @@ const fullInsights: Insights = {
   contentGaps: {
     generatedAt: '2024-01-01',
     highOpportunity: [
-      { topic: 'Millet Recipes', avgViews: 80000, videoCount: 5, opportunityScore: 85 },
-      { topic: 'Street Food Tours', avgViews: 60000, videoCount: 8, opportunityScore: 72 },
+      { topic: 'Millet Recipes', avgViews: 1.8, videoCount: 5, opportunityScore: 0.3 },
+      { topic: 'Street Food Tours', avgViews: 1.2, videoCount: 8, opportunityScore: 0.133 },
     ],
     saturatedTopics: [
       { topic: 'Biryani', competition: 'high' },
@@ -75,8 +77,8 @@ const fullInsights: Insights = {
     ],
     keywordGaps: {
       highValueKeywords: [
-        { keyword: 'millet', avgViewsPerSubscriber: 2.0, viewsMultiplier: 3.1, usageCount: 5, usageRate: 0.02 },
-        { keyword: 'street food', avgViewsPerSubscriber: 1.5, viewsMultiplier: 2.5, usageCount: 10, usageRate: 0.05 },
+        { keyword: 'millet', avgViewsPerSubscriber: 2.0, viewsMultiplier: 3.1, usageCount: 5, usageRate: 2 },
+        { keyword: 'street food', avgViewsPerSubscriber: 1.5, viewsMultiplier: 2.5, usageCount: 10, usageRate: 5 },
       ],
     },
     formatGaps: {
@@ -112,6 +114,29 @@ describe('sanitizeInput', () => {
 
   it('removes control characters', () => {
     expect(sanitizeInput('hello\x00\x01world', 100)).toBe('helloworld');
+  });
+
+  it.each([
+    ['newline', 'secret\nfor', 'secret for'],
+    ['tab', 'secret\tfor', 'secret for'],
+    ['CRLF', 'secret\r\nfor', 'secret for'],
+    ['newline next to other control chars', 'a\x01\nb', 'a b'],
+  ])('turns %s into a space instead of joining words', (_label, input, expected) => {
+    expect(sanitizeInput(input, 100)).toBe(expected);
+  });
+
+  it('returns empty string for null', () => {
+    expect(sanitizeInput(null, 100)).toBe('');
+  });
+
+  it.each([
+    ['number', 42],
+    ['object', { toString: () => 'x' }],
+    ['array', ['a']],
+    ['boolean', true],
+  ])('throws InputValidationError for non-string %s', (_label, input) => {
+    expect(() => sanitizeInput(input, 100, 'topic')).toThrow(InputValidationError);
+    expect(() => sanitizeInput(input, 100, 'topic')).toThrow('topic must be a string');
   });
 
   it('truncates to maxLength', () => {
@@ -223,6 +248,28 @@ describe('validateTags', () => {
     expect(result.utilizationPercent).toBeCloseTo((10 / 500) * 100, 1);
   });
 
+  it.each([
+    ['string', 'biryani, recipe'],
+    ['object', { a: 'b' }],
+    ['number', 5],
+  ])('treats non-array %s categories as missing', (_label, bad) => {
+    const result = validateTags({ primary: bad, secondary: bad } as any, 'recipe');
+    expect(Array.isArray(result.primary)).toBe(true);
+    expect(result.primary.length).toBeGreaterThan(0);
+    expect(result.primary).not.toContain(bad);
+    expect(result.fullTagString).not.toContain('[object Object]');
+  });
+
+  it('drops non-string entries inside arrays', () => {
+    const result = validateTags({ primary: ['ok', 3, null, { x: 1 }] } as any, 'recipe');
+    expect(result.primary).toEqual(['ok']);
+  });
+
+  it('treats a non-object tags value as missing', () => {
+    const result = validateTags('tag1, tag2' as any, 'recipe');
+    expect(result.primary.length).toBeGreaterThan(0);
+  });
+
   it('caps utilization at 100%', () => {
     const longTags = { primary: Array(50).fill('a'.repeat(20)) };
     const result = validateTags(longTags, 'recipe');
@@ -299,6 +346,11 @@ describe('buildContext', () => {
     expect(buildContext(emptyInsights)).toBe('');
   });
 
+  it('does not round small opportunity scores to 0', () => {
+    const ctx = buildContext(fullInsights);
+    expect(ctx).toContain('Street Food Tours (opportunity score: 0.133)');
+  });
+
   it.each([
     ['thumbnail elements', ['TOP PERFORMING THUMBNAIL ELEMENTS', 'split-frame', '2.3x']],
     ['power words', ['TOP POWER WORDS', 'SECRET']],
@@ -320,6 +372,18 @@ describe('buildContext', () => {
 describe('buildIdeasContext', () => {
   it('returns empty string for empty insights', () => {
     expect(buildIdeasContext(emptyInsights)).toBe('');
+  });
+
+  it('renders keyword usageRate as the percent it already is (not x100)', () => {
+    const ctx = buildIdeasContext(fullInsights);
+    expect(ctx).toContain('"millet" (3.1x views, used 5 times, 2.0% usage)');
+    expect(ctx).not.toContain('200.0% usage');
+  });
+
+  it('shows small opportunity scores with decimal precision and labels avg views/subscriber', () => {
+    const ctx = buildIdeasContext(fullInsights);
+    expect(ctx).toContain('Millet Recipes (opportunity: 0.300, avg views/subscriber: 1.8, videos: 5)');
+    expect(ctx).not.toContain('opportunity: 0,');
   });
 
   it.each([
@@ -413,18 +477,18 @@ describe('generateIdeasFromTemplates', () => {
     const result = generateIdeasFromTemplates(undefined, fullInsights);
     expect(result.length).toBeGreaterThan(0);
     expect(result[0].topic).toBe('Millet Recipes');
-    expect(result[0].opportunityScore).toBe(85);
+    expect(result[0].opportunityScore).toBe(0.3);
   });
 
   it('pads with keyword-based ideas when gaps are few', () => {
     const sparseInsights: Insights = {
       contentGaps: {
         generatedAt: '2024-01-01',
-        highOpportunity: [{ topic: 'Only One', avgViews: 100, videoCount: 1, opportunityScore: 90 }],
+        highOpportunity: [{ topic: 'Only One', avgViews: 0.9, videoCount: 1, opportunityScore: 0.45 }],
         saturatedTopics: [],
         keywordGaps: {
           highValueKeywords: [
-            { keyword: 'test-kw', avgViewsPerSubscriber: 2, viewsMultiplier: 3, usageCount: 1, usageRate: 0.01 },
+            { keyword: 'test-kw', avgViewsPerSubscriber: 2, viewsMultiplier: 3, usageCount: 1, usageRate: 1 },
           ],
         },
       },
@@ -432,6 +496,25 @@ describe('generateIdeasFromTemplates', () => {
     const result = generateIdeasFromTemplates(undefined, sparseInsights);
     expect(result.length).toBe(2);
     expect(result[1].topic).toBe('test-kw');
+  });
+
+  it('describes gap and keyword ideas with percent usage and decimal scores', () => {
+    const sparseInsights: Insights = {
+      contentGaps: {
+        generatedAt: '2024-01-01',
+        highOpportunity: [{ topic: 'Only One', avgViews: 0.9, videoCount: 1, opportunityScore: 0.45 }],
+        saturatedTopics: [],
+        keywordGaps: {
+          highValueKeywords: [
+            { keyword: 'test-kw', avgViewsPerSubscriber: 2, viewsMultiplier: 3, usageCount: 1, usageRate: 1.5 },
+          ],
+        },
+      },
+    };
+    const [gapIdea, kwIdea] = generateIdeasFromTemplates(undefined, sparseInsights);
+    expect(gapIdea.whyItWorks).toContain('Opportunity score of 0.450');
+    expect(gapIdea.whyItWorks).toContain('0.9 avg views/subscriber');
+    expect(kwIdea.whyItWorks).toContain('only used in 1.5% of videos');
   });
 
   it('respects content type filter', () => {
@@ -459,7 +542,7 @@ describe('validateAndFillResponse', () => {
   it('preserves provided fields', () => {
     const titles = generateTitlesFromTemplates('Custom', 'vlog', undefined);
     const result = validateAndFillResponse({ titles }, 'Biryani', 'recipe', emptyInsights, null, 'gemini-2.5-flash');
-    expect(result.titles).toBe(titles);
+    expect(result.titles).toEqual(titles);
   });
 
   it('validates tags even when provided', () => {
@@ -475,5 +558,109 @@ describe('validateAndFillResponse', () => {
     expect(result.tags.primary).toEqual(['my-tag']);
     expect(result.tags.fullTagString).toBeTruthy();
     expect(result.tags.characterCount).toBeGreaterThan(0);
+  });
+});
+
+describe('validateAndFillResponse nested validation', () => {
+  const fill = (parsed: unknown, topic = 'Biryani') =>
+    validateAndFillResponse(parsed, topic, 'recipe', emptyInsights, null, 'gemini-2.5-flash');
+
+  it('fills missing tags from topic-derived templates, not generic defaults', () => {
+    const result = fill({}, 'Gongura Mutton');
+    expect(result.tags.primary).toContain('gongura mutton');
+    expect(result.tags.longtail).toContain('gongura mutton in telugu');
+  });
+
+  it('keeps AI tag categories that are present and fills the rest from topic templates', () => {
+    const result = fill({ tags: { primary: ['ai-tag'] } }, 'Gongura Mutton');
+    expect(result.tags.primary).toEqual(['ai-tag']);
+    expect(result.tags.secondary).toContain('gongura mutton telugu');
+  });
+
+  it('replaces titles.primary without a combined string with the template', () => {
+    const result = fill({ titles: { primary: { english: 'x' }, alternatives: [] } });
+    expect(result.titles.primary.combined).toContain('Biryani');
+    expect(result.titles.alternatives).toEqual([]);
+  });
+
+  it('replaces non-array titles.alternatives and drops malformed alternatives', () => {
+    const notArray = fill({ titles: { primary: { combined: 'AI title' }, alternatives: 'oops' } });
+    expect(Array.isArray(notArray.titles.alternatives)).toBe(true);
+    expect(notArray.titles.primary.combined).toBe('AI title');
+
+    const mixed = fill({
+      titles: {
+        primary: { combined: 'AI title', predictedCTR: 'amazing', reasoning: 'r' },
+        alternatives: [{ combined: 'Alt 1', predictedCTR: 'high', reasoning: 'x' }, 'bad', { reasoning: 'no combined' }],
+      },
+    });
+    expect(mixed.titles.primary.predictedCTR).toBe('average');
+    expect(mixed.titles.alternatives).toEqual([{ combined: 'Alt 1', predictedCTR: 'high', reasoning: 'x' }]);
+  });
+
+  it('fills missing nested thumbnail fields used by the formatter and image generator', () => {
+    const result = fill({ thumbnail: { layout: { type: 'full-frame' }, elements: { text: {} } } });
+    expect(result.thumbnail.layout.type).toBe('full-frame');
+    expect(typeof result.thumbnail.layout.description).toBe('string');
+    expect(typeof result.thumbnail.elements.text.primary.content).toBe('string');
+    expect(typeof result.thumbnail.elements.text.primary.color).toBe('string');
+    expect(typeof result.thumbnail.elements.face.required).toBe('boolean');
+    expect(typeof result.thumbnail.elements.graphics.addArrow).toBe('boolean');
+    expect(typeof result.thumbnail.elements.mainVisual.position).toBe('string');
+    expect(typeof result.thumbnail.colors.background).toBe('string');
+  });
+
+  it('drops a malformed thumbnail secondary text but keeps a valid one', () => {
+    const bad = fill({ thumbnail: { elements: { text: { primary: { content: 'WOW' }, secondary: 'oops' } } } });
+    expect(bad.thumbnail.elements.text.primary.content).toBe('WOW');
+    expect(bad.thumbnail.elements.text.secondary).toBeUndefined();
+
+    const good = fill({ thumbnail: { elements: { text: { secondary: { content: 'రుచి' } } } } });
+    expect(good.thumbnail.elements.text.secondary?.content).toBe('రుచి');
+    expect(typeof good.thumbnail.elements.text.secondary?.position).toBe('string');
+  });
+
+  it('repairs prediction view ranges and confidence', () => {
+    const result = fill({ prediction: { expectedViewRange: { low: 'many' }, confidence: 'certain', positiveFactors: 'x' } });
+    expect(Number.isFinite(result.prediction.expectedViewRange.low)).toBe(true);
+    expect(Number.isFinite(result.prediction.expectedViewRange.medium)).toBe(true);
+    expect(['low', 'medium', 'high']).toContain(result.prediction.confidence);
+    expect(Array.isArray(result.prediction.positiveFactors)).toBe(true);
+  });
+
+  it('normalizes production arrays and string fields', () => {
+    const result = fill({
+      production: {
+        optimalDuration: 12,
+        hookScript: [{ visual: 'v' }, 'bad'],
+        segments: 'none',
+        pinnedComment: 'Pin me',
+      },
+    });
+    expect(typeof result.production.optimalDuration).toBe('string');
+    expect(result.production.hookScript).toEqual([{ visual: 'v', dialogue: '', duration: '' }]);
+    expect(Array.isArray(result.production.segments)).toBe(true);
+    expect(result.production.segments.length).toBeGreaterThan(0);
+    expect(result.production.pinnedComment).toBe('Pin me');
+    expect(typeof result.production.seoDescription).toBe('string');
+    expect(typeof result.production.endScreenScript).toBe('string');
+  });
+
+  it('handles a non-object AI response', () => {
+    const result = fill(['not', 'an', 'object']);
+    expect(result.titles.primary.combined).toContain('Biryani');
+    expect(result.metadata.fallbackUsed).toBe(false);
+  });
+});
+
+describe('formatScore', () => {
+  it.each([
+    [85, '85'],
+    [2.345, '2.35'],
+    [0.0123, '0.012'],
+    [0.3, '0.300'],
+    [NaN, '0'],
+  ])('formats %p as %p', (input, expected) => {
+    expect(formatScore(input)).toBe(expected);
   });
 });

@@ -58,12 +58,34 @@ export function resolveContentType(input: string | undefined): ContentType {
 }
 
 /**
- * Sanitize user input: remove control characters, normalize whitespace, truncate.
+ * Thrown when a user-supplied field has the wrong type (e.g. a number or object
+ * where a string was expected). Callers map this to HTTP 400 / invalid-argument.
  */
-export function sanitizeInput(input: string | undefined, maxLength: number): string {
-  if (!input) return '';
+export class InputValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InputValidationError';
+  }
+}
+
+/**
+ * Sanitize user input: normalize whitespace, remove control characters, truncate.
+ *
+ * Accepts `unknown` because request bodies are untrusted JSON: `undefined`/`null`
+ * yield '', any other non-string throws InputValidationError.
+ *
+ * Tabs/newlines/carriage returns are turned into spaces BEFORE other control
+ * characters are stripped, so "secret\nfor" becomes "secret for" rather than
+ * "secretfor".
+ */
+export function sanitizeInput(input: unknown, maxLength: number, fieldName = 'input'): string {
+  if (input === undefined || input === null) return '';
+  if (typeof input !== 'string') {
+    throw new InputValidationError(`${fieldName} must be a string`);
+  }
 
   let sanitized = input
+    .replace(/[\t\n\r]/g, ' ')
     .replace(/[\x00-\x1F\x7F]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -73,6 +95,20 @@ export function sanitizeInput(input: string | undefined, maxLength: number): str
   }
 
   return sanitized;
+}
+
+/**
+ * Format an opportunity score with precision suited to its magnitude.
+ *
+ * Insights-derived scores are avgViewsPerSubscriber / (videoCount + 1), i.e.
+ * small decimals (~0.01-2); AI-generated idea scores are 1-100.
+ */
+export function formatScore(score: number): string {
+  if (!Number.isFinite(score)) return '0';
+  const abs = Math.abs(score);
+  if (abs >= 10) return score.toFixed(0);
+  if (abs >= 1) return score.toFixed(2);
+  return score.toFixed(3);
 }
 
 /**
@@ -136,7 +172,7 @@ export function buildContext(insights: Insights): string {
   if (insights.contentGaps?.highOpportunity) {
     parts.push('\nHIGH OPPORTUNITY TOPICS:');
     for (const gap of insights.contentGaps.highOpportunity.slice(0, 3)) {
-      parts.push(`  - ${gap.topic} (opportunity score: ${gap.opportunityScore.toFixed(0)})`);
+      parts.push(`  - ${gap.topic} (opportunity score: ${formatScore(gap.opportunityScore)})`);
     }
   }
 
@@ -312,17 +348,32 @@ Respond ONLY with valid JSON. No markdown, no explanation, no wrapping.`;
 // Tag & Prediction Helpers
 // ============================================
 
-/**
- * Validate and complete tag recommendations, filling missing fields with defaults.
- */
-export function validateTags(tags: Partial<TagRecommendations> | undefined, type: ContentType): TagRecommendations {
-  const defaults = DEFAULT_TAGS[type];
+/** Keep only non-empty string entries; returns undefined when `value` is not an array. */
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+}
 
-  const primary = tags?.primary || defaults.primary || [];
-  const secondary = tags?.secondary || defaults.secondary || [];
-  const telugu = tags?.telugu || defaults.telugu || [];
-  const longtail = tags?.longtail || defaults.longtail || [];
-  const brand = tags?.brand || [];
+/**
+ * Validate and complete tag recommendations.
+ *
+ * Non-array categories (e.g. a string where a list was expected) are treated as
+ * missing and replaced from `fallback` (defaults to the generic DEFAULT_TAGS for
+ * the content type). Non-string entries inside arrays are dropped.
+ */
+export function validateTags(
+  tags: unknown,
+  type: ContentType,
+  fallback?: Partial<TagRecommendations>
+): TagRecommendations {
+  const defaults = fallback || DEFAULT_TAGS[type];
+  const t = isPlainObject(tags) ? tags : {};
+
+  const primary = stringArray(t.primary) || defaults.primary || [];
+  const secondary = stringArray(t.secondary) || defaults.secondary || [];
+  const telugu = stringArray(t.telugu) || defaults.telugu || [];
+  const longtail = stringArray(t.longtail) || defaults.longtail || [];
+  const brand = stringArray(t.brand) || [];
 
   const allTags = [...primary, ...secondary, ...telugu, ...longtail, ...brand];
   const fullTagString = allTags.join(', ');
@@ -549,14 +600,14 @@ export function buildIdeasContext(insights: Insights): string {
   if (insights.contentGaps?.highOpportunity) {
     parts.push('HIGH OPPORTUNITY TOPICS:');
     for (const gap of insights.contentGaps.highOpportunity.slice(0, 20)) {
-      parts.push(`  - ${gap.topic} (opportunity: ${gap.opportunityScore.toFixed(0)}, avg views: ${gap.avgViews}, videos: ${gap.videoCount})`);
+      parts.push(`  - ${gap.topic} (opportunity: ${formatScore(gap.opportunityScore)}, avg views/subscriber: ${gap.avgViews}, videos: ${gap.videoCount})`);
     }
   }
 
   if (insights.contentGaps?.keywordGaps?.highValueKeywords) {
     parts.push('\nHIGH VALUE KEYWORDS:');
     for (const kw of insights.contentGaps.keywordGaps.highValueKeywords.slice(0, 15)) {
-      parts.push(`  - "${kw.keyword}" (${kw.viewsMultiplier.toFixed(1)}x views, used ${kw.usageCount} times, ${(kw.usageRate * 100).toFixed(1)}% usage)`);
+      parts.push(`  - "${kw.keyword}" (${kw.viewsMultiplier.toFixed(1)}x views, used ${kw.usageCount} times, ${kw.usageRate.toFixed(1)}% usage)`);
     }
   }
 
@@ -584,7 +635,8 @@ export function buildIdeasContext(insights: Insights): string {
   if (insights.titles?.winningPatterns) {
     parts.push('\nWINNING TITLE PATTERNS:');
     for (const pattern of insights.titles.winningPatterns.slice(0, 5)) {
-      parts.push(`  - ${pattern.pattern} (avg views: ${pattern.avgViews})`);
+      const lift = pattern.lift !== undefined ? `lift: ${pattern.lift.toFixed(2)}x, ` : '';
+      parts.push(`  - ${pattern.pattern} (${lift}avg views/subscriber: ${formatScore(pattern.avgViews)})`);
     }
   }
 
@@ -651,7 +703,7 @@ export function generateIdeasFromTemplates(
     ideas.push({
       topic: gap.topic,
       angle,
-      whyItWorks: `Opportunity score of ${gap.opportunityScore.toFixed(0)} with only ${gap.videoCount} existing videos and ${gap.avgViews} avg views.`,
+      whyItWorks: `Opportunity score of ${formatScore(gap.opportunityScore)} with only ${gap.videoCount} existing videos and ${gap.avgViews} avg views/subscriber.`,
       opportunityScore: gap.opportunityScore,
       suggestedType,
       keywords: topKeywords.slice(0, 3),
@@ -664,7 +716,7 @@ export function generateIdeasFromTemplates(
       ideas.push({
         topic: kw.keyword,
         angle: `High-value keyword with ${kw.viewsMultiplier.toFixed(1)}x view multiplier`,
-        whyItWorks: `Keyword "${kw.keyword}" drives ${kw.viewsMultiplier.toFixed(1)}x more views but is only used in ${(kw.usageRate * 100).toFixed(0)}% of videos.`,
+        whyItWorks: `Keyword "${kw.keyword}" drives ${kw.viewsMultiplier.toFixed(1)}x more views but is only used in ${kw.usageRate.toFixed(1)}% of videos.`,
         opportunityScore: Math.min(100, kw.viewsMultiplier * 20),
         suggestedType: type || 'recipe',
         keywords: [kw.keyword, ...topKeywords.filter((k) => k !== kw.keyword).slice(0, 2)],
@@ -675,11 +727,137 @@ export function generateIdeasFromTemplates(
   return ideas;
 }
 
+// ============================================
+// AI Response Validation
+// ============================================
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Type-appropriate empty value for a template leaf (used for array items). */
+function blankLike(template: unknown): unknown {
+  if (typeof template === 'string') return '';
+  if (typeof template === 'number') return 0;
+  if (typeof template === 'boolean') return false;
+  if (Array.isArray(template)) return [];
+  if (isPlainObject(template)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(template)) out[k] = blankLike(v);
+    return out;
+  }
+  return template;
+}
+
+/**
+ * Conform an untrusted value to the shape of `template`.
+ *
+ * - Objects: every key present in the template is conformed recursively (missing
+ *   or wrong-typed leaves are taken from the template); keys only present in the
+ *   value are kept as-is.
+ * - Arrays: non-arrays are replaced by the template. For arrays of objects each
+ *   non-object item is dropped and each object item is conformed to a blank copy
+ *   of the template's first item (so missing strings become '' rather than
+ *   unrelated template text). For arrays of primitives, items of the wrong type
+ *   are dropped. An array that ends up empty falls back to the template.
+ * - Leaves: kept when typeof matches the template, otherwise replaced.
+ */
+function conformTo<T>(value: unknown, template: T): T {
+  if (Array.isArray(template)) {
+    if (!Array.isArray(value)) return template;
+    if (template.length === 0) return value as unknown as T;
+    const itemTemplate = template[0];
+    let items: unknown[];
+    if (isPlainObject(itemTemplate)) {
+      const blank = blankLike(itemTemplate);
+      items = value.filter(isPlainObject).map((item) => conformTo(item, blank));
+    } else {
+      items = value.filter((item) => typeof item === typeof itemTemplate);
+    }
+    return (items.length > 0 ? items : template) as unknown as T;
+  }
+  if (isPlainObject(template)) {
+    if (!isPlainObject(value)) return template;
+    const out: Record<string, unknown> = { ...value };
+    for (const [key, tplValue] of Object.entries(template)) {
+      out[key] = conformTo(value[key], tplValue);
+    }
+    return out as T;
+  }
+  if (template === undefined || template === null) return value as T;
+  return (typeof value === typeof template ? value : template) as T;
+}
+
+const VALID_CTR = new Set(['below-average', 'average', 'above-average', 'high']);
+const VALID_CONFIDENCE = new Set(['low', 'medium', 'high']);
+
+function validateTitles(parsed: unknown, template: TitleRecommendations): TitleRecommendations {
+  if (!isPlainObject(parsed)) return template;
+
+  const normalizeSuggestion = (s: Record<string, unknown>): TitleRecommendations['primary'] => ({
+    ...(typeof s.english === 'string' ? { english: s.english } : {}),
+    ...(typeof s.telugu === 'string' ? { telugu: s.telugu } : {}),
+    combined: s.combined as string,
+    predictedCTR: (VALID_CTR.has(s.predictedCTR as string) ? s.predictedCTR : 'average') as TitleRecommendations['primary']['predictedCTR'],
+    reasoning: typeof s.reasoning === 'string' ? s.reasoning : '',
+  });
+  const hasCombined = (s: unknown): s is Record<string, unknown> =>
+    isPlainObject(s) && typeof s.combined === 'string' && s.combined.trim().length > 0;
+
+  const primary = hasCombined(parsed.primary) ? normalizeSuggestion(parsed.primary) : template.primary;
+  const alternatives = Array.isArray(parsed.alternatives)
+    ? parsed.alternatives.filter(hasCombined).map(normalizeSuggestion)
+    : template.alternatives;
+
+  return { primary, alternatives };
+}
+
+function validateThumbnail(parsed: unknown, template: ThumbnailRecommendation): ThumbnailRecommendation {
+  if (!isPlainObject(parsed)) return template;
+  // Template may lack an optional secondary text; don't let a malformed one through.
+  const { secondary: tplSecondary, ...tplTextRest } = template.elements.text;
+  const result = conformTo(parsed, {
+    ...template,
+    elements: { ...template.elements, text: tplTextRest },
+  }) as ThumbnailRecommendation;
+
+  const parsedSecondary = isPlainObject(parsed.elements) && isPlainObject(parsed.elements.text)
+    ? parsed.elements.text.secondary
+    : undefined;
+  if (isPlainObject(parsedSecondary) && typeof parsedSecondary.content === 'string') {
+    result.elements.text.secondary = conformTo(parsedSecondary, {
+      content: '',
+      position: tplSecondary?.position ?? 'bottom',
+      color: tplSecondary?.color ?? '#FFFFFF',
+    });
+  } else {
+    // Missing or malformed secondary text is optional: omit it rather than guess.
+    delete result.elements.text.secondary;
+  }
+  return result;
+}
+
+function validatePrediction(parsed: unknown, template: PerformancePrediction): PerformancePrediction {
+  if (!isPlainObject(parsed)) return template;
+  const result = conformTo(parsed, template);
+  const range = result.expectedViewRange;
+  if (![range.low, range.medium, range.high].every((n) => Number.isFinite(n) && n >= 0)) {
+    result.expectedViewRange = template.expectedViewRange;
+  }
+  if (!VALID_CONFIDENCE.has(result.confidence)) result.confidence = template.confidence;
+  return result;
+}
+
 /**
  * Validate and fill missing fields from an AI-parsed response using template defaults.
+ *
+ * Validates nested fields that downstream consumers (formatter.ts,
+ * thumbnail-gen.ts, API clients) dereference, filling any that are missing or
+ * mistyped from the topic-specific template. Missing tags are filled with
+ * topic-derived template tags (generateTagsFromTemplates), not generic defaults.
  */
 export function validateAndFillResponse(
-  parsed: Partial<RecommendationResponse>,
+  parsed: unknown,
   topic: string,
   type: ContentType,
   insights: Insights,
@@ -687,14 +865,15 @@ export function validateAndFillResponse(
   modelUsed: string
 ): RecommendationResponse {
   const template = generateFromTemplates(topic, type, undefined, 'Telugu audience', insights, insightsVersion);
+  const p: Record<string, unknown> = isPlainObject(parsed) ? parsed : {};
 
   return {
-    titles: parsed.titles || template.titles,
-    thumbnail: parsed.thumbnail || template.thumbnail,
-    tags: validateTags(parsed.tags, type),
-    posting: parsed.posting || template.posting,
-    prediction: parsed.prediction || template.prediction,
-    production: parsed.production || template.production,
+    titles: validateTitles(p.titles, template.titles),
+    thumbnail: validateThumbnail(p.thumbnail, template.thumbnail),
+    tags: validateTags(p.tags, type, template.tags),
+    posting: isPlainObject(p.posting) ? conformTo(p.posting, template.posting) : template.posting,
+    prediction: validatePrediction(p.prediction, template.prediction),
+    production: isPlainObject(p.production) ? conformTo(p.production, template.production) : template.production,
     metadata: {
       generatedAt: new Date().toISOString(),
       modelUsed,

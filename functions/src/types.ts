@@ -223,6 +223,9 @@ export interface TitleInsights {
 
 export interface WinningPattern {
   pattern: string;
+  /** Top-10% rate / overall rate for this pattern (absent in pre-lift insight docs). */
+  lift?: number;
+  /** Average views per subscriber of videos using this pattern. */
   avgViews: number;
   sampleSize: number;
   examples: string[];
@@ -272,8 +275,10 @@ export interface ContentGapInsights {
 
 export interface ContentGap {
   topic: string;
+  /** Average views per subscriber (bridge maps avgViewsPerSubscriber -> avgViews). */
   avgViews: number;
   videoCount: number;
+  /** avgViewsPerSubscriber / (videoCount + 1) — small decimals, typically ~0.01-2. */
   opportunityScore: number;
 }
 
@@ -287,6 +292,7 @@ export interface KeywordOpportunity {
   avgViewsPerSubscriber: number;
   viewsMultiplier: number;
   usageCount: number;
+  /** Percent of videos using the keyword (0-100), not a fraction. */
   usageRate: number;
 }
 

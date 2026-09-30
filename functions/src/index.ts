@@ -5,37 +5,54 @@
  */
 
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
+import type { Request } from 'firebase-functions/v2/https';
+import type { Response } from 'express';
 import { setGlobalOptions } from 'firebase-functions/v2';
-import { defineString } from 'firebase-functions/params';
+import { defineSecret, defineString } from 'firebase-functions/params';
 import { createHash } from 'crypto';
 import { RecommendationEngine } from './engine';
-import { checkRateLimit } from './rate-limiter';
-import { sanitizeInput, VALID_CONTENT_TYPES, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
+import { checkRateLimit, isRateLimited } from './rate-limiter';
 import { saveGeneration as saveGen, listGenerations as listGens } from './firebase';
-import type { RecommendationRequest, RecommendationResponse, ContentType, IdeaGenerationResponse } from './types';
+import { geminiApiKey, isGeminiConfigured } from './gemini';
+import { readSecret } from './secrets';
+import {
+  safeCompareKeys,
+  extractBearerKey,
+  parseRecommendationInput,
+  parseIdeasInput,
+  validateGenerationPayload,
+} from './request-validation';
+import type { RecommendationResponse, IdeaGenerationResponse } from './types';
 
-// Set global options for all functions
+// Set global options for all functions.
+// timeoutSeconds must exceed the Gemini deadline budget (gemini.ts,
+// GEMINI_TOTAL_BUDGET_MS = 90s) so the template fallback can still respond.
 setGlobalOptions({
   region: 'us-central1',
   memory: '1GiB',
-  timeoutSeconds: 60,
+  timeoutSeconds: 120,
+  maxInstances: 10,
 });
 
-// API key for authentication (set via Firebase Console or CLI)
-const apiKeyParam = defineString('RECOMMEND_API_KEY', {
-  description: 'API key for authenticating recommendation requests',
-  default: '',
-});
+// API key for authenticating HTTP requests (Secret Manager):
+//   firebase functions:secrets:set RECOMMEND_API_KEY
+const recommendApiKey = defineSecret('RECOMMEND_API_KEY');
 
-// Allowed origins for CORS (comma-separated list)
+// Allowed origins for CORS (comma-separated list). Not a secret: a plain param
+// read from functions/.env(.<project>) or prompted at deploy. Empty/unset denies
+// all cross-origin browser requests (server-to-server calls are unaffected).
 const allowedOriginsParam = defineString('ALLOWED_ORIGINS', {
   description: 'Comma-separated list of allowed origins for CORS',
   default: '',
 });
 
 // Rate limiting configuration (distributed via Firestore)
-const RATE_LIMIT_MAX = 100; // requests per window
+const RATE_LIMIT_MAX = 100; // requests per window, per API key, per endpoint
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+// Failed-authentication throttling (per client IP)
+const AUTH_FAIL_MAX = 10; // failed attempts per window
+const AUTH_FAIL_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
  * Get allowed origins for CORS
@@ -66,14 +83,14 @@ function getAllowedOrigins(): string[] | boolean {
 }
 
 /**
- * Validate API key from request header
+ * Validate API key from request header (constant-time comparison).
  */
 function validateApiKey(authHeader: string | undefined): boolean {
-  const configuredKey = apiKeyParam.value();
+  const configuredKey = readSecret(recommendApiKey);
 
   // Reject all requests if API key is not configured
   if (!configuredKey) {
-    console.error('RECOMMEND_API_KEY not configured. All API requests will be rejected.');
+    console.error('CONFIGURATION ERROR: RECOMMEND_API_KEY secret not available. All API requests will be rejected.');
     return false;
   }
 
@@ -83,7 +100,7 @@ function validateApiKey(authHeader: string | undefined): boolean {
   }
 
   const key = extractBearerKey(authHeader);
-  if (key !== configuredKey) {
+  if (!safeCompareKeys(key, configuredKey)) {
     const keyHash = createHash('sha256').update(key).digest('hex').slice(0, 8);
     console.warn(`Auth failure: invalid key (hash prefix: ${keyHash})`);
     return false;
@@ -91,16 +108,54 @@ function validateApiKey(authHeader: string | undefined): boolean {
   return true;
 }
 
-/**
- * Extract the raw API key from an Authorization header.
- */
-function extractBearerKey(authHeader: string | undefined): string {
-  if (!authHeader) return '';
-  return authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+function clientIp(req: Request): string {
+  return req.ip || 'unknown';
 }
 
-function isValidContentType(type: string): type is ContentType {
-  return VALID_CONTENT_TYPES.includes(type as ContentType);
+/**
+ * Authenticate an HTTP request. Throttles clients (by IP) that have too many
+ * failed attempts, and records each failure. Sends the error response and
+ * returns false when the request must not proceed.
+ */
+async function authenticate(req: Request, res: Response): Promise<boolean> {
+  const failKey = `authfail:${clientIp(req)}`;
+
+  if (await isRateLimited(failKey, AUTH_FAIL_MAX, AUTH_FAIL_WINDOW_MS)) {
+    res.status(429).json({
+      error: 'Too many failed attempts',
+      message: 'Too many failed authentication attempts. Please try again later.',
+    });
+    return false;
+  }
+
+  if (!validateApiKey(req.headers.authorization)) {
+    await checkRateLimit(failKey, AUTH_FAIL_MAX, AUTH_FAIL_WINDOW_MS);
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
+    });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Consume a rate-limit slot for (API key, endpoint). Each endpoint has its own
+ * bucket so e.g. auto-saving generations doesn't eat the /recommend budget.
+ */
+async function consumeRateLimit(req: Request, res: Response, endpoint: string): Promise<boolean> {
+  const rateLimitKey = `key:${endpoint}:${extractBearerKey(req.headers.authorization)}`;
+  const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+  res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
+
+  if (!rateLimit.allowed) {
+    res.status(429).json({
+      error: 'Rate limit exceeded',
+      message: 'Too many requests. Please try again later.',
+    });
+    return false;
+  }
+  return true;
 }
 
 // ============================================
@@ -123,6 +178,7 @@ function isValidContentType(type: string): type is ContentType {
 export const recommend = onRequest(
   {
     cors: getAllowedOrigins(),  // Restricted CORS - configure ALLOWED_ORIGINS
+    secrets: [recommendApiKey, geminiApiKey],
   },
   async (req, res) => {
     // Only allow POST requests
@@ -131,62 +187,20 @@ export const recommend = onRequest(
       return;
     }
 
-    // Validate API key
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
+    if (!(await authenticate(req, res))) return;
+
+    // Validate/sanitize before consuming a rate-limit slot
+    const parsed = parseRecommendationInput(req.body);
+    if (!parsed.ok) {
+      res.status(400).json({ error: 'Invalid request', message: parsed.error });
       return;
     }
 
-    // Check rate limit (use IP or API key as identifier, distributed via Firestore)
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
+    if (!(await consumeRateLimit(req, res, 'recommend'))) return;
 
     try {
-      // Parse and validate request
-      const { topic, type, angle, audience } = req.body as Partial<RecommendationRequest>;
-
-      // Sanitize inputs to prevent prompt injection
-      const sanitizedTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
-      const sanitizedAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
-      const sanitizedAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
-
-      if (!sanitizedTopic || sanitizedTopic.length === 0) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: 'Topic is required and must be a non-empty string',
-        });
-        return;
-      }
-
-      if (type && !isValidContentType(type)) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`,
-        });
-        return;
-      }
-
-      // Generate recommendation with sanitized inputs
       const engine = new RecommendationEngine();
-      const recommendation = await engine.generateRecommendation({
-        topic: sanitizedTopic,
-        type: type as ContentType || 'recipe',
-        angle: sanitizedAngle || undefined,
-        audience: sanitizedAudience || 'Telugu audience',
-      });
-
+      const recommendation = await engine.generateRecommendation(parsed.value);
       res.status(200).json(recommendation);
     } catch (error) {
       console.error('Recommendation error:', error);
@@ -202,6 +216,12 @@ export const recommend = onRequest(
 // Callable Function (Firebase SDK)
 // ============================================
 
+const CALLABLE_OPTIONS = {
+  enforceAppCheck: true,        // Reject requests without a valid App Check token
+  consumeAppCheckToken: false,
+  secrets: [geminiApiKey],
+};
+
 /**
  * Callable function for generating recommendations
  * Use with Firebase SDK's httpsCallable()
@@ -211,7 +231,8 @@ export const recommend = onRequest(
  * const getRecommendation = httpsCallable(functions, 'getRecommendation');
  * const result = await getRecommendation({ topic: 'Biryani', type: 'recipe' });
  */
-export const getRecommendation = onCall<RecommendationRequest, Promise<RecommendationResponse>>(
+export const getRecommendation = onCall<unknown, Promise<RecommendationResponse>>(
+  CALLABLE_OPTIONS,
   async (request) => {
     // Require authentication
     if (!request.auth) {
@@ -221,12 +242,14 @@ export const getRecommendation = onCall<RecommendationRequest, Promise<Recommend
       );
     }
 
-    const { topic, type, angle, audience } = request.data;
+    // Validate/sanitize before consuming a rate-limit slot
+    const parsed = parseRecommendationInput(request.data);
+    if (!parsed.ok) {
+      throw new HttpsError('invalid-argument', parsed.error);
+    }
 
     // Check rate limit using auth UID (distributed via Firestore)
-    const rateLimitKey = request.auth.uid;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-
+    const rateLimit = await checkRateLimit(`uid:recommend:${request.auth.uid}`, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
     if (!rateLimit.allowed) {
       throw new HttpsError(
         'resource-exhausted',
@@ -234,35 +257,9 @@ export const getRecommendation = onCall<RecommendationRequest, Promise<Recommend
       );
     }
 
-    // Sanitize inputs to prevent prompt injection
-    const sanitizedTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
-    const sanitizedAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
-    const sanitizedAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
-
-    // Validate topic
-    if (!sanitizedTopic || sanitizedTopic.length === 0) {
-      throw new HttpsError(
-        'invalid-argument',
-        'Topic is required and must be a non-empty string'
-      );
-    }
-
-    // Validate content type
-    if (type && !isValidContentType(type)) {
-      throw new HttpsError(
-        'invalid-argument',
-        `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`
-      );
-    }
-
     try {
       const engine = new RecommendationEngine();
-      return await engine.generateRecommendation({
-        topic: sanitizedTopic,
-        type: type || 'recipe',
-        angle: sanitizedAngle || undefined,
-        audience: sanitizedAudience || 'Telugu audience',
-      });
+      return await engine.generateRecommendation(parsed.value);
     } catch (error) {
       console.error('Recommendation error:', error);
       throw new HttpsError(
@@ -287,6 +284,7 @@ export const getRecommendation = onCall<RecommendationRequest, Promise<Recommend
 export const ideas = onRequest(
   {
     cors: getAllowedOrigins(),
+    secrets: [recommendApiKey, geminiApiKey],
   },
   async (req, res) => {
     if (req.method !== 'POST') {
@@ -294,39 +292,19 @@ export const ideas = onRequest(
       return;
     }
 
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
+    if (!(await authenticate(req, res))) return;
+
+    const parsed = parseIdeasInput(req.body);
+    if (!parsed.ok) {
+      res.status(400).json({ error: 'Invalid request', message: parsed.error });
       return;
     }
 
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
+    if (!(await consumeRateLimit(req, res, 'ideas'))) return;
 
     try {
-      const { type } = req.body as { type?: string };
-
-      if (type && !isValidContentType(type)) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`,
-        });
-        return;
-      }
-
       const engine = new RecommendationEngine();
-      const response = await engine.generateIdeas(type as ContentType | undefined);
+      const response = await engine.generateIdeas(parsed.value.type);
       res.status(200).json(response);
     } catch (error) {
       console.error('Ideas generation error:', error);
@@ -345,7 +323,8 @@ export const ideas = onRequest(
 /**
  * Callable function for generating video ideas
  */
-export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse>>(
+export const getIdeas = onCall<unknown, Promise<IdeaGenerationResponse>>(
+  CALLABLE_OPTIONS,
   async (request) => {
     if (!request.auth) {
       throw new HttpsError(
@@ -354,9 +333,12 @@ export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse
       );
     }
 
-    const rateLimitKey = request.auth.uid;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+    const parsed = parseIdeasInput(request.data);
+    if (!parsed.ok) {
+      throw new HttpsError('invalid-argument', parsed.error);
+    }
 
+    const rateLimit = await checkRateLimit(`uid:ideas:${request.auth.uid}`, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
     if (!rateLimit.allowed) {
       throw new HttpsError(
         'resource-exhausted',
@@ -364,18 +346,9 @@ export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse
       );
     }
 
-    const { type } = request.data;
-
-    if (type && !isValidContentType(type)) {
-      throw new HttpsError(
-        'invalid-argument',
-        `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`
-      );
-    }
-
     try {
       const engine = new RecommendationEngine();
-      return await engine.generateIdeas(type as ContentType | undefined);
+      return await engine.generateIdeas(parsed.value.type);
     } catch (error) {
       console.error('Ideas generation error:', error);
       throw new HttpsError(
@@ -392,12 +365,13 @@ export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse
 
 /**
  * POST /generations-save
- * Body: { type, request, response }
+ * Body: { type: 'ideas' | 'recommendation', request: object, response: object } (max 100KB)
  * Returns: { id, savedAt }
  */
 export const generationsSave = onRequest(
   {
     cors: getAllowedOrigins(),
+    secrets: [recommendApiKey],
   },
   async (req, res) => {
     if (req.method !== 'POST') {
@@ -405,44 +379,18 @@ export const generationsSave = onRequest(
       return;
     }
 
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
+    if (!(await authenticate(req, res))) return;
+
+    const payload = validateGenerationPayload(req.body);
+    if (!payload.ok) {
+      res.status(400).json({ error: payload.error });
       return;
     }
 
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
+    if (!(await consumeRateLimit(req, res, 'generations-save'))) return;
 
     try {
-      const { type, request, response } = req.body as {
-        type?: string;
-        request?: Record<string, unknown>;
-        response?: Record<string, unknown>;
-      };
-
-      if (!type || (type !== 'ideas' && type !== 'recommendation')) {
-        res.status(400).json({ error: 'Invalid type. Must be "ideas" or "recommendation".' });
-        return;
-      }
-
-      if (!request || !response) {
-        res.status(400).json({ error: 'Both request and response fields are required.' });
-        return;
-      }
-
-      const result = await saveGen({ type, request, response });
+      const result = await saveGen(payload.value);
       res.status(200).json(result);
     } catch (error) {
       console.error('Save generation error:', error);
@@ -459,6 +407,7 @@ export const generationsSave = onRequest(
 export const generationsList = onRequest(
   {
     cors: getAllowedOrigins(),
+    secrets: [recommendApiKey],
   },
   async (req, res) => {
     if (req.method !== 'GET') {
@@ -466,28 +415,11 @@ export const generationsList = onRequest(
       return;
     }
 
-    if (!validateApiKey(req.headers.authorization)) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-      });
-      return;
-    }
-
-    const rateLimitKey = `key:${extractBearerKey(req.headers.authorization)}`;
-    const rateLimit = await checkRateLimit(rateLimitKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
-    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
-
-    if (!rateLimit.allowed) {
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
+    if (!(await authenticate(req, res))) return;
+    if (!(await consumeRateLimit(req, res, 'generations-list'))) return;
 
     try {
-      const typeParam = req.query.type as string | undefined;
+      const typeParam = req.query.type;
       let type: 'ideas' | 'recommendation' | undefined;
       if (typeParam === 'ideas' || typeParam === 'recommendation') {
         type = typeParam;
@@ -510,29 +442,37 @@ export const generationsList = onRequest(
  * Health check endpoint
  *
  * GET /health
+ * Returns { status, timestamp, version, geminiConfigured } — never secret values.
  */
-export const health = onRequest(async (req, res) => {
-  if (req.method !== 'GET') {
-    res.status(405).json({ error: 'Method not allowed. Use GET.' });
-    return;
-  }
+export const health = onRequest(
+  {
+    secrets: [geminiApiKey],
+  },
+  async (req, res) => {
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed. Use GET.' });
+      return;
+    }
 
-  try {
-    // Basic health check
-    const status = {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      version: '1.0.0',
-    };
-
-    res.status(200).json(status);
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: 'Internal server error',
-    });
+    try {
+      const geminiConfigured = isGeminiConfigured();
+      if (!geminiConfigured) {
+        console.error('CONFIGURATION ERROR: GOOGLE_API_KEY secret not available; recommendations use template fallback.');
+      }
+      res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        version: '1.0.0',
+        geminiConfigured,
+      });
+    } catch (error) {
+      res.status(500).json({
+        status: 'error',
+        message: 'Internal server error',
+      });
+    }
   }
-});
+);
 
 // ============================================
 // Re-export types for consumers
