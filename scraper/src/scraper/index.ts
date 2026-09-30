@@ -34,7 +34,7 @@ import {
   loadSavedQuota,
   saveQuotaToProgress,
 } from './progress.js';
-import { scanPageForNewIds } from './playlist-scan.js';
+import { planUpdateBatches, scanPageForNewIds } from './playlist-scan.js';
 import { processThumbnailBatch, processChannelThumbnail } from './thumbnail.js';
 import { ChannelsConfig, ChannelInput, Channel, Video, UnresolvedChannel } from '../types/index.js';
 
@@ -423,7 +423,10 @@ export async function processChannel(
 /**
  * Incrementally update a completed channel by fetching only new videos.
  * Exploits the fact that YouTube uploads playlists return newest videos first:
- * scanning stops at the first video that is already stored.
+ * scanning stops at the first video that is already stored. New videos are saved
+ * oldest batch first so an interrupted update never leaves unsaved videos older
+ * than a stored one (see planUpdateBatches). Running low on quota mid-update
+ * returns success: false / 'Quota exhausted' and does not record the update.
  */
 export async function updateChannel(
   input: ChannelInput,
@@ -471,8 +474,11 @@ export async function updateChannel(
 
     while (true) {
       if (isQuotaLow()) {
-        logger.warn('Quota running low, stopping update...');
-        break;
+        // The scan has not reached the stored frontier yet, so the IDs collected so
+        // far are only the newest part of the gap. Saving them would make the next
+        // run stop at them and never see the older new videos: save nothing.
+        logger.warn('Quota running low, stopping update before saving anything...');
+        return { success: false, channelId, newVideos: 0, thumbnailsDownloaded: 0, error: 'Quota exhausted' };
       }
 
       const page = await getPlaylistVideos(uploadsPlaylistId, pageToken || undefined);
@@ -505,14 +511,15 @@ export async function updateChannel(
       logger.success(`Found ${newVideoIds.length} new video(s) to process`);
     }
 
-    // Step 5: Fetch video details for new IDs only
-    const videoChunks = chunk(newVideoIds, config.scraper.batchSize);
+    // Step 5: Fetch video details for new IDs only, saving OLDEST batches first so an
+    // interruption leaves only newer videos unsaved (the next run's scan finds them)
+    const videoChunks = planUpdateBatches(newVideoIds, config.scraper.batchSize);
     let newVideosSaved = 0;
 
     for (const batchIds of videoChunks) {
       if (isQuotaLow()) {
-        logger.warn('Quota running low, saving partial update...');
-        break;
+        logger.warn(`Quota running low, stopping update after saving ${newVideosSaved} new video(s)...`);
+        return { success: false, channelId, newVideos: newVideosSaved, thumbnailsDownloaded: 0, error: 'Quota exhausted' };
       }
 
       const videoData = await getVideoDetails(batchIds);
@@ -815,6 +822,7 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
         totalVideos += result.newVideos;
         totalThumbnails += result.thumbnailsDownloaded;
       } else {
+        totalVideos += result.newVideos; // partial update: oldest batches may have been saved
         if (result.error === 'Quota exhausted') {
           logger.warn('Stopping due to quota exhaustion.');
           break;
