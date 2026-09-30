@@ -234,3 +234,24 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
     except Exception as e:
         print(f"Error saving insights for {insight_type}: {e}")
         raise
+
+
+def load_insight_profiles() -> Dict[str, Dict[str, Any]]:
+    """Load the per-content-type profile docs currently stored in insights/.
+
+    Profile docs are identified by their shape (a ``contentType`` string and a
+    ``summary`` dict), which excludes summary/contentGaps/bridge documents.
+
+    Returns:
+        Dict mapping doc ID -> profile data.
+    """
+    try:
+        db = get_db()
+        profiles = {}
+        for doc in db.collection("insights").stream():
+            data = doc.to_dict() or {}
+            if isinstance(data.get("contentType"), str) and isinstance(data.get("summary"), dict):
+                profiles[doc.id] = data
+        return profiles
+    except Exception as e:
+        raise RuntimeError(f"Failed to load insight profiles from Firestore: {e}") from e

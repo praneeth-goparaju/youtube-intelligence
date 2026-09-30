@@ -4,16 +4,18 @@ The recommender (functions/) reads from:
   - insights/thumbnails  → ThumbnailInsights
   - insights/titles      → TitleInsights
   - insights/timing      → TimingInsights
-  - insights/contentGaps → ContentGapInsights (flat format)
+  - insights/contentGaps → ContentGapInsights (root highOpportunity/saturatedTopics
+                           plus keywordGaps/formatGaps)
 
-This module converts per-content-type profiles into those 4 documents.
+This module converts per-content-type profiles into the first three documents and
+the gap report into the contentGaps document (see build_content_gaps_document).
 """
 
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from collections import defaultdict
 
-from .profiler import _get_nested, is_significant
+from .profiler import _get_nested
 
 
 # Maps thumbnail analysis section prefixes to recommender categories
@@ -54,7 +56,7 @@ def generate_recommender_documents(
     docs["timing"] = _build_timing_insights(profiles, timestamp, total_videos)
 
     if content_gaps:
-        docs["contentGaps"] = _build_content_gap_insights(content_gaps, timestamp)
+        docs["contentGaps"] = build_content_gaps_document(content_gaps, timestamp)
 
     return docs
 
@@ -74,7 +76,8 @@ def _build_thumbnail_insights(
          worstPerformingElements: [{element, lift}]}
     """
     # Collect all boolean thumbnail features across profiles
-    feature_lifts = defaultdict(list)  # feature_path -> [(lift, sample_size, all_rate, top_rate)]
+    # feature_path -> [(lift, sample_size, all_rate, top_rate, significant)]
+    feature_lifts = defaultdict(list)
 
     for profile in profiles.values():
         thumb = profile.get("thumbnail", {})
@@ -99,8 +102,8 @@ def _build_thumbnail_insights(
             entries = valid
             total_sample = sum(e[1] for e in entries)
 
-        # Check significance
-        significant_entries = [e for e in entries if is_significant(e[2], e[3])]
+        # Check significance (flag computed by the profiler with group sizes)
+        significant_entries = [e for e in entries if e[4]]
         if not significant_entries:
             continue
 
@@ -143,43 +146,53 @@ def _build_thumbnail_insights(
     }
 
 
+def _is_bool_stat(value: dict) -> bool:
+    """True for a profiler boolean stat: numeric all/top10 rates plus confidence/significant."""
+    return (
+        isinstance(value.get("all"), (int, float))
+        and isinstance(value.get("top10"), (int, float))
+        and "confidence" in value
+        and "significant" in value
+    )
+
+
 def _collect_bool_lifts(
     features: dict,
     prefix: str,
     result: dict,
     sample_size: int,
 ):
-    """Recursively collect boolean feature lifts from a features dict."""
+    """Recursively collect boolean feature lifts from a features dict.
+
+    Only boolean stats count as elements; other stat leaves (numeric, categorical,
+    list stats and their topItems) are skipped rather than mistaken for booleans.
+    """
     for key, value in features.items():
         path = f"{prefix}.{key}" if prefix else key
 
-        if isinstance(value, dict):
-            # Check if this is a bool stat dict (has 'all' and 'top10' as floats)
-            if (
-                "all" in value
-                and "top10" in value
-                and isinstance(value.get("all"), (int, float))
-                and isinstance(value.get("top10"), (int, float))
-            ):
-                # Check confidence
-                confidence = value.get("confidence", "medium")
-                if confidence == "low":
-                    continue
+        if not isinstance(value, dict):
+            continue
 
-                all_rate = value["all"]
-                top_rate = value["top10"]
+        if _is_bool_stat(value):
+            if value.get("confidence") == "low":
+                continue
 
-                if all_rate > 0.01:  # Avoid division by near-zero
-                    lift = top_rate / all_rate
-                elif top_rate > 0:
-                    lift = 2.0  # Cap lift when all_rate is near zero
-                else:
-                    continue
+            all_rate = value["all"]
+            top_rate = value["top10"]
 
-                result[path].append((lift, sample_size, all_rate, top_rate))
+            if all_rate > 0.01:  # Avoid division by near-zero
+                lift = top_rate / all_rate
+            elif top_rate > 0:
+                lift = 2.0  # Cap lift when all_rate is near zero
             else:
-                # Nested dict — recurse
-                _collect_bool_lifts(value, path, result, sample_size)
+                continue
+
+            result[path].append((lift, sample_size, all_rate, top_rate, bool(value["significant"])))
+        elif "confidence" in value:
+            continue  # Non-boolean stat leaf
+        else:
+            # Nested dict — recurse
+            _collect_bool_lifts(value, path, result, sample_size)
 
 
 def _get_thumbnail_category(feature_path: str) -> str:
@@ -202,7 +215,9 @@ def _build_title_insights(
         {generatedAt, basedOnVideos, winningPatterns, powerWords,
          optimalLength, optimalLanguageMix}
     """
-    all_patterns = defaultdict(lambda: {"all": 0, "top10": 0, "count": 0})
+    all_patterns = defaultdict(lambda: {"all": 0.0, "top10": 0.0, "vps_sum": 0.0, "vps_count": 0})
+    pattern_all_total = 0  # Title videos in profiles that have pattern stats
+    pattern_top_total = 0
     all_char_counts = {"all": [], "top10": []}
     all_word_counts = {"all": [], "top10": []}
     all_telugu_ratios = {"all": [], "top10": []}
@@ -215,14 +230,22 @@ def _build_title_insights(
         all_count = sample.get("all", 0)
         top_count = sample.get("top10", 0)
 
-        # Winning patterns from structure.pattern categorical stats
-        pattern_stats = _get_nested(features, "structure.pattern")
-        if pattern_stats and isinstance(pattern_stats.get("all"), dict):
-            for pattern, rate in pattern_stats["all"].items():
-                top_rate = pattern_stats.get("top10", {}).get(pattern, 0)
-                all_patterns[pattern]["all"] += rate * all_count
-                all_patterns[pattern]["top10"] += top_rate * top_count
-                all_patterns[pattern]["count"] += all_count
+        # Winning patterns from the categorical structure.patternType stats
+        # (structure.pattern is free text in title_description; kept as a fallback
+        # for older profiles). Both rates use the same set of profiles as denominators.
+        pattern_stats = _get_nested(features, "structure.patternType")
+        if not (isinstance(pattern_stats, dict) and isinstance(pattern_stats.get("all"), dict)):
+            pattern_stats = _get_nested(features, "structure.pattern")
+        if isinstance(pattern_stats, dict) and isinstance(pattern_stats.get("all"), dict):
+            pattern_all_total += all_count
+            pattern_top_total += top_count
+            top_dist = pattern_stats.get("top10") or {}
+            for pattern in set(pattern_stats["all"]) | set(top_dist):
+                all_patterns[pattern]["all"] += pattern_stats["all"].get(pattern, 0) * all_count
+                all_patterns[pattern]["top10"] += top_dist.get(pattern, 0) * top_count
+            for pattern, perf in (title.get("patternPerformance") or {}).items():
+                all_patterns[pattern]["vps_sum"] += perf.get("avgViewsPerSubscriber", 0) * perf.get("count", 0)
+                all_patterns[pattern]["vps_count"] += perf.get("count", 0)
 
         # Character count
         char_stats = _get_nested(features, "structure.characterCount")
@@ -257,27 +280,33 @@ def _build_title_insights(
                 all_power_words[word]["all_total"] += all_count
                 all_power_words[word]["top10_total"] += top_count
 
-    # Build winning patterns
+    # Build winning patterns: over-represented in the top 10% (lift > 1).
+    # lift = top10 share / all share. avgViews is the average viewsPerSubscriber of
+    # videos with the pattern (same unit as contentGaps avgViews); profiles without
+    # patternPerformance fall back to the lift so the recommender field is populated.
     winning_patterns = []
-    top_total = sum(p.get("title", {}).get("sampleSize", {}).get("top10", 0) for p in profiles.values())
-    for pattern, data in all_patterns.items():
-        if data["count"] == 0:
+    pattern_items = all_patterns.items() if pattern_all_total > 0 and pattern_top_total > 0 else []
+    for pattern, data in pattern_items:
+        all_rate = data["all"] / pattern_all_total
+        top_rate = data["top10"] / pattern_top_total
+        if all_rate <= 0.01:
             continue
-        all_rate = data["all"] / data["count"]
-        top_rate = data["top10"] / top_total if top_total > 0 else 0
-        lift = top_rate / all_rate if all_rate > 0.01 else 0
+        lift = top_rate / all_rate
+        if lift <= 1.0:
+            continue
 
-        if lift > 0:
-            winning_patterns.append(
-                {
-                    "pattern": pattern,
-                    "avgViews": round(lift, 2),  # lift as avgViews (recommender field)
-                    "sampleSize": int(data["all"]),
-                    "examples": [],
-                }
-            )
+        avg_views = data["vps_sum"] / data["vps_count"] if data["vps_count"] > 0 else lift
+        winning_patterns.append(
+            {
+                "pattern": pattern,
+                "lift": round(lift, 2),
+                "avgViews": round(avg_views, 2),
+                "sampleSize": int(round(data["all"])),
+                "examples": [],
+            }
+        )
 
-    winning_patterns.sort(key=lambda x: x["avgViews"], reverse=True)
+    winning_patterns.sort(key=lambda x: (-x["lift"], x["pattern"]))
 
     # Build power words
     power_words_list = []
@@ -294,7 +323,7 @@ def _build_title_insights(
                 }
             )
 
-    power_words_list.sort(key=lambda x: x["multiplier"], reverse=True)
+    power_words_list.sort(key=lambda x: (-x["multiplier"], x["word"]))
 
     # Build optimal length
     optimal_length = None
@@ -467,17 +496,21 @@ def _build_timing_insights(
     }
 
 
-def _build_content_gap_insights(
+def build_content_gaps_document(
     content_gaps: dict,
     timestamp: str,
 ) -> dict:
-    """Build ContentGapInsights document (flat format for recommender).
+    """Build the insights/contentGaps document in the shape the recommender reads.
 
-    Flattens: contentGaps.highOpportunity → root highOpportunity
-    Maps avgViewsPerSubscriber → avgViews.
-    Ensures saturated topics have {topic, competition} structure.
+    From the GapAnalyzer report:
+      - contentGaps.highOpportunity → root highOpportunity (avgViewsPerSubscriber → avgViews)
+      - contentGaps.saturatedTopics → root saturatedTopics as {topic, competition}
+      - keywordGaps → keywordGaps {highValueKeywords, totalKeywords} (usageRate is a percent)
+      - formatGaps  → formatGaps {formatPerformance, recommendedFormats}
     """
     gaps = content_gaps.get("contentGaps", {})
+    keyword_gaps = content_gaps.get("keywordGaps") or {}
+    format_gaps = content_gaps.get("formatGaps") or {}
 
     # Flatten high opportunity
     high_opp = []
@@ -504,9 +537,24 @@ def _build_content_gap_insights(
 
     return {
         "generatedAt": timestamp,
+        "totalVideos": content_gaps.get("totalVideos", 0),
+        "totalTopics": gaps.get("totalTopics", 0),
+        "avgViewsPerSubscriber": gaps.get("avgViewsPerSubscriber", 0),
         "highOpportunity": high_opp,
         "saturatedTopics": saturated,
+        "keywordGaps": {
+            "highValueKeywords": list(keyword_gaps.get("highValueKeywords", [])),
+            "totalKeywords": keyword_gaps.get("totalKeywords", 0),
+        },
+        "formatGaps": {
+            "formatPerformance": list(format_gaps.get("formatPerformance", [])),
+            "recommendedFormats": list(format_gaps.get("recommendedFormats", [])),
+        },
     }
+
+
+# Backwards-compatible private name
+_build_content_gap_insights = build_content_gaps_document
 
 
 def _weighted_avg(entries: List[tuple]) -> float:

@@ -6,7 +6,9 @@ Output is raw statistical data — the recommender's LLM handles interpretation.
 
 Firestore output structure:
     insights/{contentType}  — per-type profile (thumbnail + title features + timing)
-    insights/contentGaps    — global content gap analysis
+    insights/contentGaps    — global content gap analysis, in the recommender's shape
+                              (root highOpportunity/saturatedTopics + keywordGaps/formatGaps);
+                              written only by the gaps step
     insights/summary        — overview of all content types
     insights/thumbnails     — recommender bridge: thumbnail insights
     insights/titles         — recommender bridge: title insights
@@ -15,6 +17,8 @@ Firestore output structure:
 
 import argparse
 import json
+import math
+import re
 import sys
 from pathlib import Path
 from collections import defaultdict
@@ -30,6 +34,7 @@ from .config import config
 from .firebase_client import (
     initialize_firebase,
     get_all_videos_with_analyses,
+    load_insight_profiles,
     save_insights,
 )
 from .profiler import (
@@ -37,9 +42,26 @@ from .profiler import (
     compute_timing_profile,
     compute_feature_correlations,
     compute_recency_weight,
+    normalize_analysis,
+    MAX_CATEGORICAL_VALUES,
     MIN_VIDEOS_PER_TYPE,
 )
 from .gaps import GapAnalyzer
+from .recommender_bridge import build_content_gaps_document, generate_recommender_documents
+
+# Content type bucket for videos without a usable contentType; counted in the
+# summary but never profiled as a real type.
+UNKNOWN_CONTENT_TYPE = "unknown"
+
+# insights/ doc IDs owned by non-profile documents; a content type normalizing to
+# one of these gets a "type_" prefix so its profile cannot overwrite them.
+RESERVED_DOC_NAMES = {"summary", "contentgaps", "thumbnails", "titles", "timing"}
+
+# Key on the (copied) video wrapper holding the pre-winsorization VPS, used as a tie-break
+UNCAPPED_VPS_KEY = "uncapped_vps"
+
+# Warn when a document approaches Firestore's 1 MiB document limit
+MAX_DOC_BYTES_WARNING = 800_000
 
 
 def get_views_per_subscriber(video_data: dict) -> float:
@@ -65,15 +87,33 @@ def get_engagement_rate(video_data: dict) -> float:
     return 0.0
 
 
+def normalize_content_type(value) -> str:
+    """Normalize a raw contentType: lowercase, trim, and collapse separators to '_'.
+
+    "Recipe", " recipe " -> "recipe"; "list/top", "List Top", "list-top" -> "list_top".
+    Missing / non-string / empty values -> "unknown".
+    """
+    if not isinstance(value, str):
+        return UNKNOWN_CONTENT_TYPE
+    normalized = re.sub(r"[\W_]+", "_", value.strip().lower()).strip("_")
+    return normalized or UNKNOWN_CONTENT_TYPE
+
+
+def profile_doc_name(content_type: str) -> str:
+    """Firestore doc ID for a (normalized) content type profile, avoiding reserved IDs."""
+    name = normalize_content_type(content_type)
+    return f"type_{name}" if name in RESERVED_DOC_NAMES else name
+
+
 def get_content_type(video_data: dict) -> str:
-    """Extract content type from title analysis."""
-    analysis = video_data.get("title_analysis", {})
-    content_signals = analysis.get("contentSignals", {})
-    return content_signals.get("contentType", "unknown")
+    """Extract the normalized content type from title analysis."""
+    analysis = video_data.get("title_analysis") or {}
+    content_signals = analysis.get("contentSignals") or {}
+    return normalize_content_type(content_signals.get("contentType"))
 
 
 def group_by_content_type(videos: list) -> dict:
-    """Group videos by their content type."""
+    """Group videos by their normalized content type."""
     groups = defaultdict(list)
     for video in videos:
         content_type = get_content_type(video)
@@ -110,14 +150,18 @@ def remove_outliers(
         cap = float(np.percentile(vps_values, cap_percentile))
         winsorized_count = sum(1 for vps in vps_values if vps > cap)
 
-        # Cap VPS on copies to avoid mutating original video objects
-        for i, v in enumerate(filtered):
-            calculated = v.get("video", {}).get("calculated", {})
-            vps = calculated.get("viewsPerSubscriber")
-            if vps and vps > cap:
-                capped_calculated = {**calculated, "viewsPerSubscriber": cap}
-                capped_video = {**v.get("video", {}), "calculated": capped_calculated}
-                filtered[i] = {**v, "video": capped_video}
+        # Store the effective (capped) VPS on copies of every video — including those
+        # whose VPS was derived from viewCount/subscriberCount — so every downstream
+        # consumer sees the same capped value. Originals are not mutated.
+        for i, (v, vps) in enumerate(zip(filtered, vps_values)):
+            video = v.get("video") or {}
+            calculated = video.get("calculated") or {}
+            capped_calculated = {**calculated, "viewsPerSubscriber": min(vps, cap)}
+            filtered[i] = {
+                **v,
+                "video": {**video, "calculated": capped_calculated},
+                UNCAPPED_VPS_KEY: vps,
+            }
     else:
         cap = 0
         winsorized_count = 0
@@ -141,13 +185,20 @@ def split_top_performers(
 ) -> tuple:
     """Split videos into all and top performers by a metric.
 
+    The top group is chosen by rank: the ceil((100 - percentile)%) highest videos
+    (at least one). Ties are broken deterministically by uncapped VPS (only when
+    ranking by VPS), then video id, then input order. Selecting by rank rather than
+    ``value >= threshold`` keeps the group at ~10% even when winsorizing creates
+    many ties at the cap.
+
     Args:
         videos: List of video data dicts.
         percentile: Percentile threshold for top performers.
         metric_fn: Function to extract metric value (defaults to get_views_per_subscriber).
 
     Returns:
-        Tuple of (all_videos, top_videos, threshold_value)
+        Tuple of (all_videos, top_videos, threshold_value). threshold_value is the
+        metric's percentile value (np.percentile), reported for reference only.
     """
     if metric_fn is None:
         metric_fn = get_views_per_subscriber
@@ -158,7 +209,17 @@ def split_top_performers(
         return videos, [], 0.0
 
     threshold = float(np.percentile(metric_values, percentile))
-    top_videos = [v for v, val in zip(videos, metric_values) if val >= threshold]
+    top_n = max(1, math.ceil(len(videos) * (100 - percentile) / 100))
+    by_vps = metric_fn is get_views_per_subscriber
+
+    def rank_key(i: int):
+        video = videos[i]
+        uncapped = float(video.get(UNCAPPED_VPS_KEY, metric_values[i])) if by_vps else 0.0
+        video_id = str(video.get("video_id") or (video.get("video") or {}).get("id") or "")
+        return (-metric_values[i], -uncapped, video_id, i)
+
+    top_indices = sorted(sorted(range(len(videos)), key=rank_key)[:top_n])
+    top_videos = [videos[i] for i in top_indices]
 
     return videos, top_videos, threshold
 
@@ -175,6 +236,28 @@ def _compute_recency_weights(videos: list) -> List[float]:
 def _align_weights(videos: list, all_weights: List[float], has_analysis_fn: Callable) -> List[float]:
     """Return weights only for videos that pass the has_analysis_fn filter."""
     return [w for v, w in zip(videos, all_weights) if has_analysis_fn(v)]
+
+
+def _title_features(title_analysis: dict) -> dict:
+    """Title analysis prepared for profiling: normalized lists, no descriptionAnalysis subtree."""
+    normalized = normalize_analysis(title_analysis)
+    return {k: v for k, v in normalized.items() if k != "descriptionAnalysis"}
+
+
+def _pattern_performance(videos: list) -> dict:
+    """Average (capped) VPS per categorical title patternType, for the recommender bridge."""
+    by_pattern = defaultdict(list)
+    for v in videos:
+        structure = (v.get("title_analysis") or {}).get("structure") or {}
+        pattern_type = structure.get("patternType")
+        if isinstance(pattern_type, str) and pattern_type.strip():
+            by_pattern[pattern_type.strip()].append(get_views_per_subscriber(v))
+    if not by_pattern or len(by_pattern) > MAX_CATEGORICAL_VALUES:
+        return {}
+    return {
+        pattern: {"avgViewsPerSubscriber": round(float(np.mean(vals)), 2), "count": len(vals)}
+        for pattern, vals in by_pattern.items()
+    }
 
 
 def generate_content_type_profile(content_type: str, videos: list) -> dict:
@@ -218,9 +301,11 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
             "features": compute_feature_profile(all_thumb, top_thumb, all_thumb_w, top_thumb_w),
         }
 
-    # Title profile
-    all_title = [v["title_analysis"] for v in all_videos if v.get("title_analysis")]
-    top_title = [v["title_analysis"] for v in top_videos if v.get("title_analysis")]
+    # Title profile (descriptionAnalysis is profiled separately below; word-list
+    # fields normalized to lists so legacy and title_description data mix cleanly)
+    title_by_id = {id(v): _title_features(v["title_analysis"]) for v in all_videos if v.get("title_analysis")}
+    all_title = [title_by_id[id(v)] for v in all_videos if v.get("title_analysis")]
+    top_title = [title_by_id[id(v)] for v in top_videos if v.get("title_analysis")]
     all_title_w = _align_weights(all_videos, all_weights, lambda v: v.get("title_analysis"))
     top_title_w = _align_weights(top_videos, top_weights, lambda v: v.get("title_analysis"))
 
@@ -229,6 +314,9 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
             "sampleSize": {"all": len(all_title), "top10": len(top_title)},
             "features": compute_feature_profile(all_title, top_title, all_title_w, top_title_w),
         }
+        pattern_performance = _pattern_performance(all_videos)
+        if pattern_performance:
+            profile["title"]["patternPerformance"] = pattern_performance
 
     # Description profile (extracted from title_description analysis)
     all_desc = [
@@ -267,7 +355,10 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
 
     if eng_top_videos:
         eng_top_thumb = [v["thumbnail_analysis"] for v in eng_top_videos if v.get("thumbnail_analysis")]
-        eng_top_title = [v["title_analysis"] for v in eng_top_videos if v.get("title_analysis")]
+        eng_top_title = [title_by_id[id(v)] for v in eng_top_videos if v.get("title_analysis")]
+        eng_top_weights = [weight_by_id[id(v)] for v in eng_top_videos]
+        eng_top_thumb_w = _align_weights(eng_top_videos, eng_top_weights, lambda v: v.get("thumbnail_analysis"))
+        eng_top_title_w = _align_weights(eng_top_videos, eng_top_weights, lambda v: v.get("title_analysis"))
 
         engagement_profile = {
             "metric": "engagementRate",
@@ -278,12 +369,12 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
         if all_thumb and eng_top_thumb:
             engagement_profile["thumbnail"] = {
                 "sampleSize": {"all": len(all_thumb), "top10": len(eng_top_thumb)},
-                "features": compute_feature_profile(all_thumb, eng_top_thumb),
+                "features": compute_feature_profile(all_thumb, eng_top_thumb, all_thumb_w, eng_top_thumb_w),
             }
         if all_title and eng_top_title:
             engagement_profile["title"] = {
                 "sampleSize": {"all": len(all_title), "top10": len(eng_top_title)},
-                "features": compute_feature_profile(all_title, eng_top_title),
+                "features": compute_feature_profile(all_title, eng_top_title, all_title_w, eng_top_title_w),
             }
 
         profile["engagementProfile"] = engagement_profile
@@ -300,6 +391,44 @@ def save_to_file(name: str, data: dict) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
     print(f"    Saved to {filepath}")
+
+
+def _write_insight(doc_name: str, data: dict, dry_run: bool) -> None:
+    """Save an insights document to Firestore (unless dry run), warning on large docs."""
+    size = len(json.dumps(data, ensure_ascii=False, default=str).encode("utf-8"))
+    if size > MAX_DOC_BYTES_WARNING:
+        print(f"    WARNING: insights/{doc_name} is ~{size // 1024} KB (Firestore limit is 1 MiB)")
+    if not dry_run:
+        save_insights(doc_name, data)
+        print(f"    Saved to Firestore: insights/{doc_name}")
+
+
+def _write_bridge_docs(profiles: dict, dry_run: bool) -> None:
+    """Generate and save the recommender bridge docs (thumbnails, titles, timing).
+
+    insights/contentGaps is not written here: the gaps step is its only writer.
+    """
+    print("\nGenerating recommender bridge documents...")
+    bridge_docs = generate_recommender_documents(profiles, None)
+    for doc_name, doc_data in bridge_docs.items():
+        _write_insight(doc_name, doc_data, dry_run)
+        save_to_file(f"bridge_{doc_name}", doc_data)
+
+
+def _run_bridge_only(dry_run: bool) -> None:
+    """Rebuild bridge docs from the profiles already stored in Firestore.
+
+    Refuses to write anything when no stored profiles are found, so live
+    recommender documents are never overwritten with empty data.
+    """
+    print("Loading stored content type profiles from Firestore...")
+    profiles = load_insight_profiles()
+    if not profiles:
+        print("\nNo stored content type profiles found in insights/. Run with --type profiles (or all) first.")
+        print("Refusing to overwrite recommender bridge documents with empty data.")
+        sys.exit(1)
+    print(f"  Loaded {len(profiles)} profiles: {', '.join(sorted(profiles))}")
+    _write_bridge_docs(profiles, dry_run)
 
 
 def main():
@@ -329,6 +458,11 @@ def main():
     print("Initializing Firebase...")
     initialize_firebase()
     print("Connected\n")
+
+    # Bridge-only: transform stored profiles; no video loading, no summary rewrite
+    if args.type == "bridge":
+        _run_bridge_only(dry_run)
+        return
 
     # Load data
     if args.channel:
@@ -366,6 +500,9 @@ def main():
         print("\nGenerating content type profiles...")
 
         for content_type, type_videos in sorted(groups.items(), key=lambda x: -len(x[1])):
+            if content_type == UNKNOWN_CONTENT_TYPE:
+                print(f"  Skipping '{content_type}' ({len(type_videos)} videos without a content type)")
+                continue
             if len(type_videos) < MIN_VIDEOS_PER_TYPE:
                 print(f"  Skipping '{content_type}' ({len(type_videos)} videos, need {MIN_VIDEOS_PER_TYPE})")
                 continue
@@ -374,16 +511,20 @@ def main():
             profile = generate_content_type_profile(content_type, type_videos)
 
             # Save to file first (for debugging), then Firestore
-            doc_name = content_type.replace(" ", "_").replace("/", "_").replace(",", "_").lower()
+            doc_name = profile_doc_name(content_type)
             save_to_file(doc_name, profile)
-            if not dry_run:
-                save_insights(doc_name, profile)
-                print(f"    Saved to Firestore: insights/{doc_name}")
+            _write_insight(doc_name, profile, dry_run)
 
             generated_profiles[doc_name] = profile
 
-    # Generate content gaps
-    gap_report = None
+        # Report stored profiles for types that were not regenerated (not deleted:
+        # a type may be temporarily below MIN_VIDEOS_PER_TYPE)
+        if not dry_run:
+            stale = sorted(set(load_insight_profiles()) - set(generated_profiles))
+            if stale:
+                print(f"\n  WARNING: stale profile docs not regenerated this run: {', '.join(stale)}")
+
+    # Generate content gaps (sole writer of insights/contentGaps, in the recommender's shape)
     if args.type in ["all", "gaps"]:
         print("\nGenerating content gap analysis...")
         gap_analyzer = GapAnalyzer(videos, get_views_per_subscriber)
@@ -395,24 +536,17 @@ def main():
             "keywordGaps": gap_analyzer.analyze_keyword_gaps(),
             "formatGaps": gap_analyzer.analyze_format_gaps(),
         }
+        content_gaps_doc = build_content_gaps_document(gap_report, gap_report["generatedAt"])
 
-        if not dry_run:
-            save_insights("contentGaps", gap_report)
-            print("    Saved to Firestore: insights/contentGaps")
-        save_to_file("contentGaps", gap_report)
+        _write_insight("contentGaps", content_gaps_doc, dry_run)
+        save_to_file("contentGaps", content_gaps_doc)
 
     # Generate recommender bridge documents
-    if args.type in ["all", "bridge"]:
-        print("\nGenerating recommender bridge documents...")
-        from .recommender_bridge import generate_recommender_documents
-
-        bridge_docs = generate_recommender_documents(generated_profiles, gap_report)
-
-        for doc_name, doc_data in bridge_docs.items():
-            if not dry_run:
-                save_insights(doc_name, doc_data)
-                print(f"    Saved to Firestore: insights/{doc_name}")
-            save_to_file(f"bridge_{doc_name}", doc_data)
+    if args.type == "all":
+        if generated_profiles:
+            _write_bridge_docs(generated_profiles, dry_run)
+        else:
+            print("\nNo profiles generated — not overwriting recommender bridge documents.")
 
     # Generate summary
     summary = {
@@ -428,9 +562,7 @@ def main():
             for ct, vids in sorted(groups.items(), key=lambda x: -len(x[1]))
         ],
     }
-    if not dry_run:
-        save_insights("summary", summary)
-        print("\n    Saved summary to Firestore: insights/summary")
+    _write_insight("summary", summary, dry_run)
     save_to_file("summary", summary)
 
     # Print summary

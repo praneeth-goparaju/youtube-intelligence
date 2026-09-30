@@ -127,12 +127,25 @@ class TestBuildThumbnailInsights:
                             "significant": True,
                         },
                     },
+                    "textElements": {
+                        "words": {
+                            "all_avg_count": 1.0,
+                            "top10_avg_count": 2.0,
+                            "confidence": "high",
+                            "topItems": {"tasty": {"all": 0.2, "top10": 0.9}},
+                        },
+                    },
+                    "humanPresence": {
+                        # Low confidence / not significant: both filtered out
+                        "hasHands": {"all": 0.2, "top10": 0.9, "confidence": "low", "significant": True},
+                        "hasFace": {"all": 0.2, "top10": 0.9, "confidence": "high", "significant": False},
+                    },
                 }
             ),
         }
         result = _build_thumbnail_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
-        # lift = 0.75 / 0.25 = 3.0
+        # lift = 0.75 / 0.25 = 3.0 (list topItems of textElements.words are not elements)
         assert result == {
             "generatedAt": "2026-03-04T00:00:00Z",
             "basedOnVideos": 100,
@@ -158,11 +171,63 @@ class TestBuildTitleInsights:
         }
         result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
-        patterns = result["winningPatterns"]
-        # "question" is the only pattern over-represented in the top 10%
-        assert patterns[0]["pattern"] == "question"
-        lifts = [p["avgViews"] for p in patterns]
-        assert lifts == sorted(lifts, reverse=True)
+        # Only "question" is over-represented in the top 10% (lift 2.5); howto (1.0) and
+        # list (0.4) are excluded. No patternPerformance -> avgViews falls back to the lift.
+        assert result["winningPatterns"] == [
+            {"pattern": "question", "lift": 2.5, "avgViews": 2.5, "sampleSize": 20, "examples": []}
+        ]
+
+    def test_winning_patterns_use_pattern_type_and_matching_denominators(self):
+        # structure.pattern is free text (dropped by the profiler); patternType is categorical.
+        # The "vlog" profile has no pattern stats and must not dilute the top10 denominator.
+        recipe = _make_profile(
+            total=100,
+            top10=10,
+            title_features={
+                "structure": {
+                    "patternType": {
+                        "all": {"question": 0.2, "segmented": 0.8},
+                        "top10": {"question": 0.4, "segmented": 0.6},
+                        "confidence": "medium",
+                    },
+                },
+            },
+        )
+        recipe["title"]["patternPerformance"] = {
+            "question": {"avgViewsPerSubscriber": 3.0, "count": 20},
+            "segmented": {"avgViewsPerSubscriber": 1.0, "count": 80},
+        }
+        vlog = _make_profile(content_type="vlog", total=300, top10=30, title_features={})
+        result = _build_title_insights({"recipe": recipe, "vlog": vlog}, "2026-03-04T00:00:00Z", 400)
+
+        assert result["winningPatterns"] == [
+            {"pattern": "question", "lift": 2.0, "avgViews": 3.0, "sampleSize": 20, "examples": []}
+        ]
+
+    def test_power_words_split_by_impact(self):
+        profiles = {
+            "recipe": _make_profile(
+                title_features={
+                    "hooks": {
+                        "powerWords": {
+                            "all_avg_count": 1.0,
+                            "top10_avg_count": 1.5,
+                            "confidence": "medium",
+                            "topItems": {
+                                "secret": {"all": 0.1, "top10": 0.3},
+                                "best": {"all": 0.2, "top10": 0.25},
+                                "easy": {"all": 0.3, "top10": 0.1},
+                            },
+                        },
+                    },
+                },
+            ),
+        }
+        result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 100)
+        assert result["powerWords"] == {
+            "highImpact": [{"word": "secret", "multiplier": 3.0}],
+            "mediumImpact": [{"word": "best", "multiplier": 1.25}],
+        }
 
     def test_optimal_length(self):
         # Two content types with unequal top10 sample sizes (10 vs 30): sweet spot is the
@@ -300,7 +365,7 @@ class TestBuildTimingInsights:
 
 
 class TestBuildContentGapInsights:
-    def test_flat_structure(self):
+    def test_recommender_shape(self):
         content_gaps = {
             "generatedAt": "2026-03-04T00:00:00Z",
             "totalVideos": 100,
@@ -322,12 +387,40 @@ class TestBuildContentGapInsights:
             },
         }
 
+        content_gaps["contentGaps"].update({"totalTopics": 12, "avgViewsPerSubscriber": 1.5})
+        keyword = {
+            "keyword": "biryani",
+            "avgViewsPerSubscriber": 4.0,
+            "viewsMultiplier": 2.0,
+            "usageCount": 3,
+            "usageRate": 3.0,  # percent
+        }
+        fmt = {
+            "format": "recipe",
+            "avgViewsPerSubscriber": 2.0,
+            "viewsMultiplier": 1.2,
+            "count": 5,
+            "usagePercent": 5.0,
+        }
+        content_gaps["keywordGaps"] = {"highValueKeywords": [keyword], "totalKeywords": 40}
+        content_gaps["formatGaps"] = {"formatPerformance": [fmt], "recommendedFormats": [fmt]}
+
         result = _build_content_gap_insights(content_gaps, "2026-03-04T00:00:00Z")
 
-        # Should be flat (no nesting under 'contentGaps')
-        assert "highOpportunity" in result
-        assert "saturatedTopics" in result
-        assert "contentGaps" not in result
+        # Root-level fields the recommender reads (no nesting under 'contentGaps'),
+        # plus keywordGaps/formatGaps passed through unchanged
+        assert result == {
+            "generatedAt": "2026-03-04T00:00:00Z",
+            "totalVideos": 100,
+            "totalTopics": 12,
+            "avgViewsPerSubscriber": 1.5,
+            "highOpportunity": [
+                {"topic": "cooking/biryani", "avgViews": 5.0, "videoCount": 10, "opportunityScore": 2.5}
+            ],
+            "saturatedTopics": [{"topic": "cooking/general", "competition": "high"}],
+            "keywordGaps": {"highValueKeywords": [keyword], "totalKeywords": 40},
+            "formatGaps": {"formatPerformance": [fmt], "recommendedFormats": [fmt]},
+        }
 
     def test_avg_views_mapping(self):
         content_gaps = {
@@ -413,10 +506,15 @@ class TestGenerateRecommenderDocuments:
 
         result = generate_recommender_documents(profiles, content_gaps)
 
-        assert "thumbnails" in result
-        assert "titles" in result
-        assert "timing" in result
-        assert "contentGaps" in result
+        assert set(result) == {"thumbnails", "titles", "timing", "contentGaps"}
+        gaps_doc = result["contentGaps"]
+        assert gaps_doc["highOpportunity"] == [
+            {"topic": "test", "avgViews": 5.0, "videoCount": 10, "opportunityScore": 2.0}
+        ]
+        assert gaps_doc["saturatedTopics"] == [{"topic": "general", "competition": "high"}]
+        # Missing sections in the report still produce the shape the recommender reads
+        assert gaps_doc["keywordGaps"] == {"highValueKeywords": [], "totalKeywords": 0}
+        assert gaps_doc["formatGaps"] == {"formatPerformance": [], "recommendedFormats": []}
 
     def test_without_content_gaps(self):
         profiles = {"recipe": _make_profile()}

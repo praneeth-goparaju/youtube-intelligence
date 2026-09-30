@@ -76,11 +76,61 @@ class TestRecencyWeight:
         weight = compute_recency_weight("not-a-date")
         assert weight == 1.0
 
-    def test_non_string(self):
-        # Known defect: Firestore returns publishedAt as a datetime, which falls into this
-        # non-string branch and gets weight 1.0 (no recency decay). Documented, not fixed here.
+    def test_unsupported_type(self):
+        # Neither a string nor a datetime: no decay
         weight = compute_recency_weight(12345)
         assert weight == 1.0
+
+    def test_aware_datetime(self):
+        # Firestore returns publishedAt as a (tz-aware) datetime, not a string
+        from datetime import datetime, timezone, timedelta
+
+        one_year_ago = datetime.now(timezone.utc) - timedelta(days=365)
+        assert compute_recency_weight(one_year_ago) == pytest.approx(0.5, abs=0.001)
+
+    def test_naive_datetime_treated_as_utc(self):
+        from datetime import datetime, timezone, timedelta
+
+        two_years_ago = (datetime.now(timezone.utc) - timedelta(days=730)).replace(tzinfo=None)
+        assert compute_recency_weight(two_years_ago) == pytest.approx(0.25, abs=0.001)
+
+    def test_firestore_datetime_with_nanoseconds(self):
+        from datetime import datetime, timezone, timedelta
+
+        DatetimeWithNanoseconds = pytest.importorskip("google.api_core.datetime_helpers").DatetimeWithNanoseconds
+        ts = datetime.now(timezone.utc) - timedelta(days=365)
+        published = DatetimeWithNanoseconds(
+            ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, tzinfo=timezone.utc
+        )
+        assert compute_recency_weight(published) == pytest.approx(0.5, abs=0.001)
+
+
+class TestSignificanceWithGroupSizes:
+    def test_small_top_group_never_significant(self):
+        # Large gap, but only 5 top videos (< MIN_TOP_FOR_SIGNIFICANCE)
+        assert is_significant(0.2, 0.8, n_top=5, n_all=500) is False
+
+    def test_z_test_passes(self):
+        # se = sqrt(0.2*0.8/50 * 450/499) ~= 0.0537; |0.4-0.2|/se ~= 3.7
+        assert is_significant(0.2, 0.4, n_top=50, n_all=500) is True
+
+    def test_z_test_fails(self):
+        # Same gap with 10 top videos: se ~= 0.12, z ~= 1.66 < 1.96
+        assert is_significant(0.2, 0.4, n_top=10, n_all=100) is False
+
+    def test_bool_stats_use_group_sizes(self):
+        all_vals = [True] * 20 + [False] * 80
+        # 10 top videos, 7 True: rate 0.7 vs 0.2 -> z ~= 3.7
+        top_vals = [True] * 7 + [False] * 3
+        assert _bool_stats(all_vals, top_vals) == {
+            "all": 0.2,
+            "top10": 0.7,
+            "confidence": "medium",  # min(100, 10) = 10
+            "significant": True,
+        }
+        # Same rates with 2 top videos: too few for significance, low confidence
+        assert _bool_stats(all_vals, [True, False])["confidence"] == "low"
+        assert _bool_stats(all_vals, [True, True])["significant"] is False
 
 
 class TestBoolStats:
@@ -95,6 +145,10 @@ class TestNumericStats:
         result = _numeric_stats([10, 20], [])
         assert result["all_avg"] == 15.0
         assert result["top10_avg"] == 0
+
+    def test_confidence_limited_by_top_group(self):
+        result = _numeric_stats(list(range(200)), [1, 2, 3])
+        assert result["confidence"] == "low"
 
 
 class TestCategoricalStats:
@@ -138,6 +192,46 @@ class TestComputeStats:
         assert result is None
 
 
+class TestMixedListAndStringValues:
+    """Legacy `title` stores word lists as lists; title_description as comma-separated strings."""
+
+    _EXPECTED = {
+        "all_avg_count": 1.5,
+        "top10_avg_count": 2.0,
+        "confidence": "low",
+        "topItems": {
+            "best": {"all": 0.5, "top10": 1.0},
+            "easy": {"all": 0.5, "top10": 0.0},
+            "secret": {"all": 0.5, "top10": 1.0},
+        },
+    }
+
+    def test_list_first(self):
+        legacy = {"hooks": {"powerWords": ["easy"]}}
+        new = {"hooks": {"powerWords": "best, secret"}}
+        profile = compute_feature_profile([legacy, new], [new])
+        assert profile["hooks"]["powerWords"] == self._EXPECTED
+
+    def test_string_first(self):
+        legacy = {"hooks": {"powerWords": ["easy"]}}
+        new = {"hooks": {"powerWords": "best, secret"}}
+        profile = compute_feature_profile([new, legacy], [new])
+        assert profile["hooks"]["powerWords"] == self._EXPECTED
+
+
+class TestWeightsApplyToAllStatTypes:
+    def test_bool_categorical_and_list_are_weighted(self):
+        all_analyses = [
+            {"flag": True, "mood": "happy", "tags": ["a"]},
+            {"flag": False, "mood": "sad", "tags": []},
+        ]
+        profile = compute_feature_profile(all_analyses, [all_analyses[0]], all_weights=[0.25, 0.75], top_weights=[1.0])
+        assert profile["flag"]["all"] == 0.25
+        assert profile["mood"]["all"] == {"happy": 0.25, "sad": 0.75}
+        assert profile["tags"]["all_avg_count"] == 0.25
+        assert profile["tags"]["topItems"] == {"a": {"all": 0.25, "top10": 1.0}}
+
+
 class TestSetNested:
     def test_path_conflict(self):
         d = {"a": "not_a_dict"}
@@ -153,10 +247,31 @@ class TestCollectValues:
         assert "analyzedAt" not in result
         assert "score" in result
 
+    def test_analyzer_metadata_skipped(self):
+        # Metadata written by the sync analyzers and the batch importer is not a feature
+        analyses = [
+            {
+                "analyzedAt": "2026-01-01T00:00:00",
+                "modelUsed": "gemini-2.5-flash",
+                "analysisVersion": "2.0",
+                "rawTitle": "Biryani",
+                "hasDescription": True,
+                "batchMode": True,
+                "score": 5,
+            }
+        ]
+        assert dict(_collect_values(analyses)) == {"score": [5]}
+
     def test_list_values(self):
         analyses = [{"tags": ["a", "b"]}, {"tags": ["c"]}]
         result = _collect_values(analyses)
         assert result["tags"] == [["a", "b"], ["c"]]
+
+    def test_list_of_dicts_skipped(self):
+        # Legacy structure.segments is a list of objects: no meaningful leaf stats
+        analyses = [{"structure": {"segments": [{"text": "a"}], "patternType": "single"}}]
+        result = _collect_values(analyses)
+        assert dict(result) == {"structure.patternType": ["single"]}
 
 
 _PROFILE_ALL = [
@@ -172,7 +287,8 @@ class TestComputeFeatureProfile:
     @pytest.mark.parametrize(
         "path, expected",
         [
-            ("hasFace", {"all": 0.5, "top10": 1.0, "confidence": "low", "significant": True}),
+            # n_top=1 < MIN_TOP_FOR_SIGNIFICANCE, so large rate gaps are not flagged significant
+            ("hasFace", {"all": 0.5, "top10": 1.0, "confidence": "low", "significant": False}),
             ("isHD", {"all": 1.0, "top10": 1.0, "confidence": "low", "significant": False}),
             ("score", {"all_avg": 25.0, "top10_avg": 30.0, "confidence": "low"}),
             ("mood", {"all": {"happy": 0.75, "sad": 0.25}, "top10": {"happy": 1.0}, "confidence": "low"}),
@@ -189,7 +305,7 @@ class TestComputeFeatureProfile:
                     },
                 },
             ),
-            ("colors.bright", {"all": 0.25, "top10": 0.0, "confidence": "low", "significant": True}),
+            ("colors.bright", {"all": 0.25, "top10": 0.0, "confidence": "low", "significant": False}),
         ],
         ids=["bool", "bool-not-significant", "numeric", "categorical", "list", "nested"],
     )

@@ -12,13 +12,15 @@ from collections import Counter, defaultdict
 import numpy as np
 
 
-# Metadata fields to skip during profiling
+# Metadata fields to skip during profiling (written by analyzer/src/analyzers/*.py and
+# analyzer/src/batch_api/import_results.py alongside the analysis features)
 SKIP_FIELDS = {
     "analyzedAt",
     "modelUsed",
     "analysisVersion",
     "rawTitle",
     "hasDescription",
+    "batchMode",
     "inputMetadata",
 }
 
@@ -30,6 +32,64 @@ MIN_VIDEOS_PER_TYPE = 30
 
 # Max bytes for a Firestore field name (limit is 1500 for full path)
 _MAX_KEY_BYTES = 200
+
+# Minimum top-group size before a boolean difference can be flagged significant
+MIN_TOP_FOR_SIGNIFICANCE = 10
+
+# z critical value (two-sided, ~95%) used by is_significant
+_Z_CRITICAL = 1.96
+
+# Word-list fields that title_description stores as comma-separated strings but the
+# legacy `title` analysis stored as lists. Normalized to lists before profiling so
+# mixed legacy/new data profiles consistently (per-item topItems, not per-string).
+COMMA_SEPARATED_LIST_FIELDS = (
+    "language.transliteratedWords",
+    "language.teluguWords",
+    "language.englishWords",
+    "hooks.powerWords",
+    "hooks.powerWordCategories",
+    "keywords.secondaryKeywords",
+)
+
+
+def split_list_value(value: Any) -> Optional[List[str]]:
+    """Normalize a comma-separated string or list into a list of stripped, non-empty strings.
+
+    Returns None for values that are neither (e.g. None), so they stay missing.
+    """
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if isinstance(item, str) and item.strip()]
+    return None
+
+
+def normalize_analysis(analysis: Dict, list_fields=COMMA_SEPARATED_LIST_FIELDS) -> Dict:
+    """Return a copy of an analysis with word-list fields normalized to lists.
+
+    Only the dicts along each normalized path are copied; the input is not mutated.
+    """
+    if not isinstance(analysis, dict):
+        return analysis
+    result = dict(analysis)
+    for path in list_fields:
+        keys = path.split(".")
+        parent = result
+        ok = True
+        for key in keys[:-1]:
+            child = parent.get(key)
+            if not isinstance(child, dict):
+                ok = False
+                break
+            child = dict(child)
+            parent[key] = child
+            parent = child
+        if not ok or keys[-1] not in parent:
+            continue
+        normalized = split_list_value(parent[keys[-1]])
+        if normalized is not None:
+            parent[keys[-1]] = normalized
+    return result
 
 
 def _safe_key(key: str) -> str:
@@ -46,6 +106,9 @@ def _safe_key(key: str) -> str:
 def compute_confidence(sample_size: int) -> str:
     """Classify statistical confidence based on sample size.
 
+    Callers pass the size of the smaller compared group (usually the top 10%),
+    since that is what limits how trustworthy an all-vs-top comparison is.
+
     Returns:
         'low' (<10), 'medium' (10-50), 'high' (50+)
     """
@@ -56,32 +119,61 @@ def compute_confidence(sample_size: int) -> str:
     return "high"
 
 
-def is_significant(all_rate: float, top_rate: float, threshold: float = 0.05) -> bool:
+def is_significant(
+    all_rate: float,
+    top_rate: float,
+    threshold: float = 0.05,
+    n_top: Optional[int] = None,
+    n_all: Optional[int] = None,
+) -> bool:
     """Check if the difference between all and top10 rates is significant.
 
-    Uses a simple absolute difference threshold — if the top10 rate differs
-    from the all rate by more than the threshold, the difference is significant.
+    Always requires an absolute difference greater than ``threshold``.
+
+    When the group sizes are known (``n_top``, ``n_all``) it additionally requires
+    ``n_top >= MIN_TOP_FOR_SIGNIFICANCE`` and a z-test: the top group is a subset of
+    "all", so under the null hypothesis (top is a random subset) its rate has
+    standard error ``sqrt(p(1-p)/n_top * (n_all-n_top)/(n_all-1))`` (finite
+    population correction). ``|top - all| / se`` must reach 1.96 (~95%).
     """
-    return abs(top_rate - all_rate) > threshold
+    diff = abs(top_rate - all_rate)
+    if diff <= threshold:
+        return False
+    if n_top is None:
+        return True
+    if n_top < MIN_TOP_FOR_SIGNIFICANCE:
+        return False
+    if n_all is None or n_all <= n_top or n_all < 2:
+        return False
+    variance = all_rate * (1 - all_rate) / n_top * (n_all - n_top) / (n_all - 1)
+    if variance <= 0:
+        return False
+    return diff / math.sqrt(variance) >= _Z_CRITICAL
 
 
-def compute_recency_weight(published_at: str, half_life_days: float = 365.0) -> float:
+def compute_recency_weight(published_at: Any, half_life_days: float = 365.0) -> float:
     """Compute exponential decay weight based on publish date.
 
     Args:
-        published_at: ISO 8601 date string.
+        published_at: ISO 8601 date string, or a datetime (Firestore returns
+            timestamps as DatetimeWithNanoseconds, a datetime subclass).
+            Naive datetimes/strings are treated as UTC.
         half_life_days: Days for the weight to halve (default 365).
 
     Returns:
         Weight between 0 and 1 (1.0 = just published, 0.5 = one half-life ago).
     """
     try:
-        if isinstance(published_at, str):
+        if isinstance(published_at, datetime):
+            pub_date = published_at
+        elif isinstance(published_at, str):
             # Handle both Z and +00:00 suffixes
             dt_str = published_at.replace("Z", "+00:00")
             pub_date = datetime.fromisoformat(dt_str)
         else:
-            return 1.0  # Default weight if not a string
+            return 1.0  # Unknown type: no decay
+        if pub_date.tzinfo is None:
+            pub_date = pub_date.replace(tzinfo=timezone.utc)
 
         now = datetime.now(timezone.utc)
         days_ago = (now - pub_date).total_seconds() / 86400.0
@@ -103,7 +195,9 @@ def compute_feature_profile(
     Compare feature distributions between all and top performing videos.
 
     Automatically detects feature types (boolean, categorical, numeric, list)
-    and computes appropriate statistics for each.
+    and computes appropriate statistics for each. When weights are given they
+    apply to every stat type (rates, distributions, averages); sample sizes and
+    confidence always use unweighted counts.
 
     Args:
         all_analyses: Analysis dicts from all videos in the group.
@@ -323,10 +417,25 @@ def _traverse(obj: Any, prefix: str, collected: Dict[str, List]):
             path = f"{prefix}.{key}" if prefix else key
             _traverse(value, path, collected)
     elif isinstance(obj, list):
+        # Lists of objects (e.g. legacy structure.segments) have no useful leaf stats
+        if any(isinstance(item, dict) for item in obj):
+            return
         # Store entire list as a leaf value for list-level stats
         collected[prefix].append(obj)
     else:
         collected[prefix].append(obj)
+
+
+def _value_kind(value: Any) -> Optional[str]:
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "numeric"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, (list, tuple)):
+        return "list"
+    return None
 
 
 def _compute_stats(
@@ -335,72 +444,127 @@ def _compute_stats(
     all_weights: Optional[List[float]] = None,
     top_weights: Optional[List[float]] = None,
 ) -> Optional[Dict]:
-    """Compute appropriate stats based on detected value type."""
-    all_clean = [v for v in all_values if v is not None]
-    top_clean = [v for v in top_values if v is not None]
+    """Compute appropriate stats based on detected value type.
 
-    # Also filter weights to match clean values
-    if all_weights is not None:
-        all_w_clean = [w for v, w in zip(all_values, all_weights) if v is not None]
-    else:
-        all_w_clean = None
-    if top_weights is not None:
-        top_w_clean = [w for v, w in zip(top_values, top_weights) if v is not None]
-    else:
-        top_w_clean = None
-
-    if not all_clean:
+    Robust to mixed types across videos (e.g. legacy list vs new comma-separated
+    string): if any value is a list, strings are split on commas and treated as
+    lists; otherwise the most common kind wins and other kinds are dropped.
+    """
+    all_pairs = _pair_values(all_values, all_weights)
+    top_pairs = _pair_values(top_values, top_weights)
+    if not all_pairs:
         return None
 
-    sample = all_clean[0]
+    kinds = Counter(_value_kind(v) for v, _ in all_pairs)
+    kinds.pop(None, None)
+    if not kinds:
+        return None
+    if "list" in kinds:
+        kind = "list"
+    elif set(kinds) <= {"bool", "numeric"} and "numeric" in kinds:
+        kind = "numeric" if kinds["numeric"] >= kinds["bool"] else "bool"
+    else:
+        kind = kinds.most_common(1)[0][0]
 
-    if isinstance(sample, bool):
-        return _bool_stats(all_clean, top_clean)
-    if isinstance(sample, (int, float)):
-        return _numeric_stats(all_clean, top_clean, all_w_clean, top_w_clean)
-    if isinstance(sample, str):
-        return _categorical_stats(all_clean, top_clean)
-    if isinstance(sample, list):
-        return _list_stats(all_clean, top_clean)
+    all_vals, all_w = _coerce(all_pairs, kind)
+    top_vals, top_w = _coerce(top_pairs, kind)
+    if not all_vals:
+        return None
 
-    return None
+    if kind == "bool":
+        return _bool_stats(all_vals, top_vals, all_w, top_w)
+    if kind == "numeric":
+        return _numeric_stats(all_vals, top_vals, all_w, top_w)
+    if kind == "str":
+        return _categorical_stats(all_vals, top_vals, all_w, top_w)
+    return _list_stats(all_vals, top_vals, all_w, top_w)
 
 
-def _bool_stats(all_vals: List[bool], top_vals: List[bool]) -> Dict:
-    """Boolean feature: rate of True in all vs top 10%."""
-    all_rate = sum(1 for v in all_vals if v) / len(all_vals) if all_vals else 0
-    top_rate = sum(1 for v in top_vals if v) / len(top_vals) if top_vals else 0
+def _pair_values(values: List, weights: Optional[List[float]]) -> List[tuple]:
+    """Pair values with weights (default 1.0), dropping None values."""
+    if weights is None or len(weights) != len(values):
+        weights = [1.0] * len(values)
+    return [(v, w) for v, w in zip(values, weights) if v is not None]
+
+
+def _coerce(pairs: List[tuple], kind: str) -> tuple:
+    """Keep values of the chosen kind (converting where sensible) and their weights."""
+    vals, weights = [], []
+    for v, w in pairs:
+        vk = _value_kind(v)
+        if kind == "list":
+            if vk == "list":
+                v = list(v)
+            elif vk == "str":
+                v = split_list_value(v)
+            else:
+                continue
+        elif kind == "numeric":
+            if vk == "bool":
+                v = int(v)
+            elif vk != "numeric":
+                continue
+        elif vk != kind:
+            continue
+        vals.append(v)
+        weights.append(w)
+    return vals, weights
+
+
+def _wmean(values: List[float], weights: Optional[List[float]]) -> float:
+    """Weighted mean (plain mean when weights are missing or sum to zero)."""
+    if not values:
+        return 0.0
+    if weights and len(weights) == len(values) and sum(weights) > 0:
+        return float(np.average(values, weights=weights))
+    return float(np.mean(values))
+
+
+def _bool_stats(
+    all_vals: List[bool],
+    top_vals: List[bool],
+    all_weights: Optional[List[float]] = None,
+    top_weights: Optional[List[float]] = None,
+) -> Dict:
+    """Boolean feature: (weighted) rate of True in all vs top 10%."""
+    all_rate = _wmean([1.0 if v else 0.0 for v in all_vals], all_weights)
+    top_rate = _wmean([1.0 if v else 0.0 for v in top_vals], top_weights)
     return {
         "all": round(all_rate, 3),
         "top10": round(top_rate, 3),
-        "confidence": compute_confidence(len(all_vals)),
-        "significant": is_significant(all_rate, top_rate),
+        "confidence": compute_confidence(min(len(all_vals), len(top_vals))),
+        "significant": is_significant(all_rate, top_rate, n_top=len(top_vals), n_all=len(all_vals)),
     }
 
 
 def _numeric_stats(
     all_vals: List, top_vals: List, all_weights: Optional[List[float]] = None, top_weights: Optional[List[float]] = None
 ) -> Dict:
-    """Numeric feature: average in all vs top 10%."""
-    if all_weights and len(all_weights) == len(all_vals):
-        all_avg = float(np.average(all_vals, weights=all_weights))
-    else:
-        all_avg = float(np.mean(all_vals)) if all_vals else 0
-
-    if top_weights and len(top_weights) == len(top_vals) and top_vals:
-        top_avg = float(np.average(top_vals, weights=top_weights))
-    else:
-        top_avg = float(np.mean(top_vals)) if top_vals else 0
-
+    """Numeric feature: (weighted) average in all vs top 10%."""
     return {
-        "all_avg": round(all_avg, 2),
-        "top10_avg": round(top_avg, 2),
-        "confidence": compute_confidence(len(all_vals)),
+        "all_avg": round(_wmean(all_vals, all_weights), 2),
+        "top10_avg": round(_wmean(top_vals, top_weights), 2),
+        "confidence": compute_confidence(min(len(all_vals), len(top_vals))),
     }
 
 
-def _categorical_stats(all_vals: List[str], top_vals: List[str]) -> Optional[Dict]:
-    """Categorical feature: value distribution in all vs top 10%.
+def _weighted_counter(values: List, weights: Optional[List[float]]) -> tuple:
+    """Return (Counter of value -> summed weight, total weight)."""
+    if not weights or len(weights) != len(values):
+        weights = [1.0] * len(values)
+    counter = Counter()
+    for v, w in zip(values, weights):
+        counter[v] += w
+    return counter, sum(weights)
+
+
+def _categorical_stats(
+    all_vals: List[str],
+    top_vals: List[str],
+    all_weights: Optional[List[float]] = None,
+    top_weights: Optional[List[float]] = None,
+) -> Optional[Dict]:
+    """Categorical feature: (weighted) value distribution in all vs top 10%.
 
     Skips fields with too many unique values (free text).
     """
@@ -408,49 +572,48 @@ def _categorical_stats(all_vals: List[str], top_vals: List[str]) -> Optional[Dic
     if len(unique) > MAX_CATEGORICAL_VALUES:
         return None  # Too many unique values — likely free text
 
-    all_total = len(all_vals)
-    top_total = len(top_vals)
+    all_counter, all_total = _weighted_counter(all_vals, all_weights)
+    top_counter, top_total = _weighted_counter(top_vals, top_weights)
 
-    all_dist = {_safe_key(k): round(v / all_total, 3) for k, v in Counter(all_vals).items() if k}
-    top_dist = (
-        {_safe_key(k): round(v / top_total, 3) for k, v in Counter(top_vals).items() if k} if top_total > 0 else {}
-    )
+    all_dist = {_safe_key(k): round(v / all_total, 3) for k, v in all_counter.items() if k} if all_total > 0 else {}
+    top_dist = {_safe_key(k): round(v / top_total, 3) for k, v in top_counter.items() if k} if top_total > 0 else {}
 
     return {
         "all": all_dist,
         "top10": top_dist,
-        "confidence": compute_confidence(all_total),
+        "confidence": compute_confidence(min(len(all_vals), len(top_vals))),
     }
 
 
-def _list_stats(all_vals: List[List], top_vals: List[List]) -> Dict:
-    """List feature: average length + item frequency for string items."""
-    all_avg_len = float(np.mean([len(v) for v in all_vals])) if all_vals else 0
-    top_avg_len = float(np.mean([len(v) for v in top_vals])) if top_vals else 0
+def _list_stats(
+    all_vals: List[List],
+    top_vals: List[List],
+    all_weights: Optional[List[float]] = None,
+    top_weights: Optional[List[float]] = None,
+) -> Dict:
+    """List feature: (weighted) average length + per-video item frequency for string items.
 
+    topItems lists the 15 most frequent items (by video count) with the (weighted)
+    share of videos containing each item, in all vs top 10%.
+    """
     result = {
-        "all_avg_count": round(all_avg_len, 2),
-        "top10_avg_count": round(top_avg_len, 2),
-        "confidence": compute_confidence(len(all_vals)),
+        "all_avg_count": round(_wmean([len(v) for v in all_vals], all_weights), 2),
+        "top10_avg_count": round(_wmean([len(v) for v in top_vals], top_weights), 2),
+        "confidence": compute_confidence(min(len(all_vals), len(top_vals))),
     }
 
-    # Item frequency for string items
-    all_items = [item for sublist in all_vals for item in sublist if isinstance(item, str)]
+    # Per-video presence of each string item (a video counts an item once)
+    all_sets = [{item for item in sublist if isinstance(item, str) and item} for sublist in all_vals]
+    frequency = Counter(item for items in all_sets for item in items)
 
-    if all_items and len(set(all_items)) <= 50:
-        top_items = [item for sublist in top_vals for item in sublist if isinstance(item, str)]
-        all_total = len(all_vals)  # Number of videos, not items
-        top_total = len(top_vals)
-        all_counter = Counter(all_items)
-        top_counter = Counter(top_items)
-
+    if frequency:
+        top_sets = [{item for item in sublist if isinstance(item, str) and item} for sublist in top_vals]
         items = {}
-        for item, count in all_counter.most_common(15):
-            if not item:
-                continue  # Skip empty strings — invalid as Firestore keys
+        # Deterministic order: frequency desc, then item
+        for item, _ in sorted(frequency.items(), key=lambda kv: (-kv[1], kv[0]))[:15]:
             items[_safe_key(item)] = {
-                "all": round(count / all_total, 3),
-                "top10": round(top_counter.get(item, 0) / top_total, 3) if top_total > 0 else 0,
+                "all": round(_wmean([1.0 if item in s else 0.0 for s in all_sets], all_weights), 3),
+                "top10": round(_wmean([1.0 if item in s else 0.0 for s in top_sets], top_weights), 3),
             }
         result["topItems"] = items
 
