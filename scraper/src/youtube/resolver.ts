@@ -3,8 +3,6 @@ import { ResolvedChannel } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { parseChannelUrl } from './url-parser.js';
 
-export { parseChannelUrl } from './url-parser.js';
-
 // Type for YouTube API params with forHandle support (not in type definitions)
 interface ChannelListParams {
   part: string[];

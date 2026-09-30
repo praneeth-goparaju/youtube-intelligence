@@ -78,7 +78,7 @@ export function sanitizeInput(input: string | undefined, maxLength: number): str
 /**
  * Escape user input to prevent prompt injection.
  */
-export function escapeForPrompt(input: string): string {
+function escapeForPrompt(input: string): string {
   return input
     .replace(/```/g, '')
     .replace(/---+/g, '')

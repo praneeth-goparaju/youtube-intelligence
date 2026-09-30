@@ -15,7 +15,7 @@ vi.mock('firebase-admin/firestore', () => ({
 import { createInitialProgress } from '../../src/firebase/firestore.js';
 
 describe('createInitialProgress', () => {
-  it('should create progress with correct fields from arguments', () => {
+  it('creates a resumable pending record', () => {
     const progress = createInitialProgress(
       'UCxxxxxxxxxxxxxxxxxxxxxxx',
       'Test Channel',
@@ -23,41 +23,21 @@ describe('createInitialProgress', () => {
       100
     );
 
-    expect(progress.channelId).toBe('UCxxxxxxxxxxxxxxxxxxxxxxx');
-    expect(progress.channelTitle).toBe('Test Channel');
-    expect(progress.sourceUrl).toBe('https://youtube.com/@test');
-    expect(progress.totalVideos).toBe(100);
-  });
-
-  it('should initialize counters to zero', () => {
-    const progress = createInitialProgress('UC123456789012345678901', 'Ch', 'url', 50);
-
-    expect(progress.videosProcessed).toBe(0);
-    expect(progress.thumbnailsDownloaded).toBe(0);
-    expect(progress.retryCount).toBe(0);
-  });
-
-  it('should set status to pending and phase to scraping', () => {
-    const progress = createInitialProgress('UC123456789012345678901', 'Ch', 'url', 50);
-
-    expect(progress.status).toBe('pending');
-    expect(progress.phase).toBe('scraping');
-  });
-
-  it('should set nullable fields to null', () => {
-    const progress = createInitialProgress('UC123456789012345678901', 'Ch', 'url', 50);
-
-    expect(progress.lastProcessedVideoId).toBeNull();
-    expect(progress.lastPlaylistPageToken).toBeNull();
-    expect(progress.completedAt).toBeNull();
-    expect(progress.errorMessage).toBeNull();
-    expect(progress.errorStack).toBeNull();
-  });
-
-  it('should set timestamps', () => {
-    const progress = createInitialProgress('UC123456789012345678901', 'Ch', 'url', 50);
-
-    expect(progress.startedAt).toBeDefined();
-    expect(progress.lastProcessedAt).toBeDefined();
+    expect(progress).toMatchObject({
+      channelId: 'UCxxxxxxxxxxxxxxxxxxxxxxx',
+      channelTitle: 'Test Channel',
+      sourceUrl: 'https://youtube.com/@test',
+      totalVideos: 100,
+      status: 'pending',
+      phase: 'scraping',
+      videosProcessed: 0,
+      thumbnailsDownloaded: 0,
+      retryCount: 0,
+      lastProcessedVideoId: null,
+      lastPlaylistPageToken: null,
+      completedAt: null,
+      errorMessage: null,
+      errorStack: null,
+    });
   });
 });

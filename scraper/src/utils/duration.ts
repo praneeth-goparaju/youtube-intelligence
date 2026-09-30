@@ -62,14 +62,6 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
- * Check if duration indicates a YouTube Short (< 60 seconds)
- * @deprecated Use isShortVideoDetailed for more accurate detection
- */
-export function isShortVideo(durationSeconds: number): boolean {
-  return durationSeconds <= 60;
-}
-
-/**
  * Detect if a video is a YouTube Short using multiple signals:
  * 1. Duration <= 60 seconds (required)
  * 2. #Shorts hashtag in title or description (strong indicator)
