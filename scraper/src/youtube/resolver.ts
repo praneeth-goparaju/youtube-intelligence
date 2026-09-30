@@ -2,6 +2,7 @@ import { getYoutubeClient, addQuotaUsage } from './client.js';
 import { ResolvedChannel } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { parseChannelUrl } from './url-parser.js';
+import { isQuotaExceededError, QuotaExhaustedError } from '../utils/helpers.js';
 
 // Type for YouTube API params with forHandle support (not in type definitions)
 interface ChannelListParams {
@@ -47,8 +48,8 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
         part: ['id'],
         forHandle: identifier,
       };
+      addQuotaUsage(1); // YouTube charges failed requests too
       const response = await youtube.channels.list(params as any);
-      addQuotaUsage(1);
 
       const channelId = response.data.items?.[0]?.id;
       if (!channelId) {
@@ -61,6 +62,7 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
         quotaCost: 1,
       };
     } catch (error) {
+      if (isQuotaExceededError(error)) throw new QuotaExhaustedError();
       throw new Error(`Failed to resolve handle @${identifier}: ${(error as Error).message}`);
     }
   }
@@ -72,8 +74,8 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
         part: ['id'],
         forUsername: identifier,
       };
+      addQuotaUsage(1); // YouTube charges failed requests too
       const response = await youtube.channels.list(params as any);
-      addQuotaUsage(1);
 
       const channelId = response.data.items?.[0]?.id;
       if (!channelId) {
@@ -86,6 +88,7 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
         quotaCost: 1,
       };
     } catch (error) {
+      if (isQuotaExceededError(error)) throw new QuotaExhaustedError();
       throw new Error(`Failed to resolve username ${identifier}: ${(error as Error).message}`);
     }
   }
@@ -100,8 +103,8 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
         part: ['id'],
         forHandle: identifier,
       };
+      addQuotaUsage(1); // YouTube charges failed requests too
       const response = await youtube.channels.list(params as any);
-      addQuotaUsage(1);
 
       const channelId = response.data.items?.[0]?.id;
       if (channelId) {
@@ -111,7 +114,8 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
           quotaCost: 1,
         };
       }
-    } catch {
+    } catch (error) {
+      if (isQuotaExceededError(error)) throw new QuotaExhaustedError();
       // Continue to search
     }
 
@@ -124,8 +128,8 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
         type: ['channel'],
         maxResults: 1,
       };
-      const searchResponse = await youtube.search.list(searchParams as any);
       addQuotaUsage(100);
+      const searchResponse = await youtube.search.list(searchParams as any);
 
       const channelId = searchResponse.data.items?.[0]?.snippet?.channelId;
       if (!channelId) {
@@ -138,6 +142,7 @@ export async function resolveChannelUrl(url: string): Promise<ResolvedChannel> {
         quotaCost: 101, // 1 for handle attempt + 100 for search
       };
     } catch (error) {
+      if (isQuotaExceededError(error)) throw new QuotaExhaustedError();
       throw new Error(`Failed to resolve custom URL /c/${identifier}: ${(error as Error).message}`);
     }
   }

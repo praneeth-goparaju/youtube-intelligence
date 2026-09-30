@@ -2,27 +2,41 @@ import { readFileSync } from 'fs';
 import { Timestamp } from 'firebase-admin/firestore';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
-import { chunk, delay, formatNumber } from '../utils/helpers.js';
+import { chunk, delay, formatNumber, QuotaExhaustedError } from '../utils/helpers.js';
 import { formatDuration } from '../utils/duration.js';
 import { initializeFirebase } from '../firebase/client.js';
-import { saveChannel, saveVideosBatch, saveProgress, getProgress, getExistingVideoIds, getAllVideoIdsForChannel, updateVideoStatsBatch, saveUnresolvedChannel, getUnresolvedChannel } from '../firebase/firestore.js';
+import {
+  saveChannel,
+  saveVideosBatch,
+  getProgress,
+  getAllProgress,
+  getExistingVideoIds,
+  getAllVideoIdsForChannel,
+  getVideosMissingThumbnails,
+  updateVideoThumbnailPaths,
+  updateVideoStatsBatch,
+  saveUnresolvedChannel,
+  getUnresolvedChannel,
+} from '../firebase/firestore.js';
 import { resolveChannelUrl } from '../youtube/resolver.js';
 import { getChannelDetails, transformChannelData, getUploadsPlaylistId } from '../youtube/channels.js';
 import { getPlaylistVideos, getVideoDetails, transformVideoData, calculateVideoMetrics } from '../youtube/videos.js';
-import { getQuotaUsed, getQuotaRemaining, isQuotaLow, setQuotaUsed, setIgnoreQuota } from '../youtube/client.js';
+import { getQuotaUsed, getQuotaRemaining, isQuotaLow, markQuotaExhausted, setIgnoreQuota } from '../youtube/client.js';
 import {
   getOrCreateProgress,
   updateProgressStatus,
   updateProgressVideos,
   updateProgressPhase,
-  updateProgressThumbnails,
+  addProgressThumbnails,
   updateProgressForUpdate,
   updateProgressForRefresh,
   getProgressSummary,
   loadSavedQuota,
+  saveQuotaToProgress,
 } from './progress.js';
+import { scanPageForNewIds } from './playlist-scan.js';
 import { processThumbnailBatch, processChannelThumbnail } from './thumbnail.js';
-import { ChannelsConfig, ChannelInput, Channel, Video, ScrapeProgress, UnresolvedChannel } from '../types/index.js';
+import { ChannelsConfig, ChannelInput, Channel, Video, UnresolvedChannel } from '../types/index.js';
 
 /**
  * Load channels configuration from file
@@ -56,12 +70,88 @@ function urlToProgressId(url: string): string {
   }
 }
 
+
+// Failed channels are retried on later runs until they have failed this many times
+const MAX_CHANNEL_RETRIES = 3;
+
+// Thumbnail paths and counters are written to Firestore after each chunk
+const THUMBNAIL_CHUNK_SIZE = 200;
+
 /**
- * Process a single channel
+ * Resolve a channel URL to its ID, at most once per URL per run.
+ * `knownChannelIds` is seeded from stored progress records (sourceUrl → channelId),
+ * so channels seen before cost no quota to resolve.
+ */
+async function resolveChannelId(url: string, knownChannelIds: Map<string, string>): Promise<string> {
+  const known = knownChannelIds.get(url);
+  if (known) return known;
+
+  logger.info(`Resolving URL: ${url}`);
+  const resolved = await resolveChannelUrl(url);
+  logger.success(`Resolved to channel ID: ${resolved.channelId} (${resolved.quotaCost} quota)`);
+  knownChannelIds.set(url, resolved.channelId);
+  return resolved.channelId;
+}
+
+/**
+ * Channel metadata for --update/--refresh. Omits scrapedAt and thumbnailStoragePath
+ * so saveChannel's merge keeps the values from the initial scrape.
+ */
+function toChannelUpdate(info: ReturnType<typeof transformChannelData>): Partial<Channel> & Pick<Channel, 'channelId'> {
+  const { scrapedAt: _scrapedAt, ...update } = info;
+  return update;
+}
+
+/**
+ * Download thumbnails for every stored video of the channel that has none yet.
+ * The work list comes from Firestore, so an interrupted run or earlier failures
+ * are picked up next time. Returns the number downloaded in this call.
+ */
+async function downloadMissingThumbnails(
+  channelId: string,
+  settings: ChannelsConfig['settings']
+): Promise<number> {
+  const missing = await getVideosMissingThumbnails(channelId);
+  const pending = settings.skipShortThumbnails ? missing.filter((v) => !v.isShort) : missing;
+
+  if (pending.length < missing.length) {
+    logger.info(`Skipping thumbnails for ${missing.length - pending.length} short(s)`);
+  }
+  if (pending.length === 0) return 0;
+
+  logger.info(`Downloading ${pending.length} missing thumbnail(s)...`);
+  let attempted = 0;
+  let downloaded = 0;
+
+  for (const ids of chunk(pending.map((v) => v.videoId), THUMBNAIL_CHUNK_SIZE)) {
+    const results = await processThumbnailBatch(ids, channelId);
+    const updates = results
+      .filter((r) => r.success)
+      .map((r) => ({ videoId: r.videoId, thumbnailStoragePath: r.storagePath! }));
+
+    await updateVideoThumbnailPaths(channelId, updates);
+    await addProgressThumbnails(channelId, updates.length);
+
+    attempted += ids.length;
+    downloaded += updates.length;
+    logger.info(`Thumbnails: ${attempted}/${pending.length}`);
+  }
+
+  if (downloaded < attempted) {
+    logger.warn(`${attempted - downloaded} thumbnail(s) failed; they will be retried on the next run`);
+  }
+  return downloaded;
+}
+
+/**
+ * Process a single channel.
+ * Resuming is idempotent: remaining work is derived from what is already stored in
+ * Firestore (videos saved, thumbnails missing), not from in-memory state.
  */
 export async function processChannel(
   input: ChannelInput,
-  settings: ChannelsConfig['settings']
+  settings: ChannelsConfig['settings'],
+  knownChannelIds: Map<string, string> = new Map()
 ): Promise<{
   success: boolean;
   channelId?: string;
@@ -70,21 +160,17 @@ export async function processChannel(
   error?: string;
 }> {
   let channelId: string | undefined;
-  let videosProcessed = 0;  // Will be set from resume state if resuming
-  let thumbnailsDownloaded = 0;  // Will be set from resume state if resuming
+  let channelTitle: string | undefined;
+  let channelVideoCount = 0;
+  let videosProcessed = 0;
+  let thumbnailsDownloaded = 0;
 
   try {
-    // Step 1: Resolve channel URL to ID
-    logger.info(`Resolving URL: ${input.url}`);
-    const resolved = await resolveChannelUrl(input.url);
-    channelId = resolved.channelId;
-    logger.success(`Resolved to channel ID: ${channelId} (${resolved.quotaCost} quota)`);
+    // Step 1: Resolve channel URL to ID (free for channels seen in earlier runs)
+    channelId = await resolveChannelId(input.url, knownChannelIds);
 
     // Step 2: Check for existing progress
     const existingProgress = await getProgress(channelId);
-    let resumeFromToken: string | null = null;
-    let resumeFromVideoCount = 0;
-    let resumeFromThumbnailCount = 0;
 
     if (existingProgress) {
       // Skip if already completed
@@ -98,15 +184,20 @@ export async function processChannel(
         };
       }
 
-      // Resume from previous progress
-      logger.info(`Resuming from previous progress: ${existingProgress.videosProcessed} videos processed`);
-      resumeFromToken = existingProgress.lastPlaylistPageToken;
-      resumeFromVideoCount = existingProgress.videosProcessed;
-      resumeFromThumbnailCount = existingProgress.thumbnailsDownloaded;
+      if (existingProgress.status === 'failed' && existingProgress.retryCount >= MAX_CHANNEL_RETRIES) {
+        logger.warn(`Channel failed ${existingProgress.retryCount} times, skipping: ${channelId} (last error: ${existingProgress.errorMessage})`);
+        return {
+          success: false,
+          channelId,
+          videosProcessed: existingProgress.videosProcessed,
+          thumbnailsDownloaded: existingProgress.thumbnailsDownloaded,
+          error: 'Retry limit reached',
+        };
+      }
 
-      // Initialize counts from resume state
-      videosProcessed = resumeFromVideoCount;
-      thumbnailsDownloaded = resumeFromThumbnailCount;
+      logger.info(`Resuming from previous progress (phase: ${existingProgress.phase})`);
+      videosProcessed = existingProgress.videosProcessed;
+      thumbnailsDownloaded = existingProgress.thumbnailsDownloaded;
     }
 
     // Step 3: Fetch channel details
@@ -117,6 +208,8 @@ export async function processChannel(
     }
 
     const channelInfo = transformChannelData(channelData, input);
+    channelTitle = channelInfo.channelTitle;
+    channelVideoCount = channelInfo.videoCount;
     logger.success(`Channel: ${channelInfo.channelTitle}`);
     logger.stats({
       'Subscribers': channelInfo.subscriberCount !== null ? formatNumber(channelInfo.subscriberCount) : 'Hidden',
@@ -133,7 +226,7 @@ export async function processChannel(
     await saveChannel(channel);
 
     // Step 5: Initialize or update progress
-    const progress = await getOrCreateProgress(
+    await getOrCreateProgress(
       channelId,
       channel.channelTitle,
       input.url,
@@ -142,170 +235,126 @@ export async function processChannel(
 
     await updateProgressStatus(channelId, 'in_progress');
 
-    // Step 6: Fetch all videos from uploads playlist
-    const uploadsPlaylistId = getUploadsPlaylistId(channelId);
-    logger.info(`Fetching videos from playlist: ${uploadsPlaylistId}`);
+    // Steps 6-7 are skipped once the video details phase has finished
+    const detailsDone = existingProgress !== null && existingProgress.phase !== 'scraping';
 
-    let pageToken = resumeFromToken;
-    let allVideoIds: string[] = [];
-    let totalFetched = 0;
+    if (!detailsDone) {
+      // Step 6: Fetch all video IDs from the uploads playlist (always from the first page,
+      // so nothing collected before an interruption is lost)
+      const uploadsPlaylistId = getUploadsPlaylistId(channelId);
+      logger.info(`Fetching videos from playlist: ${uploadsPlaylistId}`);
 
-    // Get playlist pages
-    while (true) {
-      if (isQuotaLow()) {
-        logger.warn('Quota running low, saving progress...');
-        await updateProgressVideos(channelId, videosProcessed, null, pageToken);
-        return {
-          success: false,
-          channelId,
-          videosProcessed,
-          thumbnailsDownloaded,
-          error: 'Quota exhausted',
-        };
-      }
+      const maxVideos = settings.maxVideosPerChannel;
+      let pageToken: string | null = null;
+      let allVideoIds: string[] = [];
 
-      const page = await getPlaylistVideos(uploadsPlaylistId, pageToken || undefined);
-      const items = page.items || [];
-      const videoIds = items.map((item) => item.videoId).filter((id): id is string => !!id);
-      allVideoIds.push(...videoIds);
-      totalFetched += videoIds.length;
-
-      logger.info(`Fetched ${totalFetched}/${page.totalResults} video IDs`);
-
-      if (!page.nextPageToken) break;
-      pageToken = page.nextPageToken;
-
-      await delay(config.scraper.apiDelayMs);
-    }
-
-    // Apply max videos limit if set
-    if (settings.maxVideosPerChannel && allVideoIds.length > settings.maxVideosPerChannel) {
-      allVideoIds = allVideoIds.slice(0, settings.maxVideosPerChannel);
-    }
-
-    logger.success(`Total video IDs from playlist: ${allVideoIds.length}`);
-
-    // If resuming without a page token, we re-fetched all IDs from scratch.
-    // Skip IDs already processed to avoid duplicate work and inflated counts.
-    if (resumeFromVideoCount > 0 && resumeFromToken === null && existingProgress?.lastProcessedVideoId) {
-      const lastProcessedId = existingProgress.lastProcessedVideoId;
-      const lastIdx = allVideoIds.indexOf(lastProcessedId);
-      if (lastIdx >= 0) {
-        const alreadyChecked = lastIdx + 1;
-        allVideoIds = allVideoIds.slice(alreadyChecked);
-        logger.info(`Resuming: skipping ${alreadyChecked} already-checked IDs, ${allVideoIds.length} remaining`);
-      } else {
-        // lastProcessedVideoId not found in list — reset counter to avoid inflation
-        logger.warn(`Resume marker video not found in playlist, reprocessing all IDs`);
-        videosProcessed = 0;
-      }
-    }
-
-    const totalExpected = videosProcessed + allVideoIds.length;
-
-    // Step 7: Fetch video details in batches
-    await updateProgressPhase(channelId, 'scraping');
-    const videoChunks = chunk(allVideoIds, config.scraper.batchSize);
-    const allVideos: Video[] = [];
-
-    // Track how many video IDs we've attempted to fetch (for progress tracking)
-    let videoIdsAttempted = 0;
-
-    for (let i = 0; i < videoChunks.length; i++) {
-      if (isQuotaLow()) {
-        logger.warn('Quota running low, saving progress...');
-        // Use the last video ID from completed batches
-        const lastProcessedId = videoIdsAttempted > 0 ? allVideoIds[videoIdsAttempted - 1] : null;
-        await updateProgressVideos(channelId, videosProcessed, lastProcessedId, null);
-        return {
-          success: false,
-          channelId,
-          videosProcessed,
-          thumbnailsDownloaded,
-          error: 'Quota exhausted',
-        };
-      }
-
-      const batchIds = videoChunks[i];
-      const videoData = await getVideoDetails(batchIds);
-
-      // Track attempted video IDs (includes deleted/private videos that API didn't return)
-      videoIdsAttempted += batchIds.length;
-
-      // Log if some videos were not returned (deleted/private)
-      if (videoData.length < batchIds.length) {
-        const missing = batchIds.length - videoData.length;
-        logger.warn(`${missing} video(s) in batch were not returned (possibly deleted/private)`);
-      }
-
-      // Transform and filter
-      const videos: Video[] = [];
-      for (const data of videoData) {
-        const video = transformVideoData(data, channelId, channel.subscriberCount);
-
-        // Filter shorts if needed
-        if (!settings.includeShorts && video.isShort) {
-          continue;
+      while (true) {
+        if (isQuotaLow()) {
+          logger.warn('Quota running low, saving progress...');
+          await updateProgressVideos(channelId, videosProcessed, null, null);
+          return {
+            success: false,
+            channelId,
+            videosProcessed,
+            thumbnailsDownloaded,
+            error: 'Quota exhausted',
+          };
         }
 
-        videos.push({
-          ...video,
-          thumbnailStoragePath: '', // Will be updated later
-        });
+        const page = await getPlaylistVideos(uploadsPlaylistId, pageToken || undefined);
+        const items = page.items || [];
+        const videoIds = items.map((item) => item.videoId).filter((id): id is string => !!id);
+        allVideoIds.push(...videoIds);
+
+        logger.info(`Fetched ${allVideoIds.length}/${page.totalResults} video IDs`);
+
+        if (!page.nextPageToken || (maxVideos && allVideoIds.length >= maxVideos)) break;
+        pageToken = page.nextPageToken;
+
+        await delay(config.scraper.apiDelayMs);
       }
 
-      allVideos.push(...videos);
-      videosProcessed += videos.length;
+      // Apply max videos limit if set
+      if (maxVideos && allVideoIds.length > maxVideos) {
+        allVideoIds = allVideoIds.slice(0, maxVideos);
+      }
 
-      // Save batch to Firestore
-      await saveVideosBatch(channelId, videos);
+      logger.success(`Total video IDs from playlist: ${allVideoIds.length}`);
 
-      logger.info(`Processed ${videosProcessed}/~${totalExpected} videos (${videoIdsAttempted} IDs checked)`);
-      const lastBatchVideoId = batchIds.length > 0 ? batchIds[batchIds.length - 1] : null;
-      await updateProgressVideos(channelId, videosProcessed, lastBatchVideoId, null);
+      // Skip videos already saved by an earlier (interrupted) run
+      const storedIds = new Set(await getAllVideoIdsForChannel(channelId));
+      const pendingIds = allVideoIds.filter((id) => !storedIds.has(id));
+      videosProcessed = allVideoIds.length - pendingIds.length;
+      if (videosProcessed > 0) {
+        logger.info(`Resuming: ${videosProcessed} videos already stored, ${pendingIds.length} IDs remaining`);
+      }
 
-      await delay(config.scraper.apiDelayMs);
-    }
+      const totalExpected = videosProcessed + pendingIds.length;
 
-    // Step 8: Download thumbnails
-    await updateProgressPhase(channelId, 'thumbnails');
-    logger.info('Downloading thumbnails...');
+      // Step 7: Fetch video details in batches
+      await updateProgressPhase(channelId, 'scraping');
+      const videoChunks = chunk(pendingIds, config.scraper.batchSize);
+      let videoIdsAttempted = 0;
 
-    const videosForThumbnails = settings.skipShortThumbnails
-      ? allVideos.filter((v) => !v.isShort)
-      : allVideos;
-
-    if (videosForThumbnails.length < allVideos.length) {
-      logger.info(`Skipping thumbnails for ${allVideos.length - videosForThumbnails.length} short(s)`);
-    }
-
-    const thumbnailResults = await processThumbnailBatch(
-      videosForThumbnails.map((v) => v.videoId),
-      channelId,
-      (processed, total) => {
-        if (processed % 50 === 0 || processed === total) {
-          logger.info(`Thumbnails: ${processed}/${total}`);
+      for (const batchIds of videoChunks) {
+        if (isQuotaLow()) {
+          logger.warn('Quota running low, saving progress...');
+          const lastProcessedId = videoIdsAttempted > 0 ? pendingIds[videoIdsAttempted - 1] : null;
+          await updateProgressVideos(channelId, videosProcessed, lastProcessedId, null);
+          return {
+            success: false,
+            channelId,
+            videosProcessed,
+            thumbnailsDownloaded,
+            error: 'Quota exhausted',
+          };
         }
+
+        const videoData = await getVideoDetails(batchIds);
+
+        // Track attempted video IDs (includes deleted/private videos that API didn't return)
+        videoIdsAttempted += batchIds.length;
+
+        // Log if some videos were not returned (deleted/private)
+        if (videoData.length < batchIds.length) {
+          const missing = batchIds.length - videoData.length;
+          logger.warn(`${missing} video(s) in batch were not returned (possibly deleted/private)`);
+        }
+
+        // Transform and filter
+        const videos: Video[] = [];
+        for (const data of videoData) {
+          const video = transformVideoData(data, channelId, channel.subscriberCount);
+
+          // Filter shorts if needed
+          if (!settings.includeShorts && video.isShort) {
+            continue;
+          }
+
+          videos.push({
+            ...video,
+            thumbnailStoragePath: '', // Filled in by the thumbnail phase
+          });
+        }
+
+        videosProcessed += videos.length;
+
+        // Save batch to Firestore
+        await saveVideosBatch(channelId, videos);
+
+        logger.info(`Processed ${videosProcessed}/~${totalExpected} videos (${videoIdsAttempted} IDs checked)`);
+        await updateProgressVideos(channelId, videosProcessed, batchIds[batchIds.length - 1], null);
+
+        await delay(config.scraper.apiDelayMs);
       }
-    );
 
-    thumbnailsDownloaded = thumbnailResults.filter((r) => r.success).length;
-    await updateProgressThumbnails(channelId, thumbnailsDownloaded);
-
-    // Update videos with thumbnail paths
-    const thumbnailPathMap = new Map(
-      thumbnailResults.filter((r) => r.success).map((r) => [r.videoId, r.storagePath!])
-    );
-
-    for (const video of videosForThumbnails) {
-      const path = thumbnailPathMap.get(video.videoId);
-      if (path) {
-        video.thumbnailStoragePath = path;
-      }
+      await updateProgressVideos(channelId, videosProcessed, null, null);
+      await updateProgressPhase(channelId, 'thumbnails');
     }
 
-    // Save updated videos with thumbnail paths
-    await saveVideosBatch(channelId, videosForThumbnails);
+    // Step 8: Download thumbnails for all stored videos that still lack one
+    // (no YouTube API quota is used here)
+    thumbnailsDownloaded += await downloadMissingThumbnails(channelId, settings);
 
     // Step 9: Mark as completed
     await updateProgressPhase(channelId, 'calculations');
@@ -325,13 +374,20 @@ export async function processChannel(
       thumbnailsDownloaded,
     };
   } catch (error) {
+    if (error instanceof QuotaExhaustedError) {
+      logger.warn('YouTube API reported the daily quota is exceeded');
+      markQuotaExhausted();
+      return { success: false, channelId, videosProcessed, thumbnailsDownloaded, error: 'Quota exhausted' };
+    }
+
     const errorMessage = (error as Error).message;
     logger.error(`Failed: ${errorMessage}`);
 
     try {
       if (channelId) {
         // Channel resolved but failed later — save to scrape_progress
-        await getOrCreateProgress(channelId, input.url, input.url, 0);
+        // (an existing record is kept as-is; only status/error are updated)
+        await getOrCreateProgress(channelId, channelTitle ?? input.url, input.url, channelVideoCount);
         await updateProgressStatus(channelId, 'failed', errorMessage);
       } else {
         // URL resolution failed — save to unresolved_channels
@@ -366,12 +422,13 @@ export async function processChannel(
 
 /**
  * Incrementally update a completed channel by fetching only new videos.
- * Exploits the fact that YouTube uploads playlists return newest videos first.
- * Stops fetching playlist pages once an entire page consists of already-known videos.
+ * Exploits the fact that YouTube uploads playlists return newest videos first:
+ * scanning stops at the first video that is already stored.
  */
 export async function updateChannel(
   input: ChannelInput,
-  settings: ChannelsConfig['settings']
+  settings: ChannelsConfig['settings'],
+  knownChannelIds: Map<string, string> = new Map()
 ): Promise<{
   success: boolean;
   channelId?: string;
@@ -382,11 +439,8 @@ export async function updateChannel(
   let channelId: string | undefined;
 
   try {
-    // Step 1: Resolve channel URL to ID
-    logger.info(`Resolving URL: ${input.url}`);
-    const resolved = await resolveChannelUrl(input.url);
-    channelId = resolved.channelId;
-    logger.success(`Resolved to channel ID: ${channelId} (${resolved.quotaCost} quota)`);
+    // Step 1: Resolve channel URL to ID (free for channels seen in earlier runs)
+    channelId = await resolveChannelId(input.url, knownChannelIds);
 
     // Step 2: Only update completed channels
     const existingProgress = await getProgress(channelId);
@@ -405,19 +459,15 @@ export async function updateChannel(
 
     const channelInfo = transformChannelData(channelData, input);
     logger.success(`Channel: ${channelInfo.channelTitle}`);
+    await saveChannel(toChannelUpdate(channelInfo));
 
-    const channel: Channel = {
-      ...channelInfo,
-      thumbnailStoragePath: '', // Preserved by merge: true in saveChannel
-    };
-    await saveChannel(channel);
-
-    // Step 4: Fetch playlist pages, checking each page against Firestore
+    // Step 4: Scan playlist pages (newest first) until the first already-stored video
     const uploadsPlaylistId = getUploadsPlaylistId(channelId);
     logger.info(`Checking for new videos in playlist: ${uploadsPlaylistId}`);
 
     let pageToken: string | null = null;
     const newVideoIds: string[] = [];
+    let scanned = 0;
 
     while (true) {
       if (isQuotaLow()) {
@@ -431,19 +481,17 @@ export async function updateChannel(
 
       if (pageVideoIds.length === 0) break;
 
-      // Check which videos in this page already exist
-      const existingIds = await getExistingVideoIds(channelId, pageVideoIds);
-      const newInPage = pageVideoIds.filter((id) => !existingIds.has(id));
+      const storedIds = await getExistingVideoIds(channelId, pageVideoIds);
+      const scan = scanPageForNewIds(pageVideoIds, storedIds, scanned, settings.maxVideosPerChannel);
+      scanned = scan.scanned;
+      newVideoIds.push(...scan.newIds);
 
-      newVideoIds.push(...newInPage);
-
-      // Stop condition: entire page is all-known videos
-      if (newInPage.length === 0) {
-        logger.info(`All ${pageVideoIds.length} videos on page already known — stopping`);
+      if (scan.done) {
+        logger.info(`Reached already-stored videos (or the per-channel limit) — stopping`);
         break;
       }
 
-      logger.info(`Found ${newInPage.length} new video(s) on this page (${newVideoIds.length} total new)`);
+      logger.info(`Found ${scan.newIds.length} new video(s) on this page (${newVideoIds.length} total new)`);
 
       if (!page.nextPageToken) break;
       pageToken = page.nextPageToken;
@@ -451,18 +499,15 @@ export async function updateChannel(
       await delay(config.scraper.apiDelayMs);
     }
 
-    // No new videos found
     if (newVideoIds.length === 0) {
       logger.info('No new videos found');
-      await updateProgressForUpdate(channelId, 0, channel.videoCount);
-      return { success: true, channelId, newVideos: 0, thumbnailsDownloaded: 0 };
+    } else {
+      logger.success(`Found ${newVideoIds.length} new video(s) to process`);
     }
-
-    logger.success(`Found ${newVideoIds.length} new video(s) to process`);
 
     // Step 5: Fetch video details for new IDs only
     const videoChunks = chunk(newVideoIds, config.scraper.batchSize);
-    const allNewVideos: Video[] = [];
+    let newVideosSaved = 0;
 
     for (const batchIds of videoChunks) {
       if (isQuotaLow()) {
@@ -479,7 +524,7 @@ export async function updateChannel(
 
       const videos: Video[] = [];
       for (const data of videoData) {
-        const video = transformVideoData(data, channelId, channel.subscriberCount);
+        const video = transformVideoData(data, channelId, channelInfo.subscriberCount);
 
         if (!settings.includeShorts && video.isShort) {
           continue;
@@ -491,60 +536,21 @@ export async function updateChannel(
         });
       }
 
-      allNewVideos.push(...videos);
+      newVideosSaved += videos.length;
       await saveVideosBatch(channelId, videos);
 
       await delay(config.scraper.apiDelayMs);
     }
 
-    // Step 6: Download thumbnails for new videos only
-    let thumbnailsDownloaded = 0;
-    if (allNewVideos.length > 0) {
-      const newVideosForThumbnails = settings.skipShortThumbnails
-        ? allNewVideos.filter((v) => !v.isShort)
-        : allNewVideos;
-
-      if (newVideosForThumbnails.length < allNewVideos.length) {
-        logger.info(`Skipping thumbnails for ${allNewVideos.length - newVideosForThumbnails.length} short(s)`);
-      }
-
-      if (newVideosForThumbnails.length > 0) {
-        logger.info(`Downloading thumbnails for ${newVideosForThumbnails.length} new video(s)...`);
-
-        const thumbnailResults = await processThumbnailBatch(
-          newVideosForThumbnails.map((v) => v.videoId),
-          channelId,
-          (processed, total) => {
-            if (processed % 50 === 0 || processed === total) {
-              logger.info(`Thumbnails: ${processed}/${total}`);
-            }
-          }
-        );
-
-        thumbnailsDownloaded = thumbnailResults.filter((r) => r.success).length;
-
-        // Update videos with thumbnail paths
-        const thumbnailPathMap = new Map(
-          thumbnailResults.filter((r) => r.success).map((r) => [r.videoId, r.storagePath!])
-        );
-
-        for (const video of newVideosForThumbnails) {
-          const path = thumbnailPathMap.get(video.videoId);
-          if (path) {
-            video.thumbnailStoragePath = path;
-          }
-        }
-
-        await saveVideosBatch(channelId, newVideosForThumbnails);
-      }
-    }
+    // Step 6: Download thumbnails for new videos and retry earlier failures
+    const thumbnailsDownloaded = await downloadMissingThumbnails(channelId, settings);
 
     // Step 7: Update progress
-    await updateProgressForUpdate(channelId, allNewVideos.length, channel.videoCount);
+    await updateProgressForUpdate(channelId, newVideosSaved, channelInfo.videoCount);
 
     logger.success(`Update complete: ${channelInfo.channelTitle}`);
     logger.stats({
-      'New Videos': allNewVideos.length,
+      'New Videos': newVideosSaved,
       'Thumbnails': thumbnailsDownloaded,
       'Quota Used': `${getQuotaUsed()} / ${config.quota.dailyLimit}`,
     });
@@ -552,10 +558,16 @@ export async function updateChannel(
     return {
       success: true,
       channelId,
-      newVideos: allNewVideos.length,
+      newVideos: newVideosSaved,
       thumbnailsDownloaded,
     };
   } catch (error) {
+    if (error instanceof QuotaExhaustedError) {
+      logger.warn('YouTube API reported the daily quota is exceeded');
+      markQuotaExhausted();
+      return { success: false, channelId, newVideos: 0, thumbnailsDownloaded: 0, error: 'Quota exhausted' };
+    }
+
     const errorMessage = (error as Error).message;
     logger.error(`Update failed: ${errorMessage}`);
 
@@ -573,10 +585,12 @@ export async function updateChannel(
  * Refresh stats (views, likes, comments) for all existing videos in a completed channel.
  * Reads video IDs from Firestore, batch-fetches current stats from YouTube API,
  * recalculates derived metrics, and writes only stats fields back to Firestore.
+ * lastRefreshAt is only stamped when every batch succeeded.
  */
 export async function refreshChannel(
   input: ChannelInput,
-  settings: ChannelsConfig['settings']
+  settings: ChannelsConfig['settings'],
+  knownChannelIds: Map<string, string> = new Map()
 ): Promise<{
   success: boolean;
   channelId?: string;
@@ -584,13 +598,11 @@ export async function refreshChannel(
   error?: string;
 }> {
   let channelId: string | undefined;
+  let videosRefreshed = 0;
 
   try {
-    // Step 1: Resolve channel URL to ID
-    logger.info(`Resolving URL: ${input.url}`);
-    const resolved = await resolveChannelUrl(input.url);
-    channelId = resolved.channelId;
-    logger.success(`Resolved to channel ID: ${channelId} (${resolved.quotaCost} quota)`);
+    // Step 1: Resolve channel URL to ID (free for channels seen in earlier runs)
+    channelId = await resolveChannelId(input.url, knownChannelIds);
 
     // Step 2: Only refresh completed channels
     const existingProgress = await getProgress(channelId);
@@ -611,12 +623,7 @@ export async function refreshChannel(
     const subscriberCount = channelInfo.subscriberCount;
     logger.success(`Channel: ${channelInfo.channelTitle} (${subscriberCount !== null ? formatNumber(subscriberCount) + ' subs' : 'subs hidden'})`);
 
-    // Save refreshed channel metadata (merge:true preserves thumbnailStoragePath)
-    const channel: Channel = {
-      ...channelInfo,
-      thumbnailStoragePath: '',
-    };
-    await saveChannel(channel);
+    await saveChannel(toChannelUpdate(channelInfo));
 
     // Step 4: Get all existing video IDs from Firestore
     logger.info('Fetching video IDs from Firestore...');
@@ -633,11 +640,13 @@ export async function refreshChannel(
     const CONCURRENT_BATCHES = 5;
     const videoChunks = chunk(allVideoIds, config.scraper.batchSize);
     const waves = chunk(videoChunks, CONCURRENT_BATCHES);
-    let videosRefreshed = 0;
+    let failedBatches = 0;
+    let quotaStop = false;
 
     for (const wave of waves) {
       if (isQuotaLow()) {
         logger.warn('Quota running low, stopping refresh...');
+        quotaStop = true;
         break;
       }
 
@@ -647,7 +656,13 @@ export async function refreshChannel(
 
       for (const result of waveResults) {
         if (result.status === 'rejected') {
-          logger.warn(`Batch fetch failed: ${result.reason}`);
+          if (result.reason instanceof QuotaExhaustedError) {
+            markQuotaExhausted();
+            quotaStop = true;
+          } else {
+            logger.warn(`Batch fetch failed: ${result.reason}`);
+            failedBatches++;
+          }
           continue;
         }
 
@@ -678,7 +693,14 @@ export async function refreshChannel(
       }
 
       logger.info(`Refreshed ${videosRefreshed}/${allVideoIds.length} videos`);
+      if (quotaStop) break;
       await delay(config.scraper.apiDelayMs);
+    }
+
+    if (quotaStop || failedBatches > 0) {
+      const error = quotaStop ? 'Quota exhausted' : `${failedBatches} batch(es) failed`;
+      logger.warn(`Partial refresh: ${videosRefreshed}/${allVideoIds.length} videos (${error}); lastRefreshAt not updated`);
+      return { success: false, channelId, videosRefreshed, error };
     }
 
     // Step 6: Update progress
@@ -692,11 +714,18 @@ export async function refreshChannel(
 
     return { success: true, channelId, videosRefreshed };
   } catch (error) {
+    if (error instanceof QuotaExhaustedError) {
+      logger.warn('YouTube API reported the daily quota is exceeded');
+      markQuotaExhausted();
+      return { success: false, channelId, videosRefreshed, error: 'Quota exhausted' };
+    }
+
     const errorMessage = (error as Error).message;
     logger.error(`Refresh failed: ${errorMessage}`);
-    return { success: false, channelId, videosRefreshed: 0, error: errorMessage };
+    return { success: false, channelId, videosRefreshed, error: errorMessage };
   }
 }
+
 
 /**
  * Run the main scraper
@@ -749,6 +778,12 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
     }
   }
 
+  // Seed URL → channelId from stored progress so known channels need no resolution quota
+  const knownChannelIds = new Map<string, string>();
+  for (const progress of await getAllProgress()) {
+    if (progress.sourceUrl) knownChannelIds.set(progress.sourceUrl, progress.channelId);
+  }
+
   logger.divider();
   logger.info(`API Quota: ${formatNumber(getQuotaRemaining())} units available`);
   logger.divider();
@@ -759,6 +794,7 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
   let totalVideosRefreshed = 0;
   let channelsProcessed = 0;
   let channelsFailed = 0;
+  let lastChannelId: string | undefined;
 
   for (let i = 0; i < channelsConfig.channels.length; i++) {
     const channelInput = channelsConfig.channels[i];
@@ -771,7 +807,8 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
 
     if (updateMode) {
       logger.subheader(`Updating [${i + 1}/${channelsConfig.channels.length}]: ${channelInput.url}`);
-      const result = await updateChannel(channelInput, channelsConfig.settings);
+      const result = await updateChannel(channelInput, channelsConfig.settings, knownChannelIds);
+      lastChannelId = result.channelId ?? lastChannelId;
 
       if (result.success) {
         channelsProcessed++;
@@ -793,11 +830,12 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
       }
 
       logger.subheader(`Refreshing [${i + 1}/${channelsConfig.channels.length}]: ${channelInput.url}`);
-      const refreshResult = await refreshChannel(channelInput, channelsConfig.settings);
+      const refreshResult = await refreshChannel(channelInput, channelsConfig.settings, knownChannelIds);
+      lastChannelId = refreshResult.channelId ?? lastChannelId;
+      totalVideosRefreshed += refreshResult.videosRefreshed;
 
       if (refreshResult.success) {
         if (!updateMode) channelsProcessed++;
-        totalVideosRefreshed += refreshResult.videosRefreshed;
       } else {
         if (refreshResult.error === 'Quota exhausted') {
           logger.warn('Stopping due to quota exhaustion.');
@@ -809,7 +847,8 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
 
     if (!updateMode && !refreshMode) {
       logger.subheader(`Processing [${i + 1}/${channelsConfig.channels.length}]: ${channelInput.url}`);
-      const result = await processChannel(channelInput, channelsConfig.settings);
+      const result = await processChannel(channelInput, channelsConfig.settings, knownChannelIds);
+      lastChannelId = result.channelId ?? lastChannelId;
 
       if (result.success) {
         channelsProcessed++;
@@ -825,6 +864,11 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
     }
 
     logger.divider();
+  }
+
+  // Persist quota spent this run (incl. URL resolution) so a same-day rerun starts from it
+  if (lastChannelId) {
+    await saveQuotaToProgress(lastChannelId);
   }
 
   // Print summary

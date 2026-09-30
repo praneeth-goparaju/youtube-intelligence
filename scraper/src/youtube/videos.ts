@@ -8,6 +8,7 @@ import {
   getHourIST,
   VIDEO_CATEGORIES,
   retry,
+  QuotaExhaustedError,
 } from '../utils/helpers.js';
 import { config } from '../config.js';
 
@@ -33,13 +34,13 @@ export async function getPlaylistVideos(
 
   return retry(
     async () => {
+      addQuotaUsage(1); // YouTube charges failed requests too
       const response = await youtube.playlistItems.list({
         part: ['snippet'],
         playlistId,
         maxResults: 50,
         pageToken,
       });
-      addQuotaUsage(1);
 
       const items: PlaylistItem[] = (response.data.items || []).map((item) => ({
         videoId: item.snippet?.resourceId?.videoId || '',
@@ -57,6 +58,7 @@ export async function getPlaylistVideos(
     API_MAX_RETRIES,
     API_BASE_DELAY_MS
   ).catch((error) => {
+    if (error instanceof QuotaExhaustedError) throw error;
     throw new Error(`Failed to fetch playlist ${playlistId} after ${API_MAX_RETRIES} retries: ${(error as Error).message}`);
   });
 }
@@ -112,17 +114,18 @@ export async function getVideoDetails(videoIds: string[]): Promise<YouTubeVideoD
 
   return retry(
     async () => {
+      addQuotaUsage(1); // YouTube charges failed requests too
       const response = await youtube.videos.list({
         part: ['snippet', 'contentDetails', 'statistics', 'topicDetails', 'status'],
         id: videoIds,
       });
-      addQuotaUsage(1);
 
       return (response.data.items || []) as unknown as YouTubeVideoData[];
     },
     API_MAX_RETRIES,
     API_BASE_DELAY_MS
   ).catch((error) => {
+    if (error instanceof QuotaExhaustedError) throw error;
     throw new Error(`Failed to fetch video details after ${API_MAX_RETRIES} retries: ${(error as Error).message}`);
   });
 }

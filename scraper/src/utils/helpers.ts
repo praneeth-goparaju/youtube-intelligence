@@ -25,23 +25,21 @@ export function daysBetween(date1: Date, date2: Date): number {
   return Math.floor(diff / MS_PER_DAY);
 }
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30 (no DST)
+
 /**
- * Get day of week from date
+ * Get day of week in IST (same timezone as getHourIST, independent of host timezone)
  */
 export function getDayOfWeek(date: Date): string {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  return days[date.getDay()];
+  return days[new Date(date.getTime() + IST_OFFSET_MS).getUTCDay()];
 }
 
 /**
  * Get hour in IST (UTC+5:30)
  */
 export function getHourIST(date: Date): number {
-  // Create a date string in IST timezone and extract the hour
-  const istOffset = 5.5 * 60; // IST is UTC+5:30
-  const utcOffset = date.getTimezoneOffset();
-  const istDate = new Date(date.getTime() + (istOffset + utcOffset) * 60 * 1000);
-  return istDate.getHours();
+  return new Date(date.getTime() + IST_OFFSET_MS).getUTCHours();
 }
 
 /**
@@ -75,7 +73,54 @@ export function containsEmoji(text: string): boolean {
 }
 
 /**
- * Retry a function with exponential backoff
+ * Thrown when the YouTube API reports the daily quota is used up.
+ * Its message matches the 'Quota exhausted' signal runScraper stops on.
+ */
+export class QuotaExhaustedError extends Error {
+  constructor() {
+    super('Quota exhausted');
+    this.name = 'QuotaExhaustedError';
+  }
+}
+
+/**
+ * Extract HTTP status and the first error reason from a googleapis (Gaxios) error.
+ */
+function getApiErrorInfo(error: unknown): { status?: number; reason?: string } {
+  const err = error as {
+    code?: number | string;
+    status?: number;
+    errors?: Array<{ reason?: string }>;
+    response?: { status?: number; data?: { error?: { errors?: Array<{ reason?: string }> } } };
+  };
+  const status = err?.response?.status ?? err?.status ?? (typeof err?.code === 'number' ? err.code : undefined);
+  const reason = err?.errors?.[0]?.reason ?? err?.response?.data?.error?.errors?.[0]?.reason;
+  return { status, reason };
+}
+
+/**
+ * True if the error is YouTube's daily quota exhaustion (403 quotaExceeded / dailyLimitExceeded).
+ */
+export function isQuotaExceededError(error: unknown): boolean {
+  if (error instanceof QuotaExhaustedError) return true;
+  const { status, reason } = getApiErrorInfo(error);
+  return status === 403 && (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded');
+}
+
+/**
+ * True if retrying the request could succeed: network errors (no HTTP status),
+ * 5xx, 429 and 403 rate-limit reasons. Other 4xx (400, 404, quotaExceeded) are permanent.
+ */
+export function isRetryableError(error: unknown): boolean {
+  const { status, reason } = getApiErrorInfo(error);
+  if (status === undefined) return true;
+  if (status >= 500 || status === 429) return true;
+  return status === 403 && (reason === 'rateLimitExceeded' || reason === 'userRateLimitExceeded');
+}
+
+/**
+ * Retry a function with exponential backoff.
+ * Non-retryable errors are thrown immediately; quota exhaustion becomes QuotaExhaustedError.
  */
 export async function retry<T>(
   fn: () => Promise<T>,
@@ -88,7 +133,9 @@ export async function retry<T>(
     try {
       return await fn();
     } catch (error) {
+      if (isQuotaExceededError(error)) throw new QuotaExhaustedError();
       lastError = error as Error;
+      if (!isRetryableError(error)) break;
       if (attempt < maxRetries - 1) {
         const delayTime = baseDelayMs * Math.pow(2, attempt);
         await delay(delayTime);

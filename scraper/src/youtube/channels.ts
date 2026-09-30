@@ -1,6 +1,7 @@
 import { getYoutubeClient, addQuotaUsage } from './client.js';
 import { Timestamp } from 'firebase-admin/firestore';
 import { Channel, ChannelInput } from '../types/index.js';
+import { isQuotaExceededError, QuotaExhaustedError } from '../utils/helpers.js';
 
 interface YouTubeChannelData {
   id: string;
@@ -54,11 +55,11 @@ export async function getChannelDetails(channelId: string): Promise<YouTubeChann
   const youtube = getYoutubeClient();
 
   try {
+    addQuotaUsage(1); // YouTube charges failed requests too
     const response = await youtube.channels.list({
       part: ['snippet', 'statistics', 'brandingSettings'],
       id: [channelId],
     });
-    addQuotaUsage(1);
 
     const channel = response.data.items?.[0];
     if (!channel) {
@@ -67,6 +68,7 @@ export async function getChannelDetails(channelId: string): Promise<YouTubeChann
 
     return channel as unknown as YouTubeChannelData;
   } catch (error) {
+    if (isQuotaExceededError(error)) throw new QuotaExhaustedError();
     throw new Error(`Failed to fetch channel ${channelId}: ${(error as Error).message}`);
   }
 }

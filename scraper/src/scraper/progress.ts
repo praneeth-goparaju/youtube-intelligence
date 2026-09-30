@@ -6,23 +6,7 @@ import {
   createInitialProgress,
 } from '../firebase/firestore.js';
 import { ScrapeProgress, ProgressStatus, ProgressPhase } from '../types/index.js';
-import { getQuotaUsed, setQuotaUsed } from '../youtube/client.js';
-
-/**
- * Get today's date in Pacific Time (YouTube quota resets at midnight PT)
- */
-function getPacificDate(): string {
-  const now = new Date();
-  // Convert to Pacific Time
-  const ptOptions: Intl.DateTimeFormatOptions = {
-    timeZone: 'America/Los_Angeles',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  };
-  const ptDate = new Intl.DateTimeFormat('en-CA', ptOptions).format(now);
-  return ptDate; // Returns YYYY-MM-DD format
-}
+import { getQuotaUsed, setQuotaUsed, getPacificDate } from '../youtube/client.js';
 
 /**
  * Load saved quota usage if from the same day (quota resets daily at midnight Pacific)
@@ -133,16 +117,18 @@ export async function updateProgressVideos(
 }
 
 /**
- * Update progress after downloading thumbnails
+ * Add newly downloaded thumbnails to the channel's cumulative count
  */
-export async function updateProgressThumbnails(
+export async function addProgressThumbnails(
   channelId: string,
-  thumbnailsDownloaded: number
+  newlyDownloaded: number
 ): Promise<void> {
   const progress = await getProgress(channelId);
   if (!progress) return;
 
-  progress.thumbnailsDownloaded = thumbnailsDownloaded;
+  progress.thumbnailsDownloaded = (progress.thumbnailsDownloaded || 0) + newlyDownloaded;
+  progress.quotaUsed = getQuotaUsed();
+  progress.quotaDate = getPacificDate();
   progress.lastProcessedAt = Timestamp.now();
 
   await saveProgress(progress);
@@ -183,40 +169,6 @@ export async function getProgressSummary(): Promise<{
     failed: allProgress.filter((p) => p.status === 'failed').length,
     totalVideos: allProgress.reduce((sum, p) => sum + p.videosProcessed, 0),
   };
-}
-
-/**
- * Get channels that need processing
- */
-export async function getChannelsToProcess(
-  channelIds: string[]
-): Promise<{
-  toResume: string[];
-  toStart: string[];
-  completed: string[];
-}> {
-  const allProgress = await getAllProgress();
-  const progressMap = new Map(allProgress.map((p) => [p.channelId, p]));
-
-  const toResume: string[] = [];
-  const toStart: string[] = [];
-  const completed: string[] = [];
-
-  for (const channelId of channelIds) {
-    const progress = progressMap.get(channelId);
-
-    if (!progress) {
-      toStart.push(channelId);
-    } else if (progress.status === 'completed') {
-      completed.push(channelId);
-    } else if (progress.status === 'in_progress' || progress.status === 'pending') {
-      toResume.push(channelId);
-    } else if (progress.status === 'failed' && progress.retryCount < 3) {
-      toResume.push(channelId);
-    }
-  }
-
-  return { toResume, toStart, completed };
 }
 
 /**
@@ -264,12 +216,4 @@ export async function updateProgressForRefresh(
   progress.quotaDate = getPacificDate();
 
   await saveProgress(progress);
-}
-
-/**
- * Check if a channel is already completed
- */
-export async function isChannelCompleted(channelId: string): Promise<boolean> {
-  const progress = await getProgress(channelId);
-  return progress?.status === 'completed';
 }

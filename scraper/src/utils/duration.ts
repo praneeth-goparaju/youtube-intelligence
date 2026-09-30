@@ -61,23 +61,31 @@ export function formatDuration(seconds: number): string {
   }
 }
 
+// YouTube Shorts can be up to 3 minutes long (raised from 60s in October 2024)
+export const SHORTS_MAX_DURATION_SECONDS = 180;
+
 /**
  * Detect if a video is a YouTube Short using multiple signals:
- * 1. Duration <= 60 seconds (required)
+ * 1. Duration <= 180 seconds (required)
  * 2. #Shorts hashtag in title or description (strong indicator)
  * 3. Common Short-related patterns
  *
  * Note: Duration alone is not sufficient - a 45-second normal video is not a Short
  * The #Shorts hashtag or similar indicators help distinguish actual Shorts
+ * (the Data API exposes no aspect-ratio signal for vertical video)
  */
 export function isShortVideoDetailed(
   durationSeconds: number,
   title: string,
   description: string
 ): { isShort: boolean; confidence: 'high' | 'medium' | 'low'; reason: string } {
-  // Shorts must be <= 60 seconds
-  if (durationSeconds > 60) {
-    return { isShort: false, confidence: 'high', reason: 'Duration exceeds 60 seconds' };
+  // Live/upcoming broadcasts report a zero duration (P0D) - not a Short
+  if (durationSeconds <= 0) {
+    return { isShort: false, confidence: 'low', reason: 'Unknown duration (live or upcoming)' };
+  }
+
+  if (durationSeconds > SHORTS_MAX_DURATION_SECONDS) {
+    return { isShort: false, confidence: 'high', reason: `Duration exceeds ${SHORTS_MAX_DURATION_SECONDS} seconds` };
   }
 
   // Check for #Shorts hashtag (case-insensitive)
@@ -103,11 +111,11 @@ export function isShortVideoDetailed(
     return { isShort: true, confidence: 'medium', reason: 'Very short duration (<=15s)' };
   }
 
-  // Videos between 16-60s without #Shorts are uncertain
+  // Videos between 16-180s without #Shorts are uncertain
   // Default to considering them as regular short videos, not Shorts
   return {
     isShort: false,
     confidence: 'low',
-    reason: 'Duration <=60s but no #Shorts indicator found'
+    reason: `Duration <=${SHORTS_MAX_DURATION_SECONDS}s but no #Shorts indicator found`
   };
 }

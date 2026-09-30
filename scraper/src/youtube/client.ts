@@ -3,7 +3,31 @@ import { config } from '../config.js';
 
 let youtubeClient: youtube_v3.Youtube | null = null;
 let quotaUsed = 0;
+let quotaDate = getPacificDate();
 let ignoreQuotaChecks = false;
+
+/**
+ * Get today's date in Pacific Time as YYYY-MM-DD (YouTube quota resets at midnight PT)
+ */
+export function getPacificDate(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+/**
+ * Reset the in-memory counter when a long run crosses midnight Pacific
+ */
+function rollOverQuotaIfNewDay(): void {
+  const today = getPacificDate();
+  if (today !== quotaDate) {
+    quotaDate = today;
+    quotaUsed = 0;
+  }
+}
 
 /**
  * Get or create YouTube API client
@@ -24,6 +48,7 @@ export function getYoutubeClient(): youtube_v3.Youtube {
  * Track quota usage
  */
 export function addQuotaUsage(units: number): void {
+  rollOverQuotaIfNewDay();
   quotaUsed += units;
 }
 
@@ -31,6 +56,7 @@ export function addQuotaUsage(units: number): void {
  * Get current quota usage
  */
 export function getQuotaUsed(): number {
+  rollOverQuotaIfNewDay();
   return quotaUsed;
 }
 
@@ -38,7 +64,7 @@ export function getQuotaUsed(): number {
  * Get remaining quota
  */
 export function getQuotaRemaining(): number {
-  return config.quota.dailyLimit - quotaUsed;
+  return config.quota.dailyLimit - getQuotaUsed();
 }
 
 /**
@@ -47,6 +73,14 @@ export function getQuotaRemaining(): number {
 export function isQuotaLow(): boolean {
   if (ignoreQuotaChecks) return false;
   return getQuotaRemaining() <= config.scraper.quotaWarningThreshold;
+}
+
+/**
+ * Record that YouTube rejected a request with quotaExceeded: treat today's quota as used up
+ */
+export function markQuotaExhausted(): void {
+  rollOverQuotaIfNewDay();
+  quotaUsed = Math.max(quotaUsed, config.quota.dailyLimit);
 }
 
 /**
@@ -61,6 +95,7 @@ export function setIgnoreQuota(ignore: boolean): void {
  */
 export function resetQuotaCounter(): void {
   quotaUsed = 0;
+  quotaDate = getPacificDate();
 }
 
 /**
@@ -68,4 +103,5 @@ export function resetQuotaCounter(): void {
  */
 export function setQuotaUsed(units: number): void {
   quotaUsed = units;
+  quotaDate = getPacificDate();
 }

@@ -40,6 +40,30 @@ async function getProgressCount(): Promise<number> {
   return snapshot.data().count;
 }
 
+/**
+ * Highest quota usage recorded today (Pacific date) across progress records.
+ * The scraper restores this on startup; deleting the records forgets it.
+ */
+async function getTodaysSavedQuota(): Promise<number> {
+  const db = initFirebase();
+  const snapshot = await db.collection('scrape_progress').select('quotaUsed', 'quotaDate').get();
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+
+  let maxQuota = 0;
+  for (const doc of snapshot.docs) {
+    const quotaUsed = doc.get('quotaUsed');
+    if (doc.get('quotaDate') === today && typeof quotaUsed === 'number') {
+      maxQuota = Math.max(maxQuota, quotaUsed);
+    }
+  }
+  return maxQuota;
+}
+
 async function deleteAllProgress(): Promise<number> {
   const db = initFirebase();
   const snapshot = await db.collection('scrape_progress').get();
@@ -92,6 +116,12 @@ async function main(): Promise<void> {
     log('', COLORS.reset);
     log('WARNING: This will delete all scrape progress records.', COLORS.yellow);
     log('The scraper will start fresh on the next run.', COLORS.yellow);
+
+    const savedQuota = await getTodaysSavedQuota();
+    if (savedQuota > 0) {
+      log(`Today's saved API quota usage (${savedQuota} units) is stored in these records and will be forgotten:`, COLORS.yellow);
+      log('a same-day run will assume a full quota and may hit YouTube quotaExceeded errors.', COLORS.yellow);
+    }
     log('', COLORS.reset);
 
     const confirmed = await askConfirmation('Are you sure you want to reset all progress?');
