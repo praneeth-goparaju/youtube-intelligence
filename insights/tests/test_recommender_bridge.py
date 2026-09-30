@@ -172,10 +172,9 @@ class TestBuildTitleInsights:
         result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
         # Only "question" is over-represented in the top 10% (lift 2.5); howto (1.0) and
-        # list (0.4) are excluded. No patternPerformance -> avgViews falls back to the lift.
-        assert result["winningPatterns"] == [
-            {"pattern": "question", "lift": 2.5, "avgViews": 2.5, "sampleSize": 20, "examples": []}
-        ]
+        # list (0.4) are excluded. No patternPerformance -> avgViews is omitted (unknown),
+        # never filled with the lift.
+        assert result["winningPatterns"] == [{"pattern": "question", "lift": 2.5, "sampleSize": 20, "examples": []}]
 
     def test_winning_patterns_use_pattern_type_and_matching_denominators(self):
         # structure.pattern is free text (dropped by the profiler); patternType is categorical.

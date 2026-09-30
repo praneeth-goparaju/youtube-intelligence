@@ -44,6 +44,36 @@ export function extractBearerKey(authHeader: string | undefined): string {
 }
 
 // ============================================
+// Client IP derivation (failed-auth throttle key)
+// ============================================
+
+/**
+ * Derive the client IP used to key the failed-auth throttle.
+ *
+ * Cloud Functions v2 runs on Cloud Run behind Google's front end (GFE), which
+ * APPENDS the address of the peer it received the connection from to
+ * X-Forwarded-For. Anything to the left of that entry is client-supplied and
+ * spoofable, so we take the RIGHT-MOST entry rather than req.ip (whose value
+ * depends on Express `trust proxy` and may be the left-most, spoofable hop).
+ * Without the header (local emulator / direct connection) fall back to the
+ * socket peer address.
+ */
+export function deriveClientIp(
+  forwardedFor: string | string[] | undefined,
+  remoteAddress: string | undefined
+): string {
+  const raw = Array.isArray(forwardedFor) ? forwardedFor.join(',') : forwardedFor;
+  if (raw) {
+    const hops = raw
+      .split(',')
+      .map((h) => h.trim())
+      .filter((h) => h.length > 0);
+    if (hops.length > 0) return hops[hops.length - 1];
+  }
+  return remoteAddress || 'unknown';
+}
+
+// ============================================
 // Recommendation / ideas input
 // ============================================
 

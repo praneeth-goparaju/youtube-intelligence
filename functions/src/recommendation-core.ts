@@ -635,8 +635,10 @@ export function buildIdeasContext(insights: Insights): string {
   if (insights.titles?.winningPatterns) {
     parts.push('\nWINNING TITLE PATTERNS:');
     for (const pattern of insights.titles.winningPatterns.slice(0, 5)) {
-      const lift = pattern.lift !== undefined ? `lift: ${pattern.lift.toFixed(2)}x, ` : '';
-      parts.push(`  - ${pattern.pattern} (${lift}avg views/subscriber: ${formatScore(pattern.avgViews)})`);
+      const details: string[] = [];
+      if (pattern.lift !== undefined) details.push(`lift: ${pattern.lift.toFixed(2)}x`);
+      if (pattern.avgViews !== undefined) details.push(`avg views/subscriber: ${formatScore(pattern.avgViews)}`);
+      parts.push(`  - ${pattern.pattern}${details.length > 0 ? ` (${details.join(', ')})` : ''}`);
     }
   }
 

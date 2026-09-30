@@ -1,6 +1,7 @@
 import {
   safeCompareKeys,
   extractBearerKey,
+  deriveClientIp,
   parseRecommendationInput,
   parseIdeasInput,
   validateGenerationPayload,
@@ -27,6 +28,24 @@ describe('extractBearerKey', () => {
     [undefined, ''],
   ])('%p -> %p', (header, expected) => {
     expect(extractBearerKey(header)).toBe(expected);
+  });
+});
+
+describe('deriveClientIp', () => {
+  it.each([
+    ['right-most X-Forwarded-For hop (GFE-appended)', 'spoofed.1, 203.0.113.7', '10.0.0.1', '203.0.113.7'],
+    ['single hop', '203.0.113.7', '10.0.0.1', '203.0.113.7'],
+    ['whitespace and empty entries ignored', ' 1.1.1.1 ,  203.0.113.7 , ', undefined, '203.0.113.7'],
+    ['array header joined', ['1.1.1.1', '203.0.113.7'], undefined, '203.0.113.7'],
+    ['no header falls back to socket address', undefined, '10.0.0.1', '10.0.0.1'],
+    ['blank header falls back to socket address', ' , ', '10.0.0.1', '10.0.0.1'],
+    ['nothing available', undefined, undefined, 'unknown'],
+  ] as const)('%s', (_label, xff, remote, expected) => {
+    expect(deriveClientIp(xff as string | string[] | undefined, remote)).toBe(expected);
+  });
+
+  it('rotating the client-supplied prefix does not change the key', () => {
+    expect(deriveClientIp('a, 203.0.113.7', undefined)).toBe(deriveClientIp('b, c, 203.0.113.7', undefined));
   });
 });
 

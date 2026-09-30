@@ -430,6 +430,40 @@ class TestMainWrites:
         assert timing["basedOnVideos"] == 100
         assert timing["bestTimes"]["optimal"]["day"] == "Saturday"
 
+    def test_bridge_only_skips_stale_profile_docs(self, monkeypatch, tmp_path):
+        def profile(content_type, total, day):
+            return {
+                "contentType": content_type,
+                "summary": {"totalVideos": total},
+                "timing": {
+                    "bestDays": [{"day": day, "avgViewsPerSubscriber": 3.0, "videoCount": total}],
+                    "bestHours": [{"hour": 18, "avgViewsPerSubscriber": 3.0, "videoCount": total}],
+                },
+            }
+
+        store = _FakeStore(
+            profiles={
+                "recipe": profile("recipe", 100, "Saturday"),
+                "unknown": profile("unknown", 500, "Monday"),  # stale unknown profile
+                "Recipe": profile("Recipe", 700, "Tuesday"),  # pre-normalization doc ID
+                "summary": profile("summary", 900, "Wednesday"),  # reserved name, expected ID is type_summary
+            }
+        )
+        store.install(monkeypatch, tmp_path, ["--type", "bridge"])
+        main_module.main()
+
+        timing = store.written("timing")[0]
+        assert timing["basedOnVideos"] == 100
+        assert timing["bestTimes"]["optimal"]["day"] == "Saturday"
+
+    def test_bridge_only_refuses_when_only_stale_profiles(self, monkeypatch, tmp_path):
+        store = _FakeStore(profiles={"unknown": {"contentType": "unknown", "summary": {"totalVideos": 10}}})
+        store.install(monkeypatch, tmp_path, ["--type", "bridge"])
+        with pytest.raises(SystemExit) as exc:
+            main_module.main()
+        assert exc.value.code == 1
+        assert store.writes == []
+
     @pytest.mark.parametrize("run_type", ["gaps", "all"])
     def test_content_gaps_written_once_in_recommender_shape(self, monkeypatch, tmp_path, run_type):
         store = _FakeStore(videos=[_gap_video(i) for i in range(40)])

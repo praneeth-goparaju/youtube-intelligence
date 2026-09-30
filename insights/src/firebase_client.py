@@ -241,6 +241,8 @@ def load_insight_profiles() -> Dict[str, Dict[str, Any]]:
 
     Profile docs are identified by their shape (a ``contentType`` string and a
     ``summary`` dict), which excludes summary/contentGaps/bridge documents.
+    Stale profile docs (e.g. ``unknown`` or pre-normalization IDs) are returned
+    too; callers filter them (see ``main._run_bridge_only``).
 
     Returns:
         Dict mapping doc ID -> profile data.

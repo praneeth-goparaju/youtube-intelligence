@@ -11,13 +11,14 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { createHash } from 'crypto';
 import { RecommendationEngine } from './engine';
-import { checkRateLimit, isRateLimited } from './rate-limiter';
+import { checkRateLimit } from './rate-limiter';
 import { saveGeneration as saveGen, listGenerations as listGens } from './firebase';
 import { geminiApiKey, isGeminiConfigured } from './gemini';
 import { readSecret } from './secrets';
 import {
   safeCompareKeys,
   extractBearerKey,
+  deriveClientIp,
   parseRecommendationInput,
   parseIdeasInput,
   validateGenerationPayload,
@@ -109,18 +110,22 @@ function validateApiKey(authHeader: string | undefined): boolean {
 }
 
 function clientIp(req: Request): string {
-  return req.ip || 'unknown';
+  return deriveClientIp(req.headers['x-forwarded-for'], req.socket?.remoteAddress);
 }
 
 /**
- * Authenticate an HTTP request. Throttles clients (by IP) that have too many
- * failed attempts, and records each failure. Sends the error response and
- * returns false when the request must not proceed.
+ * Authenticate an HTTP request. The API key is validated first: a request with
+ * a valid key is never blocked by the failed-auth throttle, and only failed
+ * attempts touch Firestore (recording the failure and checking the per-IP
+ * budget in one transaction). Sends the error response and returns false when
+ * the request must not proceed.
  */
 async function authenticate(req: Request, res: Response): Promise<boolean> {
-  const failKey = `authfail:${clientIp(req)}`;
+  if (validateApiKey(req.headers.authorization)) return true;
 
-  if (await isRateLimited(failKey, AUTH_FAIL_MAX, AUTH_FAIL_WINDOW_MS)) {
+  const failKey = `authfail:${clientIp(req)}`;
+  const throttle = await checkRateLimit(failKey, AUTH_FAIL_MAX, AUTH_FAIL_WINDOW_MS);
+  if (!throttle.allowed) {
     res.status(429).json({
       error: 'Too many failed attempts',
       message: 'Too many failed authentication attempts. Please try again later.',
@@ -128,15 +133,11 @@ async function authenticate(req: Request, res: Response): Promise<boolean> {
     return false;
   }
 
-  if (!validateApiKey(req.headers.authorization)) {
-    await checkRateLimit(failKey, AUTH_FAIL_MAX, AUTH_FAIL_WINDOW_MS);
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
-    });
-    return false;
-  }
-  return true;
+  res.status(401).json({
+    error: 'Unauthorized',
+    message: 'Invalid or missing API key. Use Authorization: Bearer <key>',
+  });
+  return false;
 }
 
 /**

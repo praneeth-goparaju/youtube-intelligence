@@ -64,27 +64,3 @@ export async function checkRateLimit(
     return { allowed: false, remaining: 0 };
   }
 }
-
-/**
- * Read-only check whether `key` has already exhausted its window, without
- * consuming a slot. Used to block IPs with too many failed auth attempts.
- *
- * Fails open: this is only a pre-check, and the per-key limiter that runs after
- * successful authentication still fails closed.
- */
-export async function isRateLimited(key: string, maxRequests: number, windowMs: number): Promise<boolean> {
-  const db = admin.firestore();
-  const docId = createHash('sha256').update(key).digest('hex').slice(0, 64);
-  try {
-    const doc = await db.collection(RATE_LIMIT_COLLECTION).doc(docId).get();
-    const data = doc.data() as RateLimitRecord | undefined;
-    if (!data || Date.now() - data.windowStart >= windowMs) return false;
-    return data.count >= maxRequests;
-  } catch (error) {
-    console.error('Rate limiter peek failed (allowing pre-check):', {
-      hashedKey: docId.slice(0, 16),
-      errorMessage: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-}

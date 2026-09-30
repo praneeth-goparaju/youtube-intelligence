@@ -282,8 +282,9 @@ def _build_title_insights(
 
     # Build winning patterns: over-represented in the top 10% (lift > 1).
     # lift = top10 share / all share. avgViews is the average viewsPerSubscriber of
-    # videos with the pattern (same unit as contentGaps avgViews); profiles without
-    # patternPerformance fall back to the lift so the recommender field is populated.
+    # videos with the pattern (same unit as contentGaps avgViews); it is omitted when
+    # no profile has patternPerformance for the pattern (the recommender treats it
+    # as optional).
     winning_patterns = []
     pattern_items = all_patterns.items() if pattern_all_total > 0 and pattern_top_total > 0 else []
     for pattern, data in pattern_items:
@@ -295,16 +296,12 @@ def _build_title_insights(
         if lift <= 1.0:
             continue
 
-        avg_views = data["vps_sum"] / data["vps_count"] if data["vps_count"] > 0 else lift
-        winning_patterns.append(
-            {
-                "pattern": pattern,
-                "lift": round(lift, 2),
-                "avgViews": round(avg_views, 2),
-                "sampleSize": int(round(data["all"])),
-                "examples": [],
-            }
-        )
+        entry = {"pattern": pattern, "lift": round(lift, 2)}
+        if data["vps_count"] > 0:
+            entry["avgViews"] = round(data["vps_sum"] / data["vps_count"], 2)
+        entry["sampleSize"] = int(round(data["all"]))
+        entry["examples"] = []
+        winning_patterns.append(entry)
 
     winning_patterns.sort(key=lambda x: (-x["lift"], x["pattern"]))
 

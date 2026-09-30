@@ -386,6 +386,23 @@ describe('buildIdeasContext', () => {
     expect(ctx).not.toContain('opportunity: 0,');
   });
 
+  it('prints winning-pattern lift and avg views/subscriber only when present', () => {
+    const ctx = buildIdeasContext({
+      ...emptyInsights,
+      titles: {
+        ...fullInsights.titles,
+        winningPatterns: [
+          { pattern: 'both', lift: 2.5, avgViews: 1.8, sampleSize: 5, examples: [] },
+          { pattern: 'lift-only', lift: 2, sampleSize: 5, examples: [] },
+          { pattern: 'neither', sampleSize: 5, examples: [] },
+        ],
+      },
+    } as Insights);
+    expect(ctx).toContain('  - both (lift: 2.50x, avg views/subscriber: 1.8');
+    expect(ctx).toContain('  - lift-only (lift: 2.00x)');
+    expect(ctx).toMatch(/ {2}- neither$/m);
+  });
+
   it.each([
     ['high opportunity topics', ['HIGH OPPORTUNITY TOPICS', 'Millet Recipes']],
     ['high value keywords', ['HIGH VALUE KEYWORDS', 'millet']],

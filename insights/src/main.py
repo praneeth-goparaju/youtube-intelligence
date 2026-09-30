@@ -422,7 +422,16 @@ def _run_bridge_only(dry_run: bool) -> None:
     recommender documents are never overwritten with empty data.
     """
     print("Loading stored content type profiles from Firestore...")
-    profiles = load_insight_profiles()
+    profiles = {}
+    for doc_id, data in load_insight_profiles().items():
+        content_type = data["contentType"]
+        # Skip stale docs the profiles step would no longer write: an "unknown"
+        # profile, or a pre-normalization doc (e.g. "Recipe") whose ID differs
+        # from the current doc name for its content type.
+        if normalize_content_type(content_type) == UNKNOWN_CONTENT_TYPE or doc_id != profile_doc_name(content_type):
+            print(f"  Skipping stale profile doc insights/{doc_id} (contentType={content_type!r})")
+            continue
+        profiles[doc_id] = data
     if not profiles:
         print("\nNo stored content type profiles found in insights/. Run with --type profiles (or all) first.")
         print("Refusing to overwrite recommender bridge documents with empty data.")
