@@ -47,16 +47,17 @@ class TestExtractLocalFeatures:
         result = extract_local_features(title, "")
 
         assert result["formatting"]["hasEmoji"] is True
-        assert "🔥" in result["formatting"]["emojiList"]
-        assert "start" in result["formatting"]["emojiPositions"]
+        assert result["formatting"]["emojiList"] == "🔥, 😋"
+        assert result["formatting"]["emojiPositions"] == "start, end"
 
     def test_title_with_brackets(self):
         title = "Biryani Recipe [OFFICIAL] (Full Version)"
         result = extract_local_features(title, "")
 
         assert result["formatting"]["hasBrackets"] is True
-        # First bracket type found wins
-        assert result["formatting"]["bracketType"] in ("round", "square")
+        # Round brackets take priority over square, regardless of position
+        assert result["formatting"]["bracketType"] == "round"
+        assert result["formatting"]["bracketContent"] == "Full Version"
 
     def test_title_with_number(self):
         title = "Top 10 Biryani Recipes of 2024"
@@ -209,13 +210,6 @@ class TestDeepMerge:
 
         assert result == {"a": 1, "b": 3, "c": 4}
 
-    def test_nested_merge(self):
-        base = {"a": {"x": 1, "y": 2}, "b": 3}
-        overlay = {"a": {"y": 99, "z": 100}}
-        result = deep_merge(base, overlay)
-
-        assert result == {"a": {"x": 1, "y": 99, "z": 100}, "b": 3}
-
     def test_does_not_mutate_inputs(self):
         base = {"a": {"x": 1}}
         overlay = {"a": {"y": 2}}
@@ -235,7 +229,7 @@ class TestDeepMerge:
     def test_deeply_nested(self):
         base = {
             "descriptionAnalysis": {
-                "structure": {"wellOrganized": True, "firstLineHook": False},
+                "structure": {"wellOrganized": True, "firstLineHook": False, "lineCount": 3},
                 "ctas": {"commentQuestion": "What do you think?"},
             }
         }
@@ -247,8 +241,10 @@ class TestDeepMerge:
         }
         result = deep_merge(base, overlay)
 
-        da = result["descriptionAnalysis"]
-        assert da["structure"]["wellOrganized"] is True
-        assert da["structure"]["length"] == 500
-        assert da["ctas"]["commentQuestion"] == "What do you think?"
-        assert da["timestamps"]["hasTimestamps"] is True
+        assert result == {
+            "descriptionAnalysis": {
+                "structure": {"wellOrganized": True, "firstLineHook": False, "lineCount": 20, "length": 500},
+                "ctas": {"commentQuestion": "What do you think?"},
+                "timestamps": {"hasTimestamps": True, "timestampCount": 5},
+            }
+        }
