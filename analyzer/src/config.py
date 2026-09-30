@@ -68,6 +68,7 @@ class Config:
     GCS_BUCKET_URI: str = ""
     BATCH_POLL_INTERVAL: int = 60
     BATCH_MAX_REQUESTS: int = 680  # Tier 1 enqueued token limit (~3M / ~4.4K tokens per request)
+    BATCH_MAX_FAILURES_PER_VIDEO: int = 3  # Stop re-submitting a video after this many failed batch imports
 
     # Paths
     PROJECT_ROOT: Path = PROJECT_ROOT

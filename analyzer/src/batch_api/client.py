@@ -13,11 +13,17 @@ from google.genai import types
 from ..config import config, logger
 
 
-# Terminal states for batch jobs
-COMPLETED_STATES = {
+# Terminal states with results that can be imported
+IMPORTABLE_STATES = {
     "JOB_STATE_SUCCEEDED",
+    "JOB_STATE_PARTIALLY_SUCCEEDED",
+}
+
+# Terminal states for batch jobs (google-genai JobState); anything else may still change
+COMPLETED_STATES = IMPORTABLE_STATES | {
     "JOB_STATE_FAILED",
     "JOB_STATE_CANCELLED",
+    "JOB_STATE_EXPIRED",
 }
 
 # Client singleton

@@ -15,6 +15,7 @@ COLLECTION_INSIGHTS = "insights"
 COLLECTION_SCRAPE_PROGRESS = "scrape_progress"
 COLLECTION_ANALYSIS_PROGRESS = "analysis_progress"
 COLLECTION_BATCH_JOBS = "batch_jobs"
+COLLECTION_BATCH_FAILURES = "batch_failures"
 
 # =============================================================================
 # Analysis Types (Phase 2 output)

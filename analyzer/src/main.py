@@ -2,11 +2,12 @@
 
 import argparse
 import sys
+from typing import Optional
 
 from .config import validate_config, config, Config
 from .firebase_client import initialize_firebase
 from .gemini_client import test_connection
-from .processors.batch import BatchProcessor, run_all_analysis
+from .processors.batch import AnalysisAbortedError, BatchProcessor, run_all_analysis
 
 
 def run_batch_mode(args):
@@ -34,10 +35,20 @@ def run_batch_mode(args):
         _run_batch_loop(phase, analysis_type, args)
 
 
+class BatchRunError(RuntimeError):
+    """A batch run stopped before completion. No new job was submitted."""
+
+
 def _run_batch_loop(phase: str, analysis_type: str, args):
     """Run batch phases, looping if --loop is set."""
-    if not args.loop or phase != "all":
+    if phase != "all":
         _run_batch_phase(phase, analysis_type, args)
+        return
+
+    if not args.loop:
+        result = _run_batch_phase_with_stats(analysis_type, args)
+        if result is not None:
+            print(f"\n  Batch complete: {result['imported']} imported")
         return
 
     batch_num = 0
@@ -55,13 +66,14 @@ def _run_batch_loop(phase: str, analysis_type: str, args):
             # No requests to process — all done
             break
 
-        if not result.get("success"):
-            print(f"\n  Batch #{batch_num} failed. Stopping loop.")
-            break
-
-        imported = result.get("imported", 0)
+        imported = result["imported"]
         total_processed += imported
         print(f"\n  Batch #{batch_num} complete: {imported} imported  |  Running total: {total_processed:,}")
+
+        if imported == 0:
+            # No progress: the next prepare would pick the same videos again
+            print("\n  Nothing was imported from this batch. Stopping loop to avoid resubmitting the same videos.")
+            break
 
     print(f"\n{'=' * 60}")
     print("  ALL BATCHES COMPLETE")
@@ -70,54 +82,53 @@ def _run_batch_loop(phase: str, analysis_type: str, args):
     print(f"{'=' * 60}")
 
 
-def _run_batch_phase_with_stats(analysis_type: str, args) -> dict:
-    """Run all batch phases and return stats. Returns None if no work to do.
+def _ensure_no_blocking_job(analysis_type: str) -> None:
+    """Raise BatchRunError if an in-flight or un-imported job exists for this type."""
+    from .batch_api.submit import find_blocking_job
 
-    First checks for any succeeded-but-not-imported jobs and imports them
-    before preparing new work (avoids duplicate submissions).
-    """
-    from .batch_api import (
-        prepare_batch_requests,
-        submit_batch,
-        poll_and_update,
-        import_batch_results,
+    kind, job = find_blocking_job(analysis_type)
+    if kind:
+        raise BatchRunError(
+            f"{kind} {analysis_type} job {job['jobName']} ({job.get('state')}) must be polled/imported first "
+            "(use --phase all to resume it, or --phase poll / --phase import)"
+        )
+
+
+def _poll_and_import(analysis_type: str, job_name: str, args) -> dict:
+    """Poll a job to completion and import its results. Raises if it did not succeed."""
+    from .batch_api import poll_and_update, import_batch_results
+    from .batch_api.client import IMPORTABLE_STATES
+
+    result = poll_and_update(
+        analysis_type=analysis_type,
+        poll_interval=args.poll_interval,
+        job_name=job_name,
     )
-    from .firebase_client import get_latest_batch_job
+    state = result.get("state")
+    if state not in IMPORTABLE_STATES:
+        raise BatchRunError(f"Job {job_name} did not succeed (state: {state}). Re-run to resume or start a new batch.")
 
-    # Check for existing jobs before preparing new work
-    try:
-        # Check for unimported succeeded jobs first
-        existing = get_latest_batch_job(analysis_type, state="JOB_STATE_SUCCEEDED")
-        if existing and not existing.get("importedAt"):
-            job_name = existing["jobName"]
-            print(f"\n  Found unimported succeeded job: {job_name}")
-            stats = import_batch_results(
-                analysis_type=analysis_type,
-                job_name=job_name,
-            )
-            return {"success": True, "imported": stats.get("imported", 0)}
+    stats = import_batch_results(analysis_type=analysis_type, job_name=job_name)
+    return {"imported": stats.get("imported", 0)}
 
-        # Check for active jobs that need polling
-        for state in ("JOB_STATE_RUNNING", "JOB_STATE_PENDING", "JOB_STATE_QUEUED"):
-            active = get_latest_batch_job(analysis_type, state=state)
-            if active:
-                job_name = active["jobName"]
-                print(f"\n  Found active job: {job_name} ({state})")
-                result = poll_and_update(
-                    analysis_type=analysis_type,
-                    poll_interval=args.poll_interval,
-                    job_name=job_name,
-                )
-                if not result or result.get("state") != "JOB_STATE_SUCCEEDED":
-                    return {"success": False}
-                stats = import_batch_results(
-                    analysis_type=analysis_type,
-                    job_name=job_name,
-                )
-                return {"success": True, "imported": stats.get("imported", 0)}
-    except Exception as e:
-        print(f"  Could not check existing jobs: {e}")
-        print("  Proceeding with new batch...")
+
+def _run_batch_phase_with_stats(analysis_type: str, args) -> Optional[dict]:
+    """Run all batch phases and return {"imported": n}. Returns None if no work to do.
+
+    An existing un-imported or in-flight job is finished first instead of preparing
+    new work. Errors while checking for, polling or importing a job propagate so that
+    a new (duplicate, billed) job is never submitted after a failed resume.
+    """
+    from .batch_api import prepare_batch_requests, submit_batch
+    from .batch_api.submit import find_blocking_job
+
+    kind, existing = find_blocking_job(analysis_type)
+    if kind == "unimported":
+        print(f"\n  Found unimported finished job: {existing['jobName']}")
+        return _poll_and_import(analysis_type, existing["jobName"], args)
+    if kind == "active":
+        print(f"\n  Found active job: {existing['jobName']} ({existing.get('state')})")
+        return _poll_and_import(analysis_type, existing["jobName"], args)
 
     # No existing jobs — prepare new batch
     jsonl_path, count = prepare_batch_requests(
@@ -128,34 +139,16 @@ def _run_batch_phase_with_stats(analysis_type: str, args) -> dict:
     if count == 0:
         return None
 
-    # Submit
     job_record = submit_batch(
         jsonl_path=jsonl_path,
         analysis_type=analysis_type,
         request_count=count,
     )
-    job_name = job_record.get("jobName")
-
-    # Poll
-    result = poll_and_update(
-        analysis_type=analysis_type,
-        poll_interval=args.poll_interval,
-        job_name=job_name,
-    )
-    if not result or result.get("state") != "JOB_STATE_SUCCEEDED":
-        return {"success": False}
-
-    # Import
-    stats = import_batch_results(
-        analysis_type=analysis_type,
-        job_name=job_name,
-    )
-
-    return {"success": True, "imported": stats.get("imported", 0)}
+    return _poll_and_import(analysis_type, job_record["jobName"], args)
 
 
 def _run_batch_phase(phase: str, analysis_type: str, args):
-    """Execute a specific batch phase for an analysis type."""
+    """Execute a single batch phase (prepare, submit, poll or import) for an analysis type."""
     from .batch_api import (
         prepare_batch_requests,
         submit_batch,
@@ -163,69 +156,62 @@ def _run_batch_phase(phase: str, analysis_type: str, args):
         import_batch_results,
     )
 
-    # Track job name across phases so poll/import target the correct job
-    active_job_name = args.job_name
-
-    if phase in ("all", "prepare"):
-        jsonl_path, count = prepare_batch_requests(
+    if phase == "prepare":
+        _ensure_no_blocking_job(analysis_type)
+        prepare_batch_requests(
             analysis_type=analysis_type,
             channel_id=args.channel,
             batch_size=args.batch_size,
         )
-        if phase == "prepare" or count == 0:
-            if phase == "all" and count == 0:
-                print("No requests to submit — skipping remaining phases.")
+
+    elif phase == "submit":
+        import glob
+        import os
+        from .firebase_client import get_batch_jobs_by_jsonl_path
+
+        # Find the most recent prepared JSONL
+        batch_dir = os.path.join(config.PROJECT_ROOT, "data", "batch")
+        pattern = os.path.join(batch_dir, f"batch_{analysis_type}_*.jsonl")
+        files = sorted(glob.glob(pattern), reverse=True)
+        if not files:
+            print(f"No prepared JSONL file found for {analysis_type}")
             return
+        jsonl_path = files[0]
 
-    if phase in ("all", "submit"):
-        if phase == "submit":
-            # Need to find the most recent prepared JSONL
-            import os
-            import glob
+        submitted = get_batch_jobs_by_jsonl_path(jsonl_path)
+        if submitted:
+            raise BatchRunError(
+                f"{jsonl_path} was already submitted as {submitted[0]['jobName']}. "
+                "Run --phase prepare to build a new file."
+            )
+        _ensure_no_blocking_job(analysis_type)
 
-            batch_dir = os.path.join(config.PROJECT_ROOT, "data", "batch")
-            pattern = os.path.join(batch_dir, f"batch_{analysis_type}_*.jsonl")
-            files = sorted(glob.glob(pattern), reverse=True)
-            if not files:
-                print(f"No prepared JSONL file found for {analysis_type}")
-                return
-            jsonl_path = files[0]
-            # Count lines
-            with open(jsonl_path) as f:
-                count = sum(1 for _ in f)
-            print(f"Using prepared file: {jsonl_path} ({count} requests)")
+        with open(jsonl_path) as f:
+            count = sum(1 for _ in f)
+        print(f"Using prepared file: {jsonl_path} ({count} requests)")
 
-        job_record = submit_batch(
+        submit_batch(
             jsonl_path=jsonl_path,
             analysis_type=analysis_type,
             request_count=count,
-            job_name=active_job_name,
+            job_name=args.job_name,
         )
-        # Use the actual job name from submit for subsequent phases
-        if not active_job_name:
-            active_job_name = job_record.get("jobName")
-        if phase == "submit":
-            return
 
-    if phase in ("all", "poll"):
+    elif phase == "poll":
         result = poll_and_update(
             analysis_type=analysis_type,
             poll_interval=args.poll_interval,
-            job_name=active_job_name,
+            job_name=args.job_name,
         )
-        if not result:
-            return
-        state = result.get("state", "")
-        if state != "JOB_STATE_SUCCEEDED":
-            print(f"Job did not succeed (state: {state}). Stopping.")
-            return
-        if phase == "poll":
-            return
+        from .batch_api.client import IMPORTABLE_STATES
 
-    if phase in ("all", "import"):
+        if result and result.get("state") not in IMPORTABLE_STATES:
+            print(f"Job did not succeed (state: {result.get('state')}).")
+
+    elif phase == "import":
         import_batch_results(
             analysis_type=analysis_type,
-            job_name=active_job_name,
+            job_name=args.job_name,
         )
 
 
@@ -260,13 +246,9 @@ def _show_batch_status():
     print("\n  Checking Gemini API for active jobs...")
     try:
         api_jobs = list_api_jobs(limit=10)
-        from .batch_api.client import _state_str
+        from .batch_api.client import _state_str, COMPLETED_STATES
 
-        active = [
-            j
-            for j in api_jobs
-            if _state_str(j.state) not in {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED"}
-        ]
+        active = [j for j in api_jobs if _state_str(j.state) not in COMPLETED_STATES]
         if active:
             print(f"\n  {len(active)} active job(s) in Gemini API:")
             for j in active:
@@ -329,6 +311,22 @@ def _print_config_summary(args):
     print("-" * 60)
 
 
+def _run_sync_mode(args):
+    """Run sync (per-video) analysis."""
+    if args.channel:
+        # Process single channel
+        types = ["thumbnail", "title_description"] if args.type == "all" else [args.type]
+        for analysis_type in types:
+            print(f"\nProcessing {analysis_type} analysis for channel {args.channel}...")
+            processor = BatchProcessor(analysis_type)
+            stats = processor.process_channel(args.channel, limit=args.limit)
+            print(f"Completed: {stats['successful']} successful, {stats['failed']} failed")
+    elif args.type == "all":
+        run_all_analysis(limit_per_channel=args.limit)
+    else:
+        BatchProcessor(args.type).process_all_channels(limit=args.limit)
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="YouTube Intelligence System - AI Analysis")
@@ -360,8 +358,8 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=25,
-        help="Maximum requests per batch job (default: 25 for Tier 1, use 50000 for Tier 2+)",
+        default=Config.BATCH_MAX_REQUESTS,
+        help=f"Maximum requests per batch job (default: {Config.BATCH_MAX_REQUESTS} for Tier 1, use 50000 for Tier 2+)",
     )
     parser.add_argument(
         "--poll-interval", type=int, default=None, help="Seconds between poll checks (default: from config/60s)"
@@ -420,29 +418,19 @@ def main():
     _print_config_summary(args)
 
     if args.mode == "batch":
-        run_batch_mode(args)
+        from .batch_api.import_results import BatchImportError
+
+        try:
+            run_batch_mode(args)
+        except (BatchRunError, BatchImportError) as e:
+            print(f"\nBatch run aborted: {e}")
+            sys.exit(1)
     else:
-        # Sync mode (existing behavior)
-        if args.channel:
-            # Process single channel
-            if args.type == "all":
-                for analysis_type in ["thumbnail", "title_description"]:
-                    print(f"\nProcessing {analysis_type} analysis for channel {args.channel}...")
-                    processor = BatchProcessor(analysis_type)
-                    stats = processor.process_channel(args.channel, limit=args.limit)
-                    print(f"Completed: {stats['successful']} successful, {stats['failed']} failed")
-            else:
-                print(f"\nProcessing {args.type} analysis for channel {args.channel}...")
-                processor = BatchProcessor(args.type)
-                stats = processor.process_channel(args.channel, limit=args.limit)
-                print(f"Completed: {stats['successful']} successful, {stats['failed']} failed")
-        else:
-            # Process all channels
-            if args.type == "all":
-                run_all_analysis(limit_per_channel=args.limit)
-            else:
-                processor = BatchProcessor(args.type)
-                processor.process_all_channels(limit=args.limit)
+        try:
+            _run_sync_mode(args)
+        except AnalysisAbortedError as e:
+            print(f"\nAnalysis aborted: {e}")
+            sys.exit(1)
 
     print("\n" + "=" * 60)
     print("  Analysis Complete!")

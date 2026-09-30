@@ -8,7 +8,7 @@ from google.cloud.firestore_v1 import FieldFilter
 from .config import config
 
 # shared module path is set up by config.py (imported above)
-from shared.constants import COLLECTION_BATCH_JOBS
+from shared.constants import COLLECTION_BATCH_FAILURES, COLLECTION_BATCH_JOBS
 
 
 _app: Optional[firebase_admin.App] = None
@@ -192,7 +192,10 @@ def get_channel_video_texts(channel_id: str) -> Dict[str, Dict[str, str]]:
 
 
 def save_analysis(channel_id: str, video_id: str, analysis_type: str, data: Dict[str, Any]) -> None:
-    """Save analysis results for a video."""
+    """Save analysis results for a video, replacing any previous analysis document.
+
+    A full overwrite (no merge) so fields from an older schema don't survive re-analysis.
+    """
     db = get_db()
     (
         db.collection("channels")
@@ -201,7 +204,7 @@ def save_analysis(channel_id: str, video_id: str, analysis_type: str, data: Dict
         .document(video_id)
         .collection("analysis")
         .document(analysis_type)
-        .set(data, merge=True)
+        .set(data)
     )
 
 
@@ -275,6 +278,25 @@ def get_batch_jobs_by_state(state: str, analysis_type: Optional[str] = None) -> 
     query = query.order_by("createdAt", direction=firestore.Query.DESCENDING)
     docs = query.stream()
     return [{"id": doc.id, **doc.to_dict()} for doc in docs]
+
+
+def get_batch_jobs_in_states(analysis_type: str, states: List[str]) -> List[Dict[str, Any]]:
+    """Get batch jobs of an analysis type in any of the given states, newest first."""
+    db = get_db()
+    query = (
+        db.collection(COLLECTION_BATCH_JOBS)
+        .where(filter=FieldFilter("analysisType", "==", analysis_type))
+        .where(filter=FieldFilter("state", "in", list(states)))
+        .order_by("createdAt", direction=firestore.Query.DESCENDING)
+    )
+    return [{"id": doc.id, **doc.to_dict()} for doc in query.stream()]
+
+
+def get_batch_jobs_by_jsonl_path(jsonl_path: str) -> List[Dict[str, Any]]:
+    """Get batch jobs that were submitted from the given local JSONL file."""
+    db = get_db()
+    query = db.collection(COLLECTION_BATCH_JOBS).where(filter=FieldFilter("jsonlPath", "==", jsonl_path))
+    return [{"id": doc.id, **doc.to_dict()} for doc in query.stream()]
 
 
 def get_latest_batch_job(analysis_type: str, state: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -353,3 +375,53 @@ def get_analyzed_video_ids(channel_id: str, analysis_type: str, video_ids: List[
             analyzed.add(doc_snapshot.reference.parent.parent.id)
 
     return analyzed
+
+
+def count_channel_videos(channel_id: str) -> int:
+    """Count all video docs in a channel (aggregation query, no document reads)."""
+    db = get_db()
+    result = db.collection("channels").document(channel_id).collection("videos").count().get()
+    return int(result[0][0].value)
+
+
+def set_channel_batch_complete(channel_id: str, analysis_type: str, video_count: int) -> None:
+    """Record that every video of a channel had `analysis_type` when it held `video_count` videos."""
+    db = get_db()
+    db.collection("channels").document(channel_id).update({f"batchCompleteVideoCount.{analysis_type}": video_count})
+
+
+# ===== Batch Failure Tracking =====
+
+
+def record_batch_failures(analysis_type: str, video_keys: List[tuple], job_name: str) -> None:
+    """Increment the failure count of each (channel_id, video_id) that failed in a batch import."""
+    db = get_db()
+    col = db.collection(COLLECTION_BATCH_FAILURES)
+    for i in range(0, len(video_keys), 400):
+        batch = db.batch()
+        for channel_id, video_id in video_keys[i : i + 400]:
+            ref = col.document(f"{channel_id}_{video_id}_{analysis_type}")
+            batch.set(
+                ref,
+                {
+                    "channelId": channel_id,
+                    "videoId": video_id,
+                    "analysisType": analysis_type,
+                    "failureCount": firestore.Increment(1),
+                    "lastJobName": job_name,
+                },
+                merge=True,
+            )
+        batch.commit()
+
+
+def get_failed_video_keys(analysis_type: str, min_failures: int) -> set:
+    """Return {(channel_id, video_id)} that failed batch import at least `min_failures` times."""
+    db = get_db()
+    query = db.collection(COLLECTION_BATCH_FAILURES).where(filter=FieldFilter("analysisType", "==", analysis_type))
+    keys = set()
+    for doc in query.stream():
+        data = doc.to_dict()
+        if data.get("failureCount", 0) >= min_failures:
+            keys.add((data["channelId"], data["videoId"]))
+    return keys

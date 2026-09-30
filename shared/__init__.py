@@ -1,12 +1,11 @@
 """Shared constants and utilities for YouTube Intelligence System.
 
-Constants are always available. Utilities (config, gemini_utils, firebase_utils)
-should be imported directly from their submodules to avoid dependency issues:
+Constants are always available. Utilities (config, gemini_utils) should be
+imported directly from their submodules to avoid dependency issues:
 
     from shared.constants import GEMINI_MODEL
     from shared.config import get_env, load_env_file
     from shared.gemini_utils import parse_json_response
-    from shared.firebase_utils import initialize_firebase_app
 """
 
 from .constants import (

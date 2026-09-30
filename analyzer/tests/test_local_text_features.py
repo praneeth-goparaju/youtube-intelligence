@@ -1,5 +1,7 @@
 """Tests for local text feature extraction."""
 
+import pytest
+
 from src.analyzers.local_text_features import extract_local_features, deep_merge
 
 
@@ -248,3 +250,122 @@ class TestDeepMerge:
                 "timestamps": {"hasTimestamps": True, "timestampCount": 5},
             }
         }
+
+
+def _desc(desc):
+    return extract_local_features("Title", desc)["descriptionAnalysis"]
+
+
+class TestDescriptionRegexRegressions:
+    """Positive and negative cases for the monetization / CTA regexes."""
+
+    @pytest.mark.parametrize(
+        "desc, expected",
+        [
+            ("Use code CHEF20 for 20% off", True),
+            ("Promo code: SAVE10", True),
+            ("Grab a coupon at checkout", True),
+            ("Discount code: BIRYANI", True),
+            ("Use 2 cups rice and 1 cup water", False),
+            ("Use a heavy bottomed pan", False),
+            ("Promo video for our new series", False),
+        ],
+    )
+    def test_discount_code(self, desc, expected):
+        assert _desc(desc)["monetization"]["hasDiscountCode"] is expected
+
+    @pytest.mark.parametrize(
+        "desc, expected",
+        [
+            ("Check out my merch store!", True),
+            ("Visit our online store for spices", True),
+            ("Shop: https://example.com", True),
+            ("Store in an airtight container for a week", False),
+            ("Use shop bought ginger garlic paste", False),
+            ("Bonfire night toffee recipe", False),
+        ],
+    )
+    def test_merch_link(self, desc, expected):
+        assert _desc(desc)["monetization"]["hasMerchLink"] is expected
+
+    @pytest.mark.parametrize(
+        "desc, expected",
+        [
+            ("Like this video if you enjoyed it", True),
+            ("Hit the like button!", True),
+            ("Please like, share and subscribe", True),
+            ("Drop a like 👍", True),
+            ("Loved it? 👍", True),
+            ("This biryani tastes like home", False),
+            ("Cook like a pro", False),
+            ("If you like spicy food, add more chilli", False),
+        ],
+    )
+    def test_like_cta(self, desc, expected):
+        assert _desc(desc)["ctas"]["hasLikeCTA"] is expected
+
+    @pytest.mark.parametrize(
+        "desc, expected",
+        [
+            ("This video is sponsored by BrandX", True),
+            ("Thanks to our sponsors", True),
+            ("Great deal #ad", True),
+            ("#ad", True),
+            ("#adventure cooking in the forest", False),
+            ("Add salt to taste", False),
+        ],
+    )
+    def test_sponsor_mention(self, desc, expected):
+        assert _desc(desc)["monetization"]["hasSponsorMention"] is expected
+
+
+class TestTitleRegressions:
+    """Emoji, separator and primary-language regressions."""
+
+    @pytest.mark.parametrize(
+        "title, has_emoji, emoji_list",
+        [
+            ("Bake at 180°C for 20 minutes", False, ""),
+            ("Masala Magic™ Biryani", False, ""),
+            ("Chicken ^ Mutton © 2024", False, ""),
+            ("中文标题 한국어 제목", False, ""),  # CJK/Hangul are not emojis (bfc08b0)
+            ("⭐ Best Biryani", True, "⭐"),
+            ("Morning ☕ routine", True, "☕"),
+        ],
+    )
+    def test_emoji_detection(self, title, has_emoji, emoji_list):
+        fmt = extract_local_features(title, "")["formatting"]
+        assert fmt["hasEmoji"] is has_emoji
+        assert fmt["emojiList"] == emoji_list
+        # emojiList and emojiPositions must agree
+        assert bool(fmt["emojiPositions"]) is has_emoji
+
+    @pytest.mark.parametrize(
+        "title, separator, segments",
+        [
+            ("Ready at 10:30", "none", 1),
+            ("Timer 1:05:30 Biryani", "none", 1),
+            ("Biryani: The Complete Guide", ":", 2),
+            ("Top 10: Biryani Recipes", ":", 2),
+            ("Biryani | 10:30 Special", "|", 2),
+        ],
+    )
+    def test_colon_separator(self, title, separator, segments):
+        structure = extract_local_features(title, "")["structure"]
+        assert structure["separator"] == separator
+        assert structure["segmentCount"] == segments
+
+    @pytest.mark.parametrize(
+        "title, primary, secondary",
+        [
+            ("चिकन बिरयानी रेसिपी", "hindi", "none"),
+            ("चिकन बिरयानी रेसिपी in Hindi", "hindi", "english"),
+            ("Chicken Biryani Recipe बिरयानी", "english", "hindi"),
+            ("హైదరాబాదీ బిర్యానీ Recipe", "telugu", "english"),
+            ("Chicken Biryani", "english", "none"),
+        ],
+    )
+    def test_primary_language(self, title, primary, secondary):
+        lang = extract_local_features(title, "")["language"]
+        assert lang["primaryLanguage"] == primary
+        assert lang["secondaryLanguage"] == secondary

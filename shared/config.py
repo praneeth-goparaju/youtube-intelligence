@@ -42,38 +42,3 @@ def get_env(name: str, required: bool = True, default: str = "") -> str:
     if required and not value:
         raise ValueError(f"Missing required environment variable: {name}")
     return value
-
-
-class BaseFirebaseConfig:
-    """Base configuration with Firebase credentials.
-
-    All phases that use Firebase should inherit from this.
-    """
-
-    FIREBASE_PROJECT_ID: str = ""
-    FIREBASE_CLIENT_EMAIL: str = ""
-    FIREBASE_PRIVATE_KEY: str = ""
-    FIREBASE_STORAGE_BUCKET: str = ""
-
-    @classmethod
-    def load_firebase_config(cls) -> None:
-        """Load Firebase configuration from environment."""
-        cls.FIREBASE_PROJECT_ID = get_env("FIREBASE_PROJECT_ID")
-        cls.FIREBASE_CLIENT_EMAIL = get_env("FIREBASE_CLIENT_EMAIL")
-        cls.FIREBASE_PRIVATE_KEY = get_env("FIREBASE_PRIVATE_KEY").replace("\\n", "\n")
-        cls.FIREBASE_STORAGE_BUCKET = get_env("FIREBASE_STORAGE_BUCKET")
-
-
-class BaseGeminiConfig(BaseFirebaseConfig):
-    """Base configuration with Firebase and Gemini credentials.
-
-    Phases that use Gemini API should inherit from this.
-    """
-
-    GOOGLE_API_KEY: str = ""
-
-    @classmethod
-    def load_gemini_config(cls) -> None:
-        """Load Gemini configuration from environment."""
-        cls.load_firebase_config()
-        cls.GOOGLE_API_KEY = get_env("GOOGLE_API_KEY")

@@ -9,7 +9,6 @@ complete title_description analysis document.
 """
 
 import re
-import unicodedata
 from typing import Dict, Any, List
 
 
@@ -34,6 +33,8 @@ _EMOJI_RE = re.compile(
     "\U0000200d"  # ZWJ
     "\U0000fe0f"  # variation selector
     "\U0001f200-\U0001f251"  # enclosed ideographic supplement
+    "\u231a\u231b\u23e9-\u23f3\u23f8-\u23fa"  # watch, hourglass, media controls, alarm clock
+    "\u2b05-\u2b07\u2b1b\u2b1c\u2b50\u2b55"  # arrows, squares, star, circle
     "]+",
     flags=re.UNICODE,
 )
@@ -50,6 +51,17 @@ _HASHTAG_RE = re.compile(r"#[\w\u0C00-\u0C7F]+", re.UNICODE)
 _NUMBER_RE = re.compile(r"\d+")
 _SPECIAL_CHAR_RE = re.compile(r"[^\w\s\u0C00-\u0C7F\u0900-\u097F]", re.UNICODE)
 _QUESTION_RE = re.compile(r"[?？]")
+
+# Title segment separators in priority order. ":" only counts when it isn't between
+# two digits, so times like "10:30" are not separators.
+_SEPARATORS = [
+    ("|", re.compile(r"\|")),
+    ("-", re.compile(" - ")),
+    ("–", re.compile(" – ")),
+    ("—", re.compile(" — ")),
+    (":", re.compile(r"(?<!\d):|:(?!\d)")),
+    ("/", re.compile(" / ")),
+]
 
 # ── Description patterns ────────────────────────────────────────────────────
 
@@ -80,12 +92,23 @@ _AFFILIATE_DOMAINS = {
 _AFFILIATE_PATTERNS = {"tag=", "ref=", "affiliate", "/dp/", "/gp/"}
 
 _SUBSCRIBE_RE = re.compile(r"\bsub(?:scribe|scribed)?\b", re.IGNORECASE)
-_LIKE_RE = re.compile(r"\b(?:like|liked|👍)\b", re.IGNORECASE)
+# Like CTAs ("like this video", "hit the like button", "drop a like", "like & subscribe", 👍),
+# not comparisons such as "tastes like home".
+_LIKE_RE = re.compile(
+    r"\blike\s+(?:this|the|our|my)\s+video\b|"
+    r"\blike\s*(?:,|&|and)\s*(?:share|subscribe|comment)\b|"
+    r"\b(?:hit|smash|press|tap|click)\s+(?:the\s+|that\s+)?like\b|"
+    r"\blike\s+button\b|"
+    r"\b(?:give|leave|drop)\s+(?:it\s+|us\s+|this\s+video\s+)?a\s+like\b|"
+    r"👍",
+    re.IGNORECASE,
+)
 _COMMENT_RE = re.compile(r"\bcomment(?:s|ed)?\b", re.IGNORECASE)
 
 _SPONSOR_RE = re.compile(
-    r"\b(?:sponsor(?:ed|ship)?|#ad|paid\s+(?:promotion|partnership)|"
-    r"brand\s+partner(?:ship)?|collab(?:oration)?\s+with)\b",
+    r"\b(?:sponsor(?:s|ed|ship)?|paid\s+(?:promotion|partnership)|"
+    r"brand\s+partner(?:ship)?|collab(?:oration)?\s+with)\b|"
+    r"(?<![\w#])#ad\b",
     re.IGNORECASE,
 )
 _DISCLOSURE_RE = re.compile(
@@ -93,8 +116,15 @@ _DISCLOSURE_RE = re.compile(
     r"\bincludes?\s+paid\b|#paidpartnership\b)",
     re.IGNORECASE,
 )
-_DISCOUNT_RE = re.compile(r"\b(?:(?:use|promo|discount|coupon)\s*(?:code)?|code\s*:)\b", re.IGNORECASE)
-_MERCH_RE = re.compile(r"\b(?:merch(?:andise)?|shop\.?\s|store\.?\s|teespring|spreadshop|bonfire)\b", re.IGNORECASE)
+# "use code X", "promo code", "coupon", "code: X" — not a bare "use" ("Use 2 cups rice")
+_DISCOUNT_RE = re.compile(r"\b(?:(?:use|promo|discount|coupon)\s*code|coupon)\b|\bcode\s*:", re.IGNORECASE)
+# Merch/shop links — not "Store in an airtight container" or "shop-bought"
+_MERCH_RE = re.compile(
+    r"\b(?:merch(?:andise)?|teespring|spreadshop|bonfire\.com|"
+    r"(?:my|our|official|online)\s+(?:online\s+)?(?:shop|store))\b|"
+    r"\b(?:shop|store)\s*:",
+    re.IGNORECASE,
+)
 _DONATION_RE = re.compile(
     r"\b(?:patreon|ko-?fi|buymeacoffee|buy\s*me\s*a\s*coffee|"
     r"paypal\.me|venmo|cash\s*app|superchat|super\s*thanks|"
@@ -112,10 +142,14 @@ def _count_chars(text: str, pattern: re.Pattern) -> int:
 
 
 def _extract_emojis(text: str) -> List[str]:
-    """Extract individual emoji characters from text."""
+    """Extract individual emoji characters from text.
+
+    Only characters in the emoji ranges count; other Unicode symbols such as
+    "°", "™", "©" or "^" are not emojis.
+    """
     emojis = []
     for char in text:
-        if unicodedata.category(char).startswith(("So", "Sk")) or _EMOJI_RE.match(char):
+        if char not in "\u200d\ufe0f" and _EMOJI_RE.match(char):
             emojis.append(char)
     # Also catch multi-char emoji sequences
     for match in _EMOJI_RE.finditer(text):
@@ -405,16 +439,14 @@ def extract_local_features(title: str, description: str) -> Dict[str, Any]:
 def _extract_title_structure(title: str) -> Dict[str, Any]:
     """Extract deterministic structure fields from title."""
     # Segment detection: common separators
-    separators = ["|", " - ", " – ", " — ", ":", " / "]
     sep_found = "none"
     segments = [title]
-    for sep in separators:
-        if sep in title:
-            parts = title.split(sep)
-            if len(parts) > 1:
-                sep_found = sep.strip()
-                segments = parts
-                break
+    for sep, pattern in _SEPARATORS:
+        parts = pattern.split(title)
+        if len(parts) > 1:
+            sep_found = sep
+            segments = parts
+            break
 
     telugu_count = _count_chars(title, _TELUGU_RE)
     english_count = _count_chars(title, _LATIN_RE)
@@ -445,10 +477,11 @@ def _extract_title_language(title: str) -> Dict[str, Any]:
     has_telugu = "telugu" in scripts
     has_latin = "latin" in scripts
 
-    primary = "telugu" if telugu_ratio > 0.5 else "english"
-    secondary = "none"
-    if len(languages) > 1:
-        secondary = [lang for lang in languages if lang != primary][0]
+    # Dominant script wins; ties keep the english > telugu > hindi order of _detect_languages
+    script_counts = {"english": english_count, "telugu": telugu_count, "hindi": _count_chars(title, _DEVANAGARI_RE)}
+    ranked = sorted(languages, key=lambda lang: -script_counts[lang])
+    primary = ranked[0]
+    secondary = ranked[1] if len(ranked) > 1 else "none"
 
     return {
         "languages": languages,

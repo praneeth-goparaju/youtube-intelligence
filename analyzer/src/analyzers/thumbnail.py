@@ -30,7 +30,11 @@ class ThumbnailAnalyzer:
             force: Force re-analysis even if already exists
 
         Returns:
-            Analysis results or None if failed
+            Analysis results, or None if skipped (already analyzed, no thumbnail, empty result)
+
+        Raises:
+            GeminiAPIError (incl. rate-limit/response subclasses) and download errors propagate
+            so the caller can back off, count the failure, or stop the run.
         """
         # Check if already analyzed
         if not force and has_analysis(channel_id, video_id, self.ANALYSIS_TYPE):
@@ -39,34 +43,29 @@ class ThumbnailAnalyzer:
         if not thumbnail_path:
             return None
 
-        try:
-            # Download thumbnail from storage
-            image_data = download_thumbnail(thumbnail_path)
+        # Download thumbnail from storage
+        image_data = download_thumbnail(thumbnail_path)
 
-            # Analyze with Gemini Vision (uses response_schema when available)
-            result = analyze_image(
-                THUMBNAIL_ANALYSIS_PROMPT,
-                image_data,
-                analysis_type=self.ANALYSIS_TYPE,
-            )
+        # Analyze with Gemini Vision (uses response_schema when available)
+        result = analyze_image(
+            THUMBNAIL_ANALYSIS_PROMPT,
+            image_data,
+            analysis_type=self.ANALYSIS_TYPE,
+        )
 
-            if not result:
-                logger.warning(f"Empty result from Gemini for thumbnail {video_id}")
-                return None
-
-            # Add metadata
-            result["analyzedAt"] = datetime.utcnow().isoformat()
-            result["modelUsed"] = config.GEMINI_MODEL
-            result["analysisVersion"] = BATCH_ANALYSIS_VERSION
-
-            # Save to Firestore
-            save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error analyzing thumbnail {video_id}: {e}")
+        if not result:
+            logger.warning(f"Empty result from Gemini for thumbnail {video_id}")
             return None
+
+        # Add metadata
+        result["analyzedAt"] = datetime.utcnow().isoformat()
+        result["modelUsed"] = config.GEMINI_MODEL
+        result["analysisVersion"] = BATCH_ANALYSIS_VERSION
+
+        # Save to Firestore
+        save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
+
+        return result
 
     def analyze_from_url(
         self, channel_id: str, video_id: str, thumbnail_url: str, force: bool = False
@@ -81,39 +80,38 @@ class ThumbnailAnalyzer:
             force: Force re-analysis even if already exists
 
         Returns:
-            Analysis results or None if failed
+            Analysis results, or None if skipped (already analyzed, no thumbnail, empty result)
+
+        Raises:
+            GeminiAPIError (incl. rate-limit/response subclasses) and download errors propagate
+            so the caller can back off, count the failure, or stop the run.
         """
         # Check if already analyzed
         if not force and has_analysis(channel_id, video_id, self.ANALYSIS_TYPE):
             return None
 
-        try:
-            # Fetch image from URL using synchronous request
-            response = requests.get(thumbnail_url, timeout=30)
-            response.raise_for_status()
-            image_data = response.content
+        # Fetch image from URL using synchronous request
+        response = requests.get(thumbnail_url, timeout=30)
+        response.raise_for_status()
+        image_data = response.content
 
-            # Analyze with Gemini Vision (uses response_schema when available)
-            result = analyze_image(
-                THUMBNAIL_ANALYSIS_PROMPT,
-                image_data,
-                analysis_type=self.ANALYSIS_TYPE,
-            )
+        # Analyze with Gemini Vision (uses response_schema when available)
+        result = analyze_image(
+            THUMBNAIL_ANALYSIS_PROMPT,
+            image_data,
+            analysis_type=self.ANALYSIS_TYPE,
+        )
 
-            if not result:
-                logger.warning(f"Empty result from Gemini for thumbnail URL {video_id}")
-                return None
-
-            # Add metadata
-            result["analyzedAt"] = datetime.utcnow().isoformat()
-            result["modelUsed"] = config.GEMINI_MODEL
-            result["analysisVersion"] = BATCH_ANALYSIS_VERSION
-
-            # Save to Firestore
-            save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error analyzing thumbnail from URL {video_id}: {e}")
+        if not result:
+            logger.warning(f"Empty result from Gemini for thumbnail URL {video_id}")
             return None
+
+        # Add metadata
+        result["analyzedAt"] = datetime.utcnow().isoformat()
+        result["modelUsed"] = config.GEMINI_MODEL
+        result["analysisVersion"] = BATCH_ANALYSIS_VERSION
+
+        # Save to Firestore
+        save_analysis(channel_id, video_id, self.ANALYSIS_TYPE, result)
+
+        return result

@@ -8,27 +8,34 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Optional, Dict, Any, Tuple, FrozenSet
+from typing import Optional, Dict, Any, List, Tuple, FrozenSet
 
 from ..config import config, logger
 from ..firebase_client import (
     save_analysis,
     get_channel_video_texts,
+    get_video,
     get_all_channels_unfiltered,
     get_batch_job as get_batch_job_record,
-    get_latest_batch_job,
+    record_batch_failures,
     update_batch_job,
 )
 from ..analyzers.local_text_features import extract_local_features, deep_merge
-
-_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 from .client import (
     get_batch_job as get_batch_job_status,
     download_result_file,
+    IMPORTABLE_STATES,
     _state_str,
 )
+from .submit import find_unimported_job
 
 from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
+
+_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+class BatchImportError(RuntimeError):
+    """A batch job's results could not be imported (nothing was marked as imported)."""
 
 
 def import_batch_results(
@@ -46,20 +53,27 @@ def import_batch_results(
         job_name: Specific job name to import from (optional).
 
     Returns:
-        Import statistics dict.
+        Import statistics dict ({"imported": 0, "skipped": reason} when there is nothing to import).
+
+    Raises:
+        BatchImportError: If the job is unknown, not finished successfully, or its results
+            cannot be downloaded. The job is then left un-imported.
     """
     # Find the job to import
     if job_name:
         job_id = job_name.replace("/", "_") if "/" in job_name else job_name
         job_record = get_batch_job_record(job_id)
         if not job_record:
-            print(f"Batch job not found in Firestore: {job_name}")
-            return {"error": "Job not found"}
+            raise BatchImportError(f"Batch job not found in Firestore: {job_name}")
+        job_type = job_record.get("analysisType")
+        if job_type != analysis_type:
+            print(f"Skipping {analysis_type} import: job {job_name} is a {job_type} job")
+            return {"imported": 0, "skipped": "analysisType mismatch"}
     else:
-        job_record = _find_importable_job(analysis_type)
+        job_record = find_unimported_job(analysis_type)
         if not job_record:
             print(f"No completed batch job found to import for {analysis_type}")
-            return {"error": "No importable job found"}
+            return {"imported": 0, "skipped": "no importable job"}
         job_id = job_record["id"]
 
     batch_job_name = job_record["jobName"]
@@ -74,14 +88,13 @@ def import_batch_results(
     # Get the actual job status to find result location
     job = get_batch_job_status(batch_job_name)
 
-    if _state_str(job.state) != "JOB_STATE_SUCCEEDED":
-        print(f"  Job state is {job.state}, cannot import results")
-        return {"error": f"Job not in succeeded state: {job.state}"}
+    if _state_str(job.state) not in IMPORTABLE_STATES:
+        raise BatchImportError(f"Job {batch_job_name} is in state {_state_str(job.state)}, cannot import results")
 
     # Download results
     output_path = _download_results(job, job_record, analysis_type)
     if not output_path:
-        return {"error": "Could not download results"}
+        raise BatchImportError(f"Could not download results for job {batch_job_name}")
 
     # Load valid channel IDs for validation
     print("  Loading channel list for validation...")
@@ -89,13 +102,14 @@ def import_batch_results(
     valid_channel_ids = frozenset(ch["id"] for ch in all_channels)
     print(f"  Validating against {len(valid_channel_ids)} known channels")
 
-    # Process results
-    stats = _process_result_file(output_path, analysis_type, valid_channel_ids)
+    # Process results (every line; failures are recorded, not fatal)
+    stats, failed_videos = _process_result_file(output_path, analysis_type, valid_channel_ids)
 
-    if stats.get("aborted"):
-        print(f"\n  IMPORT ABORTED: {stats.get('abortReason', 'Unknown reason')}")
+    # Count failures per video so prepare stops re-submitting videos that keep failing
+    if failed_videos:
+        record_batch_failures(analysis_type, failed_videos, batch_job_name)
 
-    # Update job record
+    # Mark imported only after the whole file was processed
     update_batch_job(
         job_id,
         {
@@ -115,14 +129,6 @@ def import_batch_results(
         print(f"    Local features:      {stats['localFeaturesMerged']} merged (title_description)")
 
     return stats
-
-
-def _find_importable_job(analysis_type: str) -> Optional[Dict[str, Any]]:
-    """Find the latest succeeded job that hasn't been imported yet."""
-    job = get_latest_batch_job(analysis_type, state="JOB_STATE_SUCCEEDED")
-    if job and not job.get("importedAt"):
-        return job
-    return None
 
 
 def _download_results(job, job_record: Dict[str, Any], analysis_type: str) -> Optional[str]:
@@ -178,16 +184,17 @@ def _process_result_file(
     file_path: str,
     analysis_type: str,
     valid_channel_ids: FrozenSet[str],
-    failure_threshold: float = 0.2,
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
     """Process a JSONL result file and import each result to Firestore.
 
     Each line in the JSONL is expected to have:
     - key: "{channelId}_{videoId}_{analysisType}"
     - response: The Gemini API response object
 
+    Every line is processed; a failing line never stops the import.
+
     Returns:
-        Statistics dict.
+        (statistics dict, [(channel_id, video_id), ...] of results that failed to import)
     """
     stats = {
         "total": 0,
@@ -196,8 +203,8 @@ def _process_result_file(
         "parseErrors": 0,
         "invalidKeys": 0,
         "localFeaturesMerged": 0,
-        "aborted": False,
     }
+    failed_videos: List[Tuple[str, str]] = []
 
     # Read all lines once (avoids double file read)
     with open(file_path, "r") as f:
@@ -238,18 +245,9 @@ def _process_result_file(
         except Exception as e:
             logger.error(f"Import error on line {line_num}: {e}")
             stats["failed"] += 1
-
-        # Abort if failure rate exceeds threshold (after minimum sample)
-        if stats["total"] >= 10:
-            failure_rate = stats["failed"] / stats["total"]
-            if failure_rate > failure_threshold:
-                logger.error(
-                    f"Failure rate {failure_rate:.1%} exceeds threshold "
-                    f"{failure_threshold:.0%} after {stats['total']} results. Aborting."
-                )
-                stats["aborted"] = True
-                stats["abortReason"] = f"Failure rate {failure_rate:.1%} exceeded {failure_threshold:.0%} threshold"
-                break
+            channel_id, video_id = _parse_result_key(key, analysis_type)
+            if channel_id in valid_channel_ids and video_id:
+                failed_videos.append((channel_id, video_id))
 
         # Progress logging every 100 results
         if stats["total"] % 100 == 0:
@@ -259,7 +257,7 @@ def _process_result_file(
                 f"{stats['imported']} imported, {stats['failed']} failed"
             )
 
-    return stats
+    return stats, failed_videos
 
 
 def _import_single_result(
@@ -303,10 +301,16 @@ def _import_single_result(
     merged_local = False
     if analysis_type == "title_description":
         video_texts = video_text_cache.get(video_id)
-        if video_texts:
-            local_features = extract_local_features(video_texts["title"], video_texts["description"])
-            analysis_data = deep_merge(analysis_data, local_features)
-            merged_local = True
+        if video_texts is None:
+            video = get_video(channel_id, video_id)
+            if not video:
+                raise ValueError("Video doc not found; cannot compute local features")
+            video_texts = {"title": video.get("title", ""), "description": video.get("description", "")}
+        local_features = extract_local_features(video_texts["title"], video_texts["description"])
+        analysis_data = deep_merge(analysis_data, local_features)
+        analysis_data["rawTitle"] = video_texts["title"]
+        analysis_data["hasDescription"] = bool(video_texts["description"] and video_texts["description"].strip())
+        merged_local = True
 
     # Add metadata
     analysis_data["analyzedAt"] = datetime.utcnow().isoformat()

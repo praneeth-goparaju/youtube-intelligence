@@ -15,6 +15,9 @@ from ..firebase_client import (
     get_channel,
     get_analyzed_video_ids,
     get_all_channel_videos_for_batch,
+    get_failed_video_keys,
+    count_channel_videos,
+    set_channel_batch_complete,
     download_thumbnail,
 )
 from ..prompts import (
@@ -125,20 +128,27 @@ def _resolve_refs(node: Any, defs: Dict[str, Any]) -> Any:
 def prepare_batch_requests(
     analysis_type: str,
     channel_id: Optional[str] = None,
-    batch_size: int = 50000,
+    batch_size: Optional[int] = None,
 ) -> Tuple[str, int]:
     """Prepare a JSONL file with batch requests for unanalyzed videos.
+
+    When scanning all channels, a channel whose video count still equals the count
+    recorded when it was last found fully analyzed (channels/{id}.batchCompleteVideoCount)
+    is skipped with a single aggregation query instead of re-reading all its videos.
+    Videos that failed batch import config.BATCH_MAX_FAILURES_PER_VIDEO times are skipped.
 
     Args:
         analysis_type: 'thumbnail' or 'title_description'.
         channel_id: Optional single channel ID. If None, processes all channels.
-        batch_size: Maximum requests per JSONL file.
+            A single channel is always fully scanned.
+        batch_size: Maximum requests per JSONL file (default: config.BATCH_MAX_REQUESTS).
 
     Returns:
         Tuple of (jsonl_file_path, request_count).
     """
     if analysis_type not in (ANALYSIS_TYPE_THUMBNAIL, ANALYSIS_TYPE_TITLE_DESCRIPTION):
         raise ValueError(f"Unknown analysis type: {analysis_type}")
+    batch_size = batch_size or config.BATCH_MAX_REQUESTS
 
     # Get channels to process
     if channel_id:
@@ -160,7 +170,9 @@ def prepare_batch_requests(
     missing_data = 0
     channels_scanned = 0
     channels_with_work = 0
+    excluded_failures = 0
     total_channels = len(channels)
+    failed_keys = get_failed_video_keys(analysis_type, config.BATCH_MAX_FAILURES_PER_VIDEO)
 
     print(f"\nPreparing {analysis_type} batch requests...")
     print(f"Scanning up to {total_channels} channels (batch size: {batch_size})...\n")
@@ -176,6 +188,14 @@ def prepare_batch_requests(
 
             print(f"  [{channels_scanned}/{total_channels}] {ch_name[:35]}...", end=" ", flush=True)
 
+            # Cheap skip: channel was complete and its video count hasn't changed since.
+            # Counted before listing, so a video added mid-scan changes the count next time.
+            video_count = count_channel_videos(ch_id)
+            complete_count = (channel.get("batchCompleteVideoCount") or {}).get(analysis_type)
+            if not channel_id and video_count == complete_count:
+                print(f"complete ({video_count} videos, skipped)")
+                continue
+
             videos = get_all_channel_videos_for_batch(ch_id)
             video_ids = [v["id"] for v in videos]
 
@@ -183,6 +203,7 @@ def prepare_batch_requests(
             analyzed_set = get_analyzed_video_ids(ch_id, analysis_type, video_ids)
 
             ch_needs = 0
+            ch_incomplete = 0  # unanalyzed videos not written (missing data / too many failures)
             ch_analyzed = len(analyzed_set)
             already_analyzed += ch_analyzed
 
@@ -195,9 +216,15 @@ def prepare_batch_requests(
                 if video_id in analyzed_set:
                     continue
 
+                if (ch_id, video_id) in failed_keys:
+                    excluded_failures += 1
+                    ch_incomplete += 1
+                    continue
+
                 request = _build_request(analysis_type, ch_id, video_id, video)
                 if request is None:
                     missing_data += 1
+                    ch_incomplete += 1
                     continue
 
                 f.write(json.dumps(request) + "\n")
@@ -209,6 +236,8 @@ def prepare_batch_requests(
                 print(f"+{ch_needs} new  (total: {request_count})")
             else:
                 print(f"all {ch_analyzed} done")
+                if ch_incomplete == 0:
+                    set_channel_batch_complete(ch_id, analysis_type, video_count)
 
     remaining = total_channels - channels_scanned
     print("\n  Batch preparation complete:")
@@ -217,6 +246,11 @@ def prepare_batch_requests(
     )
     print(f"    Already analyzed:  {already_analyzed}")
     print(f"    Missing data:      {missing_data}")
+    if excluded_failures:
+        print(
+            f"    Excluded failures: {excluded_failures} "
+            f"(failed {config.BATCH_MAX_FAILURES_PER_VIDEO}+ times; see batch_failures collection)"
+        )
     print(
         f"    Channels scanned:  {channels_scanned}/{total_channels}"
         + (f" ({remaining} skipped — batch full)" if remaining > 0 else "")

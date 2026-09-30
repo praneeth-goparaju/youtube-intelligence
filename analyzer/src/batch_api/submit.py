@@ -7,15 +7,15 @@ job metadata in the batch_jobs Firestore collection.
 import random
 import re
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 from ..config import config
-from ..firebase_client import save_batch_job, get_latest_batch_job, update_batch_job
+from ..firebase_client import save_batch_job, get_batch_jobs_in_states, update_batch_job
 from .client import (
     upload_jsonl_file,
     create_batch_job,
     poll_batch_job,
-    COMPLETED_STATES,
+    IMPORTABLE_STATES,
     _state_str,
 )
 
@@ -148,7 +148,7 @@ def poll_and_update(
     # Update Firestore
     state = _state_str(job.state)
     updates = {"state": state}
-    if state == "JOB_STATE_SUCCEEDED":
+    if state in IMPORTABLE_STATES:
         updates["completedAt"] = datetime.utcnow().isoformat()
         # Store destination info for result import
         if job.dest:
@@ -177,17 +177,40 @@ def poll_and_update(
     return {**updates, "jobName": batch_job_name, "jobId": job_id}
 
 
+# Non-terminal google-genai JobState values (the job may still produce results)
+ACTIVE_STATES = [
+    "JOB_STATE_UNSPECIFIED",
+    "JOB_STATE_QUEUED",
+    "JOB_STATE_PENDING",
+    "JOB_STATE_RUNNING",
+    "JOB_STATE_PAUSED",
+    "JOB_STATE_UPDATING",
+    "JOB_STATE_CANCELLING",
+]
+
+
 def _find_active_job(analysis_type: str) -> Optional[Dict[str, Any]]:
     """Find the latest non-terminal batch job for an analysis type."""
-    # Check for running jobs first
-    for state in ("JOB_STATE_RUNNING", "JOB_STATE_PENDING", "JOB_STATE_QUEUED"):
-        job = get_latest_batch_job(analysis_type, state=state)
-        if job:
-            return job
+    jobs = get_batch_jobs_in_states(analysis_type, ACTIVE_STATES)
+    return jobs[0] if jobs else None
 
-    # Fall back to any job that doesn't have a completedAt
-    job = get_latest_batch_job(analysis_type)
-    if job and job.get("state") not in COMPLETED_STATES:
-        return job
 
-    return None
+def find_unimported_job(analysis_type: str) -> Optional[Dict[str, Any]]:
+    """Find the latest finished job whose results have not been imported yet."""
+    jobs = get_batch_jobs_in_states(analysis_type, sorted(IMPORTABLE_STATES))
+    return next((job for job in jobs if not job.get("importedAt")), None)
+
+
+def find_blocking_job(analysis_type: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Find a job that must be finished before a new batch may be submitted.
+
+    Returns ("unimported", job), ("active", job) or (None, None). Firestore errors
+    propagate: callers must not treat a failed lookup as "no job".
+    """
+    job = find_unimported_job(analysis_type)
+    if job:
+        return "unimported", job
+    job = _find_active_job(analysis_type)
+    if job:
+        return "active", job
+    return None, None

@@ -18,6 +18,15 @@ from shared.constants import ANALYSIS_TYPES
 # Default limit configurable via DEFAULT_VIDEO_LIMIT env var (default: 10000)
 DEFAULT_VIDEO_LIMIT = int(os.environ.get("DEFAULT_VIDEO_LIMIT", "10000"))
 
+# Abort the run after this many consecutive rate-limit / API errors (quota exhausted,
+# bad key, outage) instead of burning through every remaining video.
+MAX_CONSECUTIVE_API_ERRORS = 5
+RATE_LIMIT_BACKOFF_SECONDS = 30
+
+
+class AnalysisAbortedError(RuntimeError):
+    """Raised when repeated Gemini API errors make continuing pointless."""
+
 
 class BatchProcessor:
     """Process videos in batches for analysis."""
@@ -115,12 +124,14 @@ class BatchProcessor:
             return {"processed": 0, "successful": 0, "failed": 0, "skipped": 0}
 
         self.progress.start(len(videos))
+        consecutive_api_errors = 0
 
         for video in tqdm(videos, desc=f"  Analyzing {self.analysis_type}s"):
             video_id = video["id"]
 
             try:
                 result = self._analyze_video(channel_id, video)
+                consecutive_api_errors = 0
 
                 if result is None:
                     self.progress.record_skip()
@@ -128,18 +139,23 @@ class BatchProcessor:
                     self.progress.record_success()
 
             except GeminiRateLimitError as e:
-                logger.warning(f"Rate limit hit for {video_id}: {e}")
+                # gemini_client already retried with short backoff; back off harder here
+                consecutive_api_errors += 1
+                logger.warning(f"Rate limit hit for {video_id} ({consecutive_api_errors} in a row): {e}")
                 self.progress.record_failure()
-                # Extra delay on rate limit before continuing
-                time.sleep(config.REQUEST_DELAY * 4)
+                self._abort_if_too_many(consecutive_api_errors)
+                time.sleep(RATE_LIMIT_BACKOFF_SECONDS * 2 ** (consecutive_api_errors - 1))
 
             except GeminiResponseError as e:
+                # Per-video problem (blocked / unparseable output)
                 logger.error(f"Invalid Gemini response for {video_id}: {e}")
                 self.progress.record_failure()
 
             except GeminiAPIError as e:
-                logger.error(f"Gemini API error for {video_id}: {e}")
+                consecutive_api_errors += 1
+                logger.error(f"Gemini API error for {video_id} ({consecutive_api_errors} in a row): {e}")
                 self.progress.record_failure()
+                self._abort_if_too_many(consecutive_api_errors)
 
             except (ConnectionError, TimeoutError, OSError) as e:
                 logger.error(f"Network error processing {video_id}: {type(e).__name__}: {e}")
@@ -161,6 +177,14 @@ class BatchProcessor:
             "failed": stats["failed"],
             "skipped": stats["skipped"],
         }
+
+    def _abort_if_too_many(self, consecutive_api_errors: int) -> None:
+        if consecutive_api_errors >= MAX_CONSECUTIVE_API_ERRORS:
+            self.progress.force_save()
+            raise AnalysisAbortedError(
+                f"{consecutive_api_errors} consecutive Gemini API errors (quota exhausted or API unavailable). "
+                "Stopping run; re-run later to resume."
+            )
 
     def _analyze_video(self, channel_id: str, video: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
