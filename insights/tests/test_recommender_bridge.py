@@ -6,9 +6,6 @@ from insights.src.recommender_bridge import (
     _build_title_insights,
     _build_timing_insights,
     _build_content_gap_insights,
-    _get_hour_label,
-    _get_thumbnail_category,
-    _weighted_avg,
 )
 
 
@@ -42,36 +39,6 @@ def _make_profile(content_type="recipe", total=100, top10=10, thumb_features=Non
 
 
 class TestBuildThumbnailInsights:
-    def test_basic_structure(self):
-        profiles = {
-            "recipe": _make_profile(
-                thumb_features={
-                    "humanPresence": {
-                        "hasFace": {
-                            "all": 0.4,
-                            "top10": 0.8,
-                            "confidence": "high",
-                            "significant": True,
-                        },
-                    },
-                    "food": {
-                        "hasFood": {
-                            "all": 0.6,
-                            "top10": 0.9,
-                            "confidence": "high",
-                            "significant": True,
-                        },
-                    },
-                }
-            ),
-        }
-        result = _build_thumbnail_insights(profiles, "2026-03-04T00:00:00Z", 100)
-
-        assert "generatedAt" in result
-        assert "basedOnVideos" in result
-        assert "topPerformingElements" in result
-        assert isinstance(result["topPerformingElements"], dict)
-
     def test_categories_mapped_correctly(self):
         profiles = {
             "recipe": _make_profile(
@@ -100,18 +67,31 @@ class TestBuildThumbnailInsights:
                             "significant": True,
                         },
                     },
+                    "textElements": {
+                        "hasText": {"all": 0.4, "top10": 0.8, "confidence": "high", "significant": True},
+                    },
+                    "food": {
+                        "hasFood": {"all": 0.5, "top10": 0.9, "confidence": "high", "significant": True},
+                    },
+                    "unknownSection": {
+                        "field": {"all": 0.2, "top10": 0.6, "confidence": "high", "significant": True},
+                    },
                 }
             ),
         }
         result = _build_thumbnail_insights(profiles, "2026-03-04T00:00:00Z", 100)
-        elements = result["topPerformingElements"]
+        by_category = {
+            category: [e["element"] for e in elements] for category, elements in result["topPerformingElements"].items()
+        }
 
-        # humanPresence should stay humanPresence
-        assert "humanPresence" in elements
-        # colors should stay colors
-        assert "colors" in elements
-        # scene maps to composition
-        assert "composition" in elements
+        # textElements -> text; scene and unmapped sections -> composition (sorted by lift: 3.0, 2.5)
+        assert by_category == {
+            "humanPresence": ["humanPresence.hasFace"],
+            "colors": ["colors.isBright"],
+            "text": ["textElements.hasText"],
+            "food": ["food.hasFood"],
+            "composition": ["unknownSection.field", "scene.isOutdoor"],
+        }
 
     def test_worst_performing(self):
         profiles = {
@@ -129,7 +109,11 @@ class TestBuildThumbnailInsights:
             ),
         }
         result = _build_thumbnail_insights(profiles, "2026-03-04T00:00:00Z", 100)
-        assert "worstPerformingElements" in result
+        # lift = 0.1 / 0.5 = 0.2 < 0.7 -> flagged to avoid, not listed as top performing
+        assert result["topPerformingElements"] == {}
+        assert result["worstPerformingElements"] == [
+            {"element": "humanPresence.hasCartoon", "lift": 0.2, "sampleSize": 100, "avoid": True}
+        ]
 
     def test_lift_computation(self):
         profiles = {
@@ -148,42 +132,16 @@ class TestBuildThumbnailInsights:
         }
         result = _build_thumbnail_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
-        if "food" in result["topPerformingElements"]:
-            elements = result["topPerformingElements"]["food"]
-            # lift = 0.75 / 0.25 = 3.0
-            assert elements[0]["lift"] == 3.0
+        # lift = 0.75 / 0.25 = 3.0
+        assert result == {
+            "generatedAt": "2026-03-04T00:00:00Z",
+            "basedOnVideos": 100,
+            "topPerformingElements": {"food": [{"element": "food.hasCloseUp", "lift": 3.0, "sampleSize": 100}]},
+            "worstPerformingElements": [],
+        }
 
 
 class TestBuildTitleInsights:
-    def test_basic_structure(self):
-        profiles = {
-            "recipe": _make_profile(
-                title_features={
-                    "structure": {
-                        "pattern": {
-                            "all": {"question": 0.3, "statement": 0.7},
-                            "top10": {"question": 0.6, "statement": 0.4},
-                            "confidence": "high",
-                        },
-                        "characterCount": {
-                            "all_avg": 45.0,
-                            "top10_avg": 50.0,
-                            "confidence": "high",
-                        },
-                        "wordCount": {
-                            "all_avg": 8.0,
-                            "top10_avg": 9.0,
-                            "confidence": "high",
-                        },
-                    },
-                }
-            ),
-        }
-        result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 100)
-
-        assert "generatedAt" in result
-        assert "basedOnVideos" in result
-
     def test_winning_patterns(self):
         profiles = {
             "recipe": _make_profile(
@@ -200,40 +158,43 @@ class TestBuildTitleInsights:
         }
         result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
-        if "winningPatterns" in result:
-            patterns = result["winningPatterns"]
-            assert isinstance(patterns, list)
-            for p in patterns:
-                assert "pattern" in p
-                assert "avgViews" in p
-                assert "sampleSize" in p
+        patterns = result["winningPatterns"]
+        # "question" is the only pattern over-represented in the top 10%
+        assert patterns[0]["pattern"] == "question"
+        lifts = [p["avgViews"] for p in patterns]
+        assert lifts == sorted(lifts, reverse=True)
 
     def test_optimal_length(self):
+        # Two content types with unequal top10 sample sizes (10 vs 30): sweet spot is the
+        # sample-weighted top10 average, e.g. (40*10 + 80*30) / 40 = 70 (unweighted would be 60).
         profiles = {
             "recipe": _make_profile(
+                top10=10,
                 title_features={
                     "structure": {
-                        "characterCount": {
-                            "all_avg": 45.0,
-                            "top10_avg": 55.0,
-                            "confidence": "high",
-                        },
-                        "wordCount": {
-                            "all_avg": 8.0,
-                            "top10_avg": 10.0,
-                            "confidence": "high",
-                        },
+                        "characterCount": {"all_avg": 35.0, "top10_avg": 40.0, "confidence": "high"},
+                        "wordCount": {"all_avg": 7.0, "top10_avg": 8.0, "confidence": "high"},
                     },
-                }
+                },
+            ),
+            "vlog": _make_profile(
+                content_type="vlog",
+                top10=30,
+                title_features={
+                    "structure": {
+                        "characterCount": {"all_avg": 60.0, "top10_avg": 80.0, "confidence": "high"},
+                        "wordCount": {"all_avg": 10.0, "top10_avg": 12.0, "confidence": "high"},
+                    },
+                },
             ),
         }
-        result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 100)
+        result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 200)
 
-        if "optimalLength" in result:
-            opt = result["optimalLength"]
-            assert "characters" in opt
-            assert "words" in opt
-            assert "sweetSpot" in opt["characters"]
+        # min/max = sweetSpot * 0.7 / 1.3, rounded
+        assert result["optimalLength"] == {
+            "characters": {"min": 49.0, "max": 91.0, "sweetSpot": 70.0},
+            "words": {"min": 8.0, "max": 14.0, "sweetSpot": 11.0},
+        }
 
     def test_optimal_language_mix(self):
         profiles = {
@@ -251,35 +212,10 @@ class TestBuildTitleInsights:
         }
         result = _build_title_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
-        if "optimalLanguageMix" in result:
-            mix = result["optimalLanguageMix"]
-            assert "teluguRatio" in mix
-            assert mix["teluguRatio"]["sweetSpot"] == 0.6
+        assert result["optimalLanguageMix"] == {"teluguRatio": {"min": 0.45, "max": 0.75, "sweetSpot": 0.6}}
 
 
 class TestBuildTimingInsights:
-    def test_basic_structure(self):
-        profiles = {
-            "recipe": _make_profile(
-                timing={
-                    "bestDays": [
-                        {"day": "Saturday", "avgViewsPerSubscriber": 3.0, "videoCount": 50},
-                        {"day": "Sunday", "avgViewsPerSubscriber": 2.5, "videoCount": 40},
-                    ],
-                    "bestHours": [
-                        {"hour": 18, "avgViewsPerSubscriber": 3.5, "videoCount": 30},
-                        {"hour": 12, "avgViewsPerSubscriber": 2.0, "videoCount": 25},
-                    ],
-                }
-            ),
-        }
-        result = _build_timing_insights(profiles, "2026-03-04T00:00:00Z", 100)
-
-        assert "bestTimes" in result
-        assert "byDayOfWeek" in result["bestTimes"]
-        assert "byHourIST" in result["bestTimes"]
-        assert "optimal" in result["bestTimes"]
-
     def test_multiplier_calculation(self):
         profiles = {
             "recipe": _make_profile(
@@ -318,33 +254,40 @@ class TestBuildTimingInsights:
         }
         result = _build_timing_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
-        optimal = result["bestTimes"]["optimal"]
-        assert optimal["day"] == "Saturday"
-        assert optimal["hourIST"] == 18
-        assert optimal["multiplier"] > 1.0
+        # Saturday 4 / 3 = 1.33, 18h 3 / 2 = 1.5 -> combined round(1.33 * 1.5, 2)
+        assert result["bestTimes"]["optimal"] == {
+            "day": "Saturday",
+            "hourIST": 18,
+            "description": "Evening",
+            "multiplier": 2.0,
+        }
 
     def test_hour_labels(self):
+        boundaries = {
+            0: "Night",
+            5: "Night",
+            6: "Morning",
+            11: "Morning",
+            12: "Afternoon",
+            16: "Afternoon",
+            17: "Evening",
+            21: "Evening",
+            22: "Night",
+        }
         profiles = {
             "recipe": _make_profile(
                 timing={
                     "bestDays": [],
                     "bestHours": [
-                        {"hour": 8, "avgViewsPerSubscriber": 2.0, "videoCount": 20},
-                        {"hour": 14, "avgViewsPerSubscriber": 2.0, "videoCount": 20},
-                        {"hour": 19, "avgViewsPerSubscriber": 2.0, "videoCount": 20},
-                        {"hour": 23, "avgViewsPerSubscriber": 2.0, "videoCount": 20},
+                        {"hour": hour, "avgViewsPerSubscriber": 2.0, "videoCount": 20} for hour in boundaries
                     ],
                 }
             ),
         }
         result = _build_timing_insights(profiles, "2026-03-04T00:00:00Z", 100)
 
-        hours = result["bestTimes"]["byHourIST"]
-        labels = {h["hour"]: h["label"] for h in hours}
-        assert labels[8] == "Morning"
-        assert labels[14] == "Afternoon"
-        assert labels[19] == "Evening"
-        assert labels[23] == "Night"
+        labels = {h["hour"]: h["label"] for h in result["bestTimes"]["byHourIST"]}
+        assert labels == boundaries
 
     def test_empty_timing(self):
         profiles = {
@@ -488,29 +431,3 @@ class TestGenerateRecommenderDocuments:
         result = generate_recommender_documents({}, None)
         assert "thumbnails" in result
         assert result["thumbnails"]["basedOnVideos"] == 0
-
-
-class TestHelpers:
-    def test_get_hour_label(self):
-        assert _get_hour_label(6) == "Morning"
-        assert _get_hour_label(11) == "Morning"
-        assert _get_hour_label(12) == "Afternoon"
-        assert _get_hour_label(16) == "Afternoon"
-        assert _get_hour_label(17) == "Evening"
-        assert _get_hour_label(21) == "Evening"
-        assert _get_hour_label(22) == "Night"
-        assert _get_hour_label(5) == "Night"
-        assert _get_hour_label(0) == "Night"
-
-    def test_get_thumbnail_category(self):
-        assert _get_thumbnail_category("humanPresence.hasFace") == "humanPresence"
-        assert _get_thumbnail_category("food.hasFood") == "food"
-        assert _get_thumbnail_category("colors.isBright") == "colors"
-        assert _get_thumbnail_category("textElements.hasText") == "text"
-        assert _get_thumbnail_category("scene.isOutdoor") == "composition"
-        assert _get_thumbnail_category("unknownSection.field") == "composition"
-
-    def test_weighted_avg(self):
-        assert _weighted_avg([]) == 0.0
-        assert _weighted_avg([(10, 1), (20, 1)]) == 15.0
-        assert _weighted_avg([(10, 1), (20, 3)]) == 17.5

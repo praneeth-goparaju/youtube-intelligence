@@ -163,18 +163,6 @@ def split_top_performers(
     return videos, top_videos, threshold
 
 
-def _extract_description_analysis(title_analysis: dict) -> dict:
-    """Extract the descriptionAnalysis sub-dict for separate profiling.
-
-    Args:
-        title_analysis: The full title_description analysis dict.
-
-    Returns:
-        The descriptionAnalysis sub-dict, or empty dict if not present.
-    """
-    return title_analysis.get("descriptionAnalysis", {})
-
-
 def _compute_recency_weights(videos: list) -> List[float]:
     """Compute recency weights for a list of videos."""
     weights = []
@@ -244,20 +232,16 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
 
     # Description profile (extracted from title_description analysis)
     all_desc = [
-        desc
-        for v in all_videos
-        if v.get("title_analysis") and (desc := _extract_description_analysis(v["title_analysis"]))
+        desc for v in all_videos if v.get("title_analysis") and (desc := v["title_analysis"].get("descriptionAnalysis"))
     ]
     top_desc = [
-        desc
-        for v in top_videos
-        if v.get("title_analysis") and (desc := _extract_description_analysis(v["title_analysis"]))
+        desc for v in top_videos if v.get("title_analysis") and (desc := v["title_analysis"].get("descriptionAnalysis"))
     ]
 
     if all_desc:
 
         def _has_desc(v):
-            return v.get("title_analysis") and _extract_description_analysis(v["title_analysis"])
+            return v.get("title_analysis") and v["title_analysis"].get("descriptionAnalysis")
 
         all_desc_w = _align_weights(all_videos, all_weights, _has_desc)
         top_desc_w = _align_weights(top_videos, top_weights, _has_desc)

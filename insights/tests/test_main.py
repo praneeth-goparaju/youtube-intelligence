@@ -1,5 +1,9 @@
 """Tests for insights main module helper functions."""
 
+import copy
+
+import pytest
+
 from insights.src.main import (
     get_views_per_subscriber,
     get_engagement_rate,
@@ -7,7 +11,7 @@ from insights.src.main import (
     group_by_content_type,
     split_top_performers,
     remove_outliers,
-    _extract_description_analysis,
+    generate_content_type_profile,
 )
 
 
@@ -51,20 +55,16 @@ class TestGetEngagementRate:
         }
         assert get_engagement_rate(video_data) == 3.5
 
-    def test_missing_data(self):
-        video_data = {}
-        assert get_engagement_rate(video_data) == 0.0
-
-    def test_zero_rate(self):
-        video_data = {
-            "video": {"calculated": {"engagementRate": 0}},
-        }
-        assert get_engagement_rate(video_data) == 0.0
-
-    def test_none_rate(self):
-        video_data = {
-            "video": {"calculated": {"engagementRate": None}},
-        }
+    @pytest.mark.parametrize(
+        "video_data",
+        [
+            {},
+            {"video": {"calculated": {"engagementRate": 0}}},
+            {"video": {"calculated": {"engagementRate": None}}},
+        ],
+        ids=["missing", "zero", "none"],
+    )
+    def test_falsy_rate_is_zero(self, video_data):
         assert get_engagement_rate(video_data) == 0.0
 
 
@@ -108,10 +108,10 @@ class TestSplitTopPerformers:
             )
 
         all_vids, top_vids, threshold = split_top_performers(videos)
-        assert len(all_vids) == 10
-        # Top 10% of 10 videos = 1 video (vps >= 90th percentile)
-        assert len(top_vids) >= 1
-        assert threshold > 0
+        assert all_vids is videos
+        # np.percentile linear interpolation: 9 + 0.1 * (10 - 9) = 9.1
+        assert threshold == 9.1
+        assert top_vids == [videos[9]]
 
     def test_empty_videos(self):
         all_vids, top_vids, threshold = split_top_performers([])
@@ -136,9 +136,10 @@ class TestSplitTopPerformers:
             )
 
         all_vids, top_vids, threshold = split_top_performers(videos, metric_fn=get_engagement_rate)
-        assert len(all_vids) == 10
-        assert len(top_vids) >= 1
-        assert threshold > 0
+        assert all_vids is videos
+        # 0.9 + 0.1 * (1.0 - 0.9) = 0.91
+        assert threshold == pytest.approx(0.91)
+        assert top_vids == [videos[9]]
 
 
 class TestRemoveOutliers:
@@ -161,8 +162,11 @@ class TestRemoveOutliers:
                     "channel": {"subscriberCount": 10000},
                 }
             )
+        original = copy.deepcopy(videos)
 
         filtered, stats = remove_outliers(videos, get_views_per_subscriber)
+        # Capping happens on copies: caller's list and video dicts are untouched
+        assert videos == original
         assert stats["winsorizedCount"] > 0
         assert stats["vpsCap"] < 100.0
 
@@ -184,24 +188,36 @@ class TestRemoveOutliers:
         assert len(filtered) == 1  # 500 > 100
 
 
-class TestDescriptionExtraction:
-    def test_extracts_description(self):
-        analysis = {
-            "contentSignals": {"contentType": "recipe"},
-            "descriptionAnalysis": {
-                "hasTimestamps": True,
-                "linkCount": 3,
+def _profile_video(vps, engagement, description):
+    title_analysis = {"contentSignals": {"contentType": "recipe"}, "descriptionAnalysis": description}
+    return {
+        "video": {"calculated": {"viewsPerSubscriber": vps, "engagementRate": engagement}},
+        "title_analysis": title_analysis,
+    }
+
+
+class TestGenerateContentTypeProfile:
+    def test_description_and_engagement_sections(self):
+        videos = [
+            _profile_video(1.0, 1.0, {"hasTimestamps": False, "linkCount": 2}),
+            _profile_video(2.0, 2.0, {"hasTimestamps": False, "linkCount": 4}),
+            _profile_video(10.0, 3.0, {"hasTimestamps": True, "linkCount": 6}),  # VPS top performer
+            _profile_video(3.0, 4.0, None),  # engagement top performer, no description analysis
+        ]
+
+        profile = generate_content_type_profile("recipe", videos)
+
+        # Description section comes from title_analysis.descriptionAnalysis; the None entry is skipped
+        assert profile["description"] == {
+            "sampleSize": {"all": 3, "top10": 1},
+            "features": {
+                "hasTimestamps": {"all": 0.333, "top10": 1.0, "confidence": "low", "significant": True},
+                "linkCount": {"all_avg": 4.0, "top10_avg": 6.0, "confidence": "low"},
             },
         }
-        result = _extract_description_analysis(analysis)
-        assert result == {"hasTimestamps": True, "linkCount": 3}
-
-    def test_missing_description(self):
-        analysis = {"contentSignals": {"contentType": "recipe"}}
-        result = _extract_description_analysis(analysis)
-        assert result == {}
-
-    def test_empty_description(self):
-        analysis = {"descriptionAnalysis": {}}
-        result = _extract_description_analysis(analysis)
-        assert result == {}
+        # Engagement profile splits by engagementRate (p90 of 1..4 = 3.7), not VPS
+        engagement = profile["engagementProfile"]
+        assert engagement["metric"] == "engagementRate"
+        assert engagement["top10Threshold"] == 3.7
+        assert engagement["top10Count"] == 1
+        assert engagement["title"]["sampleSize"] == {"all": 4, "top10": 1}
