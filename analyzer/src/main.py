@@ -84,13 +84,14 @@ def _run_batch_loop(phase: str, analysis_type: str, args):
 
 def _ensure_no_blocking_job(analysis_type: str) -> None:
     """Raise BatchRunError if an in-flight or un-imported job exists for this type."""
-    from .batch_api.submit import find_blocking_job
+    from .batch_api.submit import ABANDON_HINT, find_blocking_job
 
     kind, job = find_blocking_job(analysis_type)
     if kind:
         raise BatchRunError(
             f"{kind} {analysis_type} job {job['jobName']} ({job.get('state')}) must be polled/imported first "
-            "(use --phase all to resume it, or --phase poll / --phase import)"
+            "(use --phase all to resume it, or --phase poll / --phase import). "
+            + ABANDON_HINT.format(job_name=job["jobName"])
         )
 
 
@@ -105,6 +106,11 @@ def _poll_and_import(analysis_type: str, job_name: str, args) -> dict:
         job_name=job_name,
     )
     state = result.get("state")
+    if result.get("abandoned"):
+        raise BatchRunError(
+            f"Job {job_name} no longer exists in the Gemini API and was marked abandoned. "
+            "Re-run to prepare a new batch."
+        )
     if state not in IMPORTABLE_STATES:
         raise BatchRunError(f"Job {job_name} did not succeed (state: {state}). Re-run to resume or start a new batch.")
 
@@ -120,14 +126,13 @@ def _run_batch_phase_with_stats(analysis_type: str, args) -> Optional[dict]:
     a new (duplicate, billed) job is never submitted after a failed resume.
     """
     from .batch_api import prepare_batch_requests, submit_batch
-    from .batch_api.submit import find_blocking_job
+    from .batch_api.submit import ABANDON_HINT, find_blocking_job
 
     kind, existing = find_blocking_job(analysis_type)
-    if kind == "unimported":
-        print(f"\n  Found unimported finished job: {existing['jobName']}")
-        return _poll_and_import(analysis_type, existing["jobName"], args)
-    if kind == "active":
-        print(f"\n  Found active job: {existing['jobName']} ({existing.get('state')})")
+    if kind:
+        label = "unimported finished" if kind == "unimported" else "active"
+        print(f"\n  Found {label} job: {existing['jobName']} ({existing.get('state')})")
+        print(f"  {ABANDON_HINT.format(job_name=existing['jobName'])}")
         return _poll_and_import(analysis_type, existing["jobName"], args)
 
     # No existing jobs — prepare new batch
@@ -239,7 +244,7 @@ def _show_batch_status():
             atype = job.get("analysisType", "?")
             state = job.get("state", "?")
             count = job.get("requestCount", "?")
-            imported = "Yes" if job.get("importedAt") else "No"
+            imported = "Yes" if job.get("importedAt") else ("Abandoned" if job.get("abandonedAt") else "No")
             print(f"  {name:<35} {atype:<20} {state:<25} {str(count):<10} {imported}")
 
     # Also check the API for any jobs not tracked
@@ -259,6 +264,23 @@ def _show_batch_status():
         print(f"  Could not check API: {e}")
 
     print()
+
+
+def _abandon_job(job_name: str) -> None:
+    """Mark a batch job abandoned so it no longer blocks prepare/submit (--abandon-job)."""
+    from .batch_api.submit import abandon_job
+
+    try:
+        record = abandon_job(job_name)
+    except ValueError as e:
+        print(f"\nError: {e}")
+        sys.exit(1)
+    print(
+        f"\nMarked {record.get('analysisType', '?')} job {record.get('jobName', job_name)} "
+        f"({record.get('state', '?')}) as abandoned. It no longer blocks new batches."
+    )
+    if record.get("importedAt"):
+        print("  Note: this job had already been imported.")
 
 
 def _get_type_description(analysis_type: str) -> str:
@@ -368,8 +390,16 @@ def main():
     parser.add_argument(
         "--loop", action="store_true", help="Loop batch jobs until all videos are analyzed (batch mode only)"
     )
+    parser.add_argument(
+        "--abandon-job",
+        metavar="JOB_NAME",
+        default=None,
+        help="Mark a batch job (e.g. batches/abc123) as abandoned so it stops blocking new batches (batch mode only)",
+    )
 
     args = parser.parse_args()
+    if args.abandon_job and args.mode != "batch":
+        parser.error("--abandon-job requires --mode batch")
 
     # Validate channel ID format if provided
     if args.channel:
@@ -396,6 +426,10 @@ def main():
     print("Initializing Firebase...")
     initialize_firebase()
     print("Firebase connected")
+
+    if args.abandon_job:
+        _abandon_job(args.abandon_job)
+        return
 
     # For batch status, skip Gemini connection test (Config already loaded above)
     if args.mode == "batch" and args.phase == "status":

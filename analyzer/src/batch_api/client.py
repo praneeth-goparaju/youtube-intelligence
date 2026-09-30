@@ -8,7 +8,9 @@ import time
 from typing import Optional, List, Any
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
+from google.api_core import exceptions as google_exceptions
 
 from ..config import config, logger
 
@@ -39,6 +41,17 @@ def _state_str(state) -> str:
     if hasattr(state, "value"):
         return state.value
     return str(state)
+
+
+def is_not_found_error(exc: BaseException) -> bool:
+    """True if `exc` means the batch job / result file no longer exists (HTTP 404).
+
+    Such errors are permanent: retrying will never succeed. Everything else
+    (network errors, 5xx, rate limits) is treated as transient by callers.
+    """
+    if isinstance(exc, genai_errors.APIError):
+        return exc.code == 404
+    return isinstance(exc, google_exceptions.NotFound)
 
 
 def get_client() -> genai.Client:
@@ -129,6 +142,8 @@ def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440
             job = client.batches.get(name=job_name)
             consecutive_errors = 0
         except Exception as e:
+            if is_not_found_error(e):
+                raise  # the job is gone; retrying cannot help
             consecutive_errors += 1
             logger.warning(f"Poll error ({consecutive_errors}/{max_retries}): {e}")
             print(f"  Network error (attempt {consecutive_errors}/{max_retries}), retrying...")

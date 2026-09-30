@@ -7,17 +7,23 @@ job metadata in the batch_jobs Firestore collection.
 import random
 import re
 from datetime import datetime
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, List, Tuple
 
-from ..config import config
-from ..firebase_client import save_batch_job, get_batch_jobs_in_states, update_batch_job
+from ..config import config, logger
+from ..firebase_client import save_batch_job, get_batch_job, get_batch_jobs_in_states, update_batch_job
 from .client import (
     upload_jsonl_file,
     create_batch_job,
     poll_batch_job,
+    is_not_found_error,
     IMPORTABLE_STATES,
     _state_str,
 )
+
+# Pseudo-state reported by poll_and_update when the job no longer exists in the Gemini API
+STATE_NOT_FOUND = "NOT_FOUND"
+
+ABANDON_HINT = "If it can never be completed, run: python -m src.main --mode batch --abandon-job {job_name}"
 
 from shared.constants import GEMINI_MODEL, BATCH_ANALYSIS_VERSION
 
@@ -142,8 +148,18 @@ def poll_and_update(
     print(f"  Analysis type: {analysis_type}")
     print(f"  Poll interval: {interval}s")
 
-    # Poll until complete
-    job = poll_batch_job(batch_job_name, poll_interval=interval)
+    # Poll until complete. A 404 is permanent (job deleted / expired from the API): mark the
+    # job abandoned so it stops blocking new batches. Transient errors propagate unchanged.
+    try:
+        job = poll_batch_job(batch_job_name, poll_interval=interval)
+    except Exception as e:
+        if not is_not_found_error(e):
+            raise
+        reason = f"Job not found in Gemini API while polling: {e}"
+        logger.error(f"{batch_job_name}: {reason}")
+        mark_job_abandoned(job_id, reason)
+        print(f"\nJob {batch_job_name} no longer exists in the Gemini API; marked as abandoned.")
+        return {"state": STATE_NOT_FOUND, "abandoned": True, "jobName": batch_job_name, "jobId": job_id}
 
     # Update Firestore
     state = _state_str(job.state)
@@ -189,16 +205,45 @@ ACTIVE_STATES = [
 ]
 
 
+def _live_jobs(analysis_type: str, states: List[str]) -> List[Dict[str, Any]]:
+    """Jobs in the given states that have not been marked abandoned, newest first."""
+    return [job for job in get_batch_jobs_in_states(analysis_type, states) if not job.get("abandonedAt")]
+
+
 def _find_active_job(analysis_type: str) -> Optional[Dict[str, Any]]:
-    """Find the latest non-terminal batch job for an analysis type."""
-    jobs = get_batch_jobs_in_states(analysis_type, ACTIVE_STATES)
+    """Find the latest non-terminal, non-abandoned batch job for an analysis type."""
+    jobs = _live_jobs(analysis_type, ACTIVE_STATES)
     return jobs[0] if jobs else None
 
 
 def find_unimported_job(analysis_type: str) -> Optional[Dict[str, Any]]:
-    """Find the latest finished job whose results have not been imported yet."""
-    jobs = get_batch_jobs_in_states(analysis_type, sorted(IMPORTABLE_STATES))
+    """Find the latest finished, non-abandoned job whose results have not been imported yet."""
+    jobs = _live_jobs(analysis_type, sorted(IMPORTABLE_STATES))
     return next((job for job in jobs if not job.get("importedAt")), None)
+
+
+def job_id_for(job_name: str) -> str:
+    """Firestore batch_jobs document ID for a Gemini job name ("batches/abc" -> "batches_abc")."""
+    return job_name.replace("/", "_")
+
+
+def mark_job_abandoned(job_id: str, reason: str) -> None:
+    """Record that a job can never be polled/imported, so it no longer blocks new batches."""
+    update_batch_job(job_id, {"abandonedAt": datetime.utcnow().isoformat(), "abandonReason": reason})
+
+
+def abandon_job(job_name: str, reason: str = "Abandoned manually (--abandon-job)") -> Dict[str, Any]:
+    """Mark a tracked job as abandoned (CLI escape hatch). Returns the job record before the change.
+
+    Raises:
+        ValueError: If the job is not tracked in Firestore.
+    """
+    job_id = job_id_for(job_name)
+    record = get_batch_job(job_id)
+    if not record:
+        raise ValueError(f"Batch job not found in Firestore: {job_name} (document batch_jobs/{job_id})")
+    mark_job_abandoned(job_id, reason)
+    return record
 
 
 def find_blocking_job(analysis_type: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:

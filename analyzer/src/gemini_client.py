@@ -27,9 +27,41 @@ class GeminiRateLimitError(GeminiAPIError):
 
 
 class GeminiResponseError(GeminiAPIError):
-    """Exception for invalid response errors."""
+    """Per-video failure: blocked, empty, truncated or unparseable output, or a request Gemini rejects.
+
+    Not retried, and not counted toward the sync processor's consecutive-API-error abort.
+    """
 
     pass
+
+
+def _response_text(response) -> str:
+    """Return the response text, raising GeminiResponseError when there is none.
+
+    The SDK's ``response.text`` raises ValueError when the candidate has no text part
+    (safety block, MAX_TOKENS/RECITATION finish, no candidates). That is a property of the
+    video, not of the API, so it must not look like a (retryable) API error.
+    """
+    try:
+        text = response.text
+    except (ValueError, AttributeError) as e:
+        reason = _finish_reason(response)
+        raise GeminiResponseError(f"Gemini response has no usable text{reason}: {e}") from e
+    if not text:
+        raise GeminiResponseError(f"Gemini response has no text content{_finish_reason(response)}")
+    return text
+
+
+def _finish_reason(response) -> str:
+    try:
+        return f" (finish_reason={response.candidates[0].finish_reason})"
+    except Exception:
+        return ""
+
+
+def _is_invalid_api_key(error: Exception) -> bool:
+    message = str(error)
+    return "API_KEY_INVALID" in message or "API key not valid" in message
 
 
 # Model instances: keyed by (analysis_type or 'default')
@@ -141,11 +173,7 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
                 if hasattr(response.prompt_feedback, "block_reason") and response.prompt_feedback.block_reason:
                     raise GeminiResponseError(f"Response blocked: {response.prompt_feedback.block_reason}")
 
-            # Validate response text exists
-            if not hasattr(response, "text") or not response.text:
-                raise GeminiResponseError("Gemini response has no text content")
-
-            return parse_json_response(response.text)
+            return parse_json_response(_response_text(response))
 
         except json.JSONDecodeError as e:
             # JSON parsing error - don't retry, it won't help
@@ -162,9 +190,12 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
                 time.sleep(wait_time)
 
         except google_exceptions.InvalidArgument as e:
-            # Invalid request - don't retry
+            # Invalid request - don't retry. A bad key affects every call (API-level error);
+            # anything else is about this video's input (e.g. an image Gemini rejects).
             logger.error(f"Invalid argument error: {e}")
-            raise GeminiAPIError(f"Invalid request: {e}")
+            if _is_invalid_api_key(e):
+                raise GeminiAPIError(f"Invalid API key: {e}")
+            raise GeminiResponseError(f"Invalid request: {e}")
 
         except google_exceptions.GoogleAPIError as e:
             # Other Google API errors - may be transient

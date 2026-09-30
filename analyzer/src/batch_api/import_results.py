@@ -8,7 +8,7 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Tuple, FrozenSet
+from typing import Optional, Dict, Any, List, NoReturn, Tuple, FrozenSet
 
 from ..config import config, logger
 from ..firebase_client import (
@@ -24,10 +24,11 @@ from ..analyzers.local_text_features import extract_local_features, deep_merge
 from .client import (
     get_batch_job as get_batch_job_status,
     download_result_file,
+    is_not_found_error,
     IMPORTABLE_STATES,
     _state_str,
 )
-from .submit import find_unimported_job
+from .submit import ABANDON_HINT, find_unimported_job, mark_job_abandoned
 
 from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
 
@@ -36,6 +37,25 @@ _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 class BatchImportError(RuntimeError):
     """A batch job's results could not be imported (nothing was marked as imported)."""
+
+
+class ResultContentError(ValueError):
+    """A result line's content is unusable (bad key, empty/blocked/unparseable response).
+
+    Only these count as per-video strikes in batch_failures: re-submitting the video is
+    what might fix them, and repeated strikes mean the video itself is the problem.
+    """
+
+
+class ResultStoreError(RuntimeError):
+    """Firestore failed while reading/saving a result (infrastructure, usually transient).
+
+    The job is left un-imported so a re-run retries the import of the paid results.
+    """
+
+
+class MissingVideoError(RuntimeError):
+    """The video document no longer exists; the result is skipped without a strike."""
 
 
 def import_batch_results(
@@ -86,15 +106,31 @@ def import_batch_results(
     print(f"  Expected results: {request_count}")
 
     # Get the actual job status to find result location
-    job = get_batch_job_status(batch_job_name)
+    try:
+        job = get_batch_job_status(batch_job_name)
+    except Exception as e:
+        if not is_not_found_error(e):
+            raise  # transient (network / 5xx): leave the job as is so a re-run retries
+        _abandon(job_id, batch_job_name, f"Job not found in Gemini API during import: {e}")
 
     if _state_str(job.state) not in IMPORTABLE_STATES:
         raise BatchImportError(f"Job {batch_job_name} is in state {_state_str(job.state)}, cannot import results")
 
     # Download results
-    output_path = _download_results(job, job_record, analysis_type)
+    try:
+        output_path = _download_results(job, job_record, analysis_type)
+    except Exception as e:
+        if not is_not_found_error(e):
+            raise
+        _abandon(job_id, batch_job_name, f"Result file not found: {e}")
     if not output_path:
-        raise BatchImportError(f"Could not download results for job {batch_job_name}")
+        dest_uri = getattr(job.dest, "gcs_uri", None) if job.dest else None
+        reason = (
+            f"Results are at {dest_uri} (GCS download not supported; import manually)"
+            if dest_uri
+            else "No downloadable result location for job"
+        )
+        _abandon(job_id, batch_job_name, reason)
 
     # Load valid channel IDs for validation
     print("  Loading channel list for validation...")
@@ -105,7 +141,17 @@ def import_batch_results(
     # Process results (every line; failures are recorded, not fatal)
     stats, failed_videos = _process_result_file(output_path, analysis_type, valid_channel_ids)
 
-    # Count failures per video so prepare stops re-submitting videos that keep failing
+    if stats["storeErrors"]:
+        # Paid results that did not reach Firestore: keep the job un-imported so a re-run
+        # re-imports the file (saves are idempotent overwrites). No strikes are recorded yet
+        # so a retried import does not count the same content failures twice.
+        update_batch_job(job_id, {"importStats": stats, "lastImportAttemptAt": datetime.utcnow().isoformat()})
+        raise BatchImportError(
+            f"{stats['storeErrors']} result(s) of job {batch_job_name} could not be saved to Firestore; "
+            "the job was left un-imported. Re-run the import to retry. " + ABANDON_HINT.format(job_name=batch_job_name)
+        )
+
+    # Count content failures per video so prepare stops re-submitting videos that keep failing
     if failed_videos:
         record_batch_failures(analysis_type, failed_videos, batch_job_name)
 
@@ -123,12 +169,26 @@ def import_batch_results(
     print(f"    Successful imports:  {stats['imported']}")
     print(f"    Failed imports:      {stats['failed']}")
     print(f"    Parse errors:        {stats['parseErrors']}")
+    if stats.get("missingVideos", 0) > 0:
+        print(f"    Missing video docs:  {stats['missingVideos']} (skipped)")
+    if stats.get("otherErrors", 0) > 0:
+        print(f"    Unexpected errors:   {stats['otherErrors']} (see log)")
     if stats.get("invalidKeys", 0) > 0:
         print(f"    Invalid keys:        {stats['invalidKeys']}")
     if stats.get("localFeaturesMerged", 0) > 0:
         print(f"    Local features:      {stats['localFeaturesMerged']} merged (title_description)")
 
     return stats
+
+
+def _abandon(job_id: str, batch_job_name: str, reason: str) -> NoReturn:
+    """Mark a job whose results can never be imported as abandoned and raise BatchImportError."""
+    logger.error(f"Abandoning batch job {batch_job_name}: {reason}")
+    mark_job_abandoned(job_id, reason)
+    raise BatchImportError(
+        f"Results of job {batch_job_name} are permanently unavailable ({reason}). "
+        "The job was marked abandoned and no longer blocks new batches."
+    )
 
 
 def _download_results(job, job_record: Dict[str, Any], analysis_type: str) -> Optional[str]:
@@ -191,10 +251,13 @@ def _process_result_file(
     - key: "{channelId}_{videoId}_{analysisType}"
     - response: The Gemini API response object
 
-    Every line is processed; a failing line never stops the import.
+    Every line is processed; a failing line never stops the import. Failures are split into
+    content failures (returned for per-video strikes), Firestore errors (``storeErrors``: the
+    caller leaves the job un-imported), missing video docs and other unexpected errors (neither
+    counts as a strike).
 
     Returns:
-        (statistics dict, [(channel_id, video_id), ...] of results that failed to import)
+        (statistics dict, [(channel_id, video_id), ...] of results whose content was unusable)
     """
     stats = {
         "total": 0,
@@ -203,6 +266,10 @@ def _process_result_file(
         "parseErrors": 0,
         "invalidKeys": 0,
         "localFeaturesMerged": 0,
+        "contentFailures": 0,
+        "storeErrors": 0,
+        "missingVideos": 0,
+        "otherErrors": 0,
     }
     failed_videos: List[Tuple[str, str]] = []
 
@@ -242,12 +309,25 @@ def _process_result_file(
             stats["imported"] += 1
             if merged_local:
                 stats["localFeaturesMerged"] += 1
-        except Exception as e:
-            logger.error(f"Import error on line {line_num}: {e}")
+        except ResultContentError as e:
+            logger.error(f"Unusable result on line {line_num}: {e}")
             stats["failed"] += 1
+            stats["contentFailures"] += 1
             channel_id, video_id = _parse_result_key(key, analysis_type)
             if channel_id in valid_channel_ids and video_id:
                 failed_videos.append((channel_id, video_id))
+        except ResultStoreError as e:
+            logger.error(f"Firestore error on line {line_num}: {e.__cause__ or e}")
+            stats["failed"] += 1
+            stats["storeErrors"] += 1
+        except MissingVideoError as e:
+            logger.warning(f"Skipping line {line_num}: {e}")
+            stats["failed"] += 1
+            stats["missingVideos"] += 1
+        except Exception as e:
+            logger.error(f"Unexpected import error on line {line_num}: {type(e).__name__}: {e}")
+            stats["failed"] += 1
+            stats["otherErrors"] += 1
 
         # Progress logging every 100 results
         if stats["total"] % 100 == 0:
@@ -283,28 +363,36 @@ def _import_single_result(
 
     if not channel_id or not video_id:
         logger.debug(f"Unparseable key: {key}")
-        raise ValueError("Could not parse result key")
+        raise ResultContentError("Could not parse result key")
 
     # Validate channel exists in Firestore
     if channel_id not in valid_channel_ids:
         logger.warning(f"Unknown channel ID in batch result: {channel_id}")
-        raise ValueError("Unknown channel ID in batch result")
+        raise ResultContentError("Unknown channel ID in batch result")
 
-    # Extract response text from Gemini response structure
-    analysis_data = _extract_analysis_data(response)
+    # Extract response text from Gemini response structure (empty / blocked / unparseable -> content error)
+    try:
+        analysis_data = _extract_analysis_data(response)
+    except (ValueError, AttributeError, TypeError) as e:
+        raise ResultContentError(f"Unparseable response: {e}") from e
 
     if not analysis_data:
         logger.debug(f"Empty response for key: {key}")
-        raise ValueError("No analysis data in response")
+        raise ResultContentError("No analysis data in response")
+    if not isinstance(analysis_data, dict):
+        raise ResultContentError(f"Response JSON is a {type(analysis_data).__name__}, expected an object")
 
     # For title_description, merge locally-computed deterministic features
     merged_local = False
     if analysis_type == "title_description":
         video_texts = video_text_cache.get(video_id)
         if video_texts is None:
-            video = get_video(channel_id, video_id)
+            try:
+                video = get_video(channel_id, video_id)
+            except Exception as e:
+                raise ResultStoreError(f"Could not read video {channel_id}/{video_id}") from e
             if not video:
-                raise ValueError("Video doc not found; cannot compute local features")
+                raise MissingVideoError(f"Video doc {channel_id}/{video_id} not found; cannot compute local features")
             video_texts = {"title": video.get("title", ""), "description": video.get("description", "")}
         local_features = extract_local_features(video_texts["title"], video_texts["description"])
         analysis_data = deep_merge(analysis_data, local_features)
@@ -319,7 +407,10 @@ def _import_single_result(
     analysis_data["batchMode"] = True
 
     # Save to Firestore
-    save_analysis(channel_id, video_id, analysis_type, analysis_data)
+    try:
+        save_analysis(channel_id, video_id, analysis_type, analysis_data)
+    except Exception as e:
+        raise ResultStoreError(f"Could not save analysis for {channel_id}/{video_id}") from e
     return merged_local
 
 

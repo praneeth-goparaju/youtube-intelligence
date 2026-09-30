@@ -89,6 +89,7 @@ python -m src.main --mode batch --channel UCxxx --type thumbnail              # 
 python -m src.main --mode batch --phase prepare --type thumbnail --batch-size 10  # Small test batch (default: 680)
 python -m src.main --mode batch --type thumbnail --loop                           # Loop until all videos analyzed
 python -m src.main --mode batch --phase poll --job-name JOB_NAME                  # Poll specific job
+python -m src.main --mode batch --abandon-job JOB_NAME                           # Mark a job that can never be polled/imported as abandoned (stops blocking new batches)
 python -m src.main --mode batch --phase poll --poll-interval 120                  # Custom poll interval (seconds)
 
 python -m pytest tests/                                                       # Run tests

@@ -152,6 +152,7 @@ class BatchProcessor:
                 self.progress.record_failure()
 
             except GeminiAPIError as e:
+                # API-level / transient failures only (per-video problems arrive as GeminiResponseError)
                 consecutive_api_errors += 1
                 logger.error(f"Gemini API error for {video_id} ({consecutive_api_errors} in a row): {e}")
                 self.progress.record_failure()
