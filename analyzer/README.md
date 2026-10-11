@@ -79,11 +79,11 @@ analyzer/
 
 ### Sync Mode (default)
 
-Per-video API calls using the `google-generativeai` SDK. Each video is processed sequentially with 0.5s delay between calls for rate limiting.
+Per-video API calls use the `google-genai` SDK, which also handles batch mode. Each video is processed sequentially with 0.5s delay between calls for rate limiting. The sync client reuses HTTP connections and closes them when the process exits. Application retries handle rate limits and transient failures; SDK retries are disabled for sync requests to keep the configured attempt count predictable.
 
 Both sync and batch modes use:
 - **`response_schema`**: Pydantic models (`ThumbnailAnalysisSchema`, `TitleDescriptionAnalysisSchema`) guarantee valid JSON output
-- **`system_instruction`**: Concise role/domain context set on the model
+- **`system_instruction`**: Concise role/domain context supplied in the generation configuration
 - **User prompts**: Shorter analysis instructions (no JSON template needed since schema enforces structure)
 
 ```bash
@@ -195,13 +195,12 @@ pytest tests/ --cov=src
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `google-generativeai` | >=0.3.0 | Gemini API client (sync mode) |
-| `google-genai` | >=1.0.0 | Gemini API client (batch mode) |
-| `pydantic` | >=2.0.0 | Response schema models |
-| `firebase-admin` | >=6.4.0 | Firebase Admin SDK |
-| `Pillow` | >=10.2.0 | Image processing |
-| `tqdm` | >=4.66.2 | Progress bars |
-| `python-dotenv` | >=1.0.1 | Environment configuration |
+| `google-genai` | 2.29.0 | Gemini API client for sync and batch modes |
+| `pydantic` | 2.12.5 | Response schema models |
+| `firebase-admin` | 7.1.0 | Firebase Admin SDK |
+| `Pillow` | 11.3.0 | Image processing |
+| `tqdm` | 4.67.1 | Progress bars |
+| `python-dotenv` | 1.2.1 | Environment configuration |
 
 ## Related Documentation
 

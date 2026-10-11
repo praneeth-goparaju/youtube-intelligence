@@ -69,10 +69,17 @@ Set the Gemini API key:
 ```bash
 # Using Firebase CLI
 firebase functions:secrets:set GOOGLE_API_KEY
-
-# Or using .env.local for emulator
-echo "GOOGLE_API_KEY=your_api_key" > .env.local
+firebase functions:secrets:set RECOMMEND_API_KEY
 ```
+
+For local emulator overrides, create `functions/.secret.local` with:
+
+```dotenv
+GOOGLE_API_KEY=your_api_key
+RECOMMEND_API_KEY=your_recommendation_key
+```
+
+The HTTP endpoints bind `RECOMMEND_API_KEY`. Recommendation and idea generation also bind `GOOGLE_API_KEY`. Callable endpoints use Firebase Authentication and bind only `GOOGLE_API_KEY`. Set `ALLOWED_ORIGINS` as a comma-separated string parameter when using cross-origin browser requests.
 
 ### Local Development
 
@@ -83,6 +90,7 @@ npm run serve
 # Test the endpoint
 curl -X POST http://localhost:5001/PROJECT_ID/us-central1/recommend \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{"topic": "Biryani", "type": "recipe"}'
 ```
 
@@ -210,11 +218,11 @@ Generate data-backed video ideas.
 }
 ```
 
-### POST /generations-save
+### POST /generationsSave
 
 Save a generation result.
 
-### GET /generations-list
+### GET /generationsList
 
 List saved generations.
 
@@ -272,7 +280,8 @@ functions/
 │   ├── engine.ts               # Recommendation engine (API)
 │   ├── recommendation-core.ts  # Shared recommendation logic
 │   ├── firebase.ts             # Firestore client for insights
-│   ├── gemini.ts               # Gemini AI client
+│   ├── gemini.ts               # Gemini client, secrets, and retry handling
+│   ├── gemini-client.ts        # Shared Google Gen AI text adapter for API and CLI
 │   ├── templates.ts            # Fallback templates
 │   ├── types.ts                # TypeScript interfaces
 │   ├── rate-limiter.ts         # Firestore-based distributed rate limiting

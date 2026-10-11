@@ -6,12 +6,15 @@
 
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
-import { defineString } from 'firebase-functions/params';
+import { defineSecret, defineString } from 'firebase-functions/params';
 import { RecommendationEngine } from './engine';
+import { geminiApiKey } from './gemini';
 import { withHttpGuards, requireCallableAuth, parseAllowedOrigins, type RateLimitConfig } from './middleware';
-import { sanitizeInput, VALID_CONTENT_TYPES, MAX_TOPIC_LENGTH, MAX_ANGLE_LENGTH, MAX_AUDIENCE_LENGTH } from './recommendation-core';
+import {
+  InvalidRequest, parseRecommendationRequest, parseIdeasRequest, parseGenerationRequest, parseGenerationType,
+} from './request-validation';
 import { saveGeneration as saveGen, listGenerations as listGens } from './firebase';
-import type { RecommendationRequest, RecommendationResponse, ContentType, IdeaGenerationResponse } from './types';
+import type { RecommendationResponse, IdeaGenerationResponse } from './types';
 
 // Set global options for all functions
 setGlobalOptions({
@@ -21,10 +24,7 @@ setGlobalOptions({
 });
 
 // API key for authentication (set via Firebase Console or CLI)
-const apiKeyParam = defineString('RECOMMEND_API_KEY', {
-  description: 'API key for authenticating recommendation requests',
-  default: '',
-});
+const apiKeyParam = defineSecret('RECOMMEND_API_KEY');
 
 // Allowed origins for CORS (comma-separated list)
 const allowedOriginsParam = defineString('ALLOWED_ORIGINS', {
@@ -47,10 +47,6 @@ function getAllowedOrigins(): string[] | boolean {
   return parseAllowedOrigins(allowedOriginsParam.value());
 }
 
-function isValidContentType(type: string): type is ContentType {
-  return VALID_CONTENT_TYPES.includes(type as ContentType);
-}
-
 // ============================================
 // HTTP Endpoint (REST API)
 // ============================================
@@ -71,44 +67,20 @@ function isValidContentType(type: string): type is ContentType {
 export const recommend = onRequest(
   {
     cors: getAllowedOrigins(),  // Restricted CORS - configure ALLOWED_ORIGINS
+    secrets: [apiKeyParam, geminiApiKey],
   },
   withHttpGuards({ method: 'POST', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
-      // Parse and validate request
-      const { topic, type, angle, audience } = req.body as Partial<RecommendationRequest>;
-
-      // Sanitize inputs to prevent prompt injection
-      const sanitizedTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
-      const sanitizedAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
-      const sanitizedAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
-
-      if (!sanitizedTopic || sanitizedTopic.length === 0) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: 'Topic is required and must be a non-empty string',
-        });
-        return;
-      }
-
-      if (type && !isValidContentType(type)) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`,
-        });
-        return;
-      }
-
-      // Generate recommendation with sanitized inputs
+      const request = parseRecommendationRequest(req.body);
       const engine = new RecommendationEngine();
-      const recommendation = await engine.generateRecommendation({
-        topic: sanitizedTopic,
-        type: type as ContentType || 'recipe',
-        angle: sanitizedAngle || undefined,
-        audience: sanitizedAudience || 'Telugu audience',
-      });
+      const recommendation = await engine.generateRecommendation(request);
 
       res.status(200).json(recommendation);
     } catch (error) {
+      if (error instanceof InvalidRequest) {
+        res.status(400).json({ error: 'Invalid request', message: error.message });
+        return;
+      }
       console.error('Recommendation error:', error);
       res.status(500).json({
         error: 'Internal server error',
@@ -131,42 +103,17 @@ export const recommend = onRequest(
  * const getRecommendation = httpsCallable(functions, 'getRecommendation');
  * const result = await getRecommendation({ topic: 'Biryani', type: 'recipe' });
  */
-export const getRecommendation = onCall<RecommendationRequest, Promise<RecommendationResponse>>(
+export const getRecommendation = onCall<unknown, Promise<RecommendationResponse>>(
+  { secrets: [geminiApiKey] },
   async (request) => {
     await requireCallableAuth(request, RATE_LIMIT);
 
-    const { topic, type, angle, audience } = request.data;
-
-    // Sanitize inputs to prevent prompt injection
-    const sanitizedTopic = sanitizeInput(topic, MAX_TOPIC_LENGTH);
-    const sanitizedAngle = sanitizeInput(angle, MAX_ANGLE_LENGTH);
-    const sanitizedAudience = sanitizeInput(audience, MAX_AUDIENCE_LENGTH);
-
-    // Validate topic
-    if (!sanitizedTopic || sanitizedTopic.length === 0) {
-      throw new HttpsError(
-        'invalid-argument',
-        'Topic is required and must be a non-empty string'
-      );
-    }
-
-    // Validate content type
-    if (type && !isValidContentType(type)) {
-      throw new HttpsError(
-        'invalid-argument',
-        `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`
-      );
-    }
-
     try {
+      const input = parseRecommendationRequest(request.data);
       const engine = new RecommendationEngine();
-      return await engine.generateRecommendation({
-        topic: sanitizedTopic,
-        type: type || 'recipe',
-        angle: sanitizedAngle || undefined,
-        audience: sanitizedAudience || 'Telugu audience',
-      });
+      return await engine.generateRecommendation(input);
     } catch (error) {
+      if (error instanceof InvalidRequest) throw new HttpsError('invalid-argument', error.message);
       console.error('Recommendation error:', error);
       throw new HttpsError(
         'internal',
@@ -190,23 +137,19 @@ export const getRecommendation = onCall<RecommendationRequest, Promise<Recommend
 export const ideas = onRequest(
   {
     cors: getAllowedOrigins(),
+    secrets: [apiKeyParam, geminiApiKey],
   },
   withHttpGuards({ method: 'POST', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
-      const { type } = req.body as { type?: string };
-
-      if (type && !isValidContentType(type)) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`,
-        });
-        return;
-      }
-
+      const { type } = parseIdeasRequest(req.body);
       const engine = new RecommendationEngine();
-      const response = await engine.generateIdeas(type as ContentType | undefined);
+      const response = await engine.generateIdeas(type);
       res.status(200).json(response);
     } catch (error) {
+      if (error instanceof InvalidRequest) {
+        res.status(400).json({ error: 'Invalid request', message: error.message });
+        return;
+      }
       console.error('Ideas generation error:', error);
       res.status(500).json({
         error: 'Internal server error',
@@ -223,23 +166,17 @@ export const ideas = onRequest(
 /**
  * Callable function for generating video ideas
  */
-export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse>>(
+export const getIdeas = onCall<unknown, Promise<IdeaGenerationResponse>>(
+  { secrets: [geminiApiKey] },
   async (request) => {
     await requireCallableAuth(request, RATE_LIMIT);
 
-    const { type } = request.data;
-
-    if (type && !isValidContentType(type)) {
-      throw new HttpsError(
-        'invalid-argument',
-        `Invalid content type. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}`
-      );
-    }
-
     try {
+      const { type } = parseIdeasRequest(request.data);
       const engine = new RecommendationEngine();
-      return await engine.generateIdeas(type as ContentType | undefined);
+      return await engine.generateIdeas(type);
     } catch (error) {
+      if (error instanceof InvalidRequest) throw new HttpsError('invalid-argument', error.message);
       console.error('Ideas generation error:', error);
       throw new HttpsError(
         'internal',
@@ -254,35 +191,24 @@ export const getIdeas = onCall<{ type?: string }, Promise<IdeaGenerationResponse
 // ============================================
 
 /**
- * POST /generations-save
+ * POST /generationsSave
  * Body: { type, request, response }
  * Returns: { id, savedAt }
  */
 export const generationsSave = onRequest(
   {
     cors: getAllowedOrigins(),
+    secrets: [apiKeyParam],
   },
   withHttpGuards({ method: 'POST', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
-      const { type, request, response } = req.body as {
-        type?: string;
-        request?: Record<string, unknown>;
-        response?: Record<string, unknown>;
-      };
-
-      if (!type || (type !== 'ideas' && type !== 'recommendation')) {
-        res.status(400).json({ error: 'Invalid type. Must be "ideas" or "recommendation".' });
-        return;
-      }
-
-      if (!request || !response) {
-        res.status(400).json({ error: 'Both request and response fields are required.' });
-        return;
-      }
-
-      const result = await saveGen({ type, request, response });
+      const result = await saveGen(parseGenerationRequest(req.body));
       res.status(200).json(result);
     } catch (error) {
+      if (error instanceof InvalidRequest) {
+        res.status(400).json({ error: 'Invalid request', message: error.message });
+        return;
+      }
       console.error('Save generation error:', error);
       res.status(500).json({ error: 'Failed to save generation' });
     }
@@ -290,25 +216,25 @@ export const generationsSave = onRequest(
 );
 
 /**
- * GET /generations-list
+ * GET /generationsList
  * Query: ?type=ideas|recommendation (optional)
  * Returns: { generations: [...] }
  */
 export const generationsList = onRequest(
   {
     cors: getAllowedOrigins(),
+    secrets: [apiKeyParam],
   },
   withHttpGuards({ method: 'GET', getApiKey, rateLimit: RATE_LIMIT }, async (req, res) => {
     try {
-      const typeParam = req.query.type as string | undefined;
-      let type: 'ideas' | 'recommendation' | undefined;
-      if (typeParam === 'ideas' || typeParam === 'recommendation') {
-        type = typeParam;
-      }
-
+      const type = parseGenerationType(req.query.type);
       const generations = await listGens(type);
       res.status(200).json({ generations });
     } catch (error) {
+      if (error instanceof InvalidRequest) {
+        res.status(400).json({ error: 'Invalid request', message: error.message });
+        return;
+      }
       console.error('List generations error:', error);
       res.status(500).json({ error: 'Failed to list generations' });
     }

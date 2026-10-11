@@ -4,6 +4,8 @@ import {
   getProgress,
   getAllProgress,
   createInitialProgress,
+  getVideoCount,
+  getThumbnailCount,
 } from '../firebase/firestore.js';
 import { ScrapeProgress, ProgressStatus, ProgressPhase } from '../types/index.js';
 import { getQuotaUsed, setQuotaUsed } from '../youtube/client.js';
@@ -221,28 +223,45 @@ export async function getChannelsToProcess(
 
 /**
  * Update progress after an incremental update of a completed channel.
- * Increments videosProcessed, sets lastUpdateAt, and saves quota info.
+ * Recounts saved records, advances the completed scan marker, and saves quota info.
  * Keeps status as 'completed'.
  */
 export async function updateProgressForUpdate(
   channelId: string,
   newVideosCount: number,
-  newTotalVideos?: number
+  newTotalVideos: number,
+  lastCompletedPlaylistVideoId: string | null
 ): Promise<void> {
   const progress = await getProgress(channelId);
   if (!progress) return;
 
-  progress.videosProcessed += newVideosCount;
+  progress.videosProcessed = await getVideoCount(channelId);
+  progress.thumbnailsDownloaded = await getThumbnailCount(channelId);
+  progress.lastCompletedPlaylistVideoId = lastCompletedPlaylistVideoId;
   progress.lastUpdateAt = Timestamp.now();
   progress.lastUpdateNewVideos = newVideosCount;
   progress.lastProcessedAt = Timestamp.now();
   progress.quotaUsed = getQuotaUsed();
   progress.quotaDate = getPacificDate();
 
-  if (newTotalVideos !== undefined) {
-    progress.totalVideos = newTotalVideos;
-  }
+  progress.totalVideos = newTotalVideos;
 
+  await saveProgress(progress);
+}
+
+export async function completeProgress(channelId: string, lastCompletedPlaylistVideoId: string | null): Promise<void> {
+  const progress = await getProgress(channelId);
+  if (!progress) return;
+  progress.videosProcessed = await getVideoCount(channelId);
+  progress.thumbnailsDownloaded = await getThumbnailCount(channelId);
+  progress.lastCompletedPlaylistVideoId = lastCompletedPlaylistVideoId;
+  progress.lastPlaylistPageToken = null;
+  progress.status = 'completed';
+  progress.completedAt = Timestamp.now();
+  progress.lastProcessedAt = Timestamp.now();
+  progress.errorMessage = null;
+  progress.quotaUsed = getQuotaUsed();
+  progress.quotaDate = getPacificDate();
   await saveProgress(progress);
 }
 

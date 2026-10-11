@@ -18,6 +18,7 @@ COMPLETED_STATES = {
     "JOB_STATE_SUCCEEDED",
     "JOB_STATE_FAILED",
     "JOB_STATE_CANCELLED",
+    "JOB_STATE_EXPIRED",
 }
 
 # Client singleton

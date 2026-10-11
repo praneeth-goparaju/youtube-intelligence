@@ -5,11 +5,11 @@ import { logger } from '../utils/logger.js';
 import { chunk, delay, formatNumber } from '../utils/helpers.js';
 import { formatDuration } from '../utils/duration.js';
 import { initializeFirebase } from '../firebase/client.js';
-import { saveChannel, saveVideosBatch, saveProgress, getProgress, getExistingVideoIds, getAllVideoIdsForChannel, updateVideoStatsBatch, saveUnresolvedChannel, getUnresolvedChannel } from '../firebase/firestore.js';
+import { saveChannel, saveVideosBatch, getProgress, getVideosByIds, getVideoCount, getThumbnailCount, getAllVideoIdsForChannel, updateVideoStatsBatch, saveUnresolvedChannel, getUnresolvedChannel } from '../firebase/firestore.js';
 import { resolveChannelUrl } from '../youtube/resolver.js';
 import { getChannelDetails, transformChannelData, getUploadsPlaylistId } from '../youtube/channels.js';
 import { getPlaylistVideos, getVideoDetails, calculateVideoMetrics } from '../youtube/videos.js';
-import { getQuotaUsed, getQuotaRemaining, isQuotaLow, setQuotaUsed, setIgnoreQuota } from '../youtube/client.js';
+import { getQuotaUsed, getQuotaRemaining, isQuotaLow, setIgnoreQuota } from '../youtube/client.js';
 import {
   getOrCreateProgress,
   updateProgressStatus,
@@ -20,10 +20,38 @@ import {
   updateProgressForRefresh,
   getProgressSummary,
   loadSavedQuota,
+  saveQuotaToProgress,
+  completeProgress,
 } from './progress.js';
 import { processThumbnailBatch, processChannelThumbnail } from './thumbnail.js';
 import { transformAndFilterVideos, applyThumbnailPaths } from './video-processing.js';
-import { ChannelsConfig, ChannelInput, Channel, Video, ScrapeProgress, UnresolvedChannel } from '../types/index.js';
+import { ChannelsConfig, ChannelInput, UnresolvedChannel } from '../types/index.js';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function parseChannelsConfig(value: unknown): ChannelsConfig {
+  if (!isRecord(value) || !Array.isArray(value.channels) || !isRecord(value.settings)) {
+    throw new Error('Channels configuration must contain a channels array and settings object');
+  }
+  const channels: ChannelInput[] = value.channels.map((channel: unknown, index: number) => {
+    if (!isRecord(channel) || typeof channel.url !== 'string' || channel.url.trim() === '' ||
+      typeof channel.category !== 'string' || channel.category.trim() === '' ||
+      typeof channel.priority !== 'number' || !Number.isInteger(channel.priority) || channel.priority < 1 || channel.priority > 3) {
+      throw new Error(`Invalid channel at index ${index}: expected a URL, category, and priority from 1 to 3`);
+    }
+    return { url: channel.url, category: channel.category, priority: channel.priority };
+  });
+  const { maxVideosPerChannel = null, includeShorts = false, includePrivate = false, skipShortThumbnails = false } = value.settings;
+  if (maxVideosPerChannel !== null && (typeof maxVideosPerChannel !== 'number' || !Number.isInteger(maxVideosPerChannel) || maxVideosPerChannel <= 0)) {
+    throw new Error('maxVideosPerChannel must be null or a positive integer');
+  }
+  if (typeof includeShorts !== 'boolean' || typeof includePrivate !== 'boolean' || typeof skipShortThumbnails !== 'boolean') {
+    throw new Error('includeShorts, includePrivate, and skipShortThumbnails must be booleans');
+  }
+  return { channels, settings: { maxVideosPerChannel, includeShorts, includePrivate, skipShortThumbnails } };
+}
 
 /**
  * Load channels configuration from file
@@ -31,7 +59,7 @@ import { ChannelsConfig, ChannelInput, Channel, Video, ScrapeProgress, Unresolve
 export function loadChannelsConfig(): ChannelsConfig {
   try {
     const content = readFileSync(config.paths.channelsConfig, 'utf-8');
-    return JSON.parse(content) as ChannelsConfig;
+    return parseChannelsConfig(JSON.parse(content));
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err.code === 'ENOENT') {
@@ -57,6 +85,36 @@ function urlToProgressId(url: string): string {
   }
 }
 
+/** Process durable metadata and any missing thumbnails before advancing progress. */
+async function processVideoBatch(
+  channelId: string,
+  videoIds: string[],
+  subscriberCount: number | null,
+  settings: ChannelsConfig['settings']
+): Promise<{ newVideos: number; thumbnailsDownloaded: number; failedThumbnails: number }> {
+  const existingVideos = await getVideosByIds(channelId, videoIds);
+  const existingIds = new Set(existingVideos.map((video) => video.videoId));
+  const missingIds = videoIds.filter((id) => !existingIds.has(id));
+  const videoData = missingIds.length > 0 ? await getVideoDetails(missingIds) : [];
+  const newVideos = transformAndFilterVideos(videoData, channelId, subscriberCount, settings.includeShorts);
+  await saveVideosBatch(channelId, newVideos);
+
+  const pendingThumbnails = [...existingVideos, ...newVideos].filter((video) =>
+    !video.thumbnailStoragePath &&
+    (settings.includeShorts || !video.isShort) &&
+    (!settings.skipShortThumbnails || !video.isShort)
+  );
+  const results = await processThumbnailBatch(pendingThumbnails.map((video) => video.videoId), channelId);
+  applyThumbnailPaths(pendingThumbnails, results);
+  await saveVideosBatch(channelId, pendingThumbnails);
+
+  return {
+    newVideos: newVideos.length,
+    thumbnailsDownloaded: results.filter((result) => result.success).length,
+    failedThumbnails: results.filter((result) => !result.success).length,
+  };
+}
+
 /**
  * Process a single channel
  */
@@ -71,8 +129,8 @@ export async function processChannel(
   error?: string;
 }> {
   let channelId: string | undefined;
-  let videosProcessed = 0;  // Will be set from resume state if resuming
-  let thumbnailsDownloaded = 0;  // Will be set from resume state if resuming
+  let videosProcessed = 0;
+  let thumbnailsDownloaded = 0;
 
   try {
     // Step 1: Resolve channel URL to ID
@@ -83,32 +141,19 @@ export async function processChannel(
 
     // Step 2: Check for existing progress
     const existingProgress = await getProgress(channelId);
-    let resumeFromToken: string | null = null;
-    let resumeFromVideoCount = 0;
-    let resumeFromThumbnailCount = 0;
-
-    if (existingProgress) {
-      // Skip if already completed
-      if (existingProgress.status === 'completed') {
-        logger.info(`Channel already completed, skipping: ${channelId}`);
-        return {
-          success: true,
-          channelId,
-          videosProcessed: existingProgress.videosProcessed,
-          thumbnailsDownloaded: existingProgress.thumbnailsDownloaded,
-        };
-      }
-
-      // Resume from previous progress
-      logger.info(`Resuming from previous progress: ${existingProgress.videosProcessed} videos processed`);
-      resumeFromToken = existingProgress.lastPlaylistPageToken;
-      resumeFromVideoCount = existingProgress.videosProcessed;
-      resumeFromThumbnailCount = existingProgress.thumbnailsDownloaded;
-
-      // Initialize counts from resume state
-      videosProcessed = resumeFromVideoCount;
-      thumbnailsDownloaded = resumeFromThumbnailCount;
+    if (existingProgress?.status === 'completed' && existingProgress.lastCompletedPlaylistVideoId !== undefined) {
+      logger.info(`Channel already completed, skipping: ${channelId}`);
+      return {
+        success: true, channelId,
+        videosProcessed: existingProgress.videosProcessed,
+        thumbnailsDownloaded: existingProgress.thumbnailsDownloaded,
+      };
     }
+
+    // Older checkpoints may refer to unsaved IDs or unfinished thumbnails.
+    // Re-enumerate from the beginning and skip only work present in Firestore.
+    videosProcessed = await getVideoCount(channelId);
+    thumbnailsDownloaded = await getThumbnailCount(channelId);
 
     // Step 3: Fetch channel details
     logger.info('Fetching channel details...');
@@ -126,15 +171,15 @@ export async function processChannel(
     });
 
     // Step 4: Download and save channel thumbnail
-    const channelThumbnailPath = await processChannelThumbnail(channelId, channelInfo.thumbnailUrl) || '';
-    const channel: Channel = {
+    const channelThumbnailPath = await processChannelThumbnail(channelId, channelInfo.thumbnailUrl);
+    const channel = {
       ...channelInfo,
-      thumbnailStoragePath: channelThumbnailPath,
+      ...(channelThumbnailPath ? { thumbnailStoragePath: channelThumbnailPath } : {}),
     };
     await saveChannel(channel);
 
     // Step 5: Initialize or update progress
-    const progress = await getOrCreateProgress(
+    await getOrCreateProgress(
       channelId,
       channel.channelTitle,
       input.url,
@@ -147,7 +192,7 @@ export async function processChannel(
     const uploadsPlaylistId = getUploadsPlaylistId(channelId);
     logger.info(`Fetching videos from playlist: ${uploadsPlaylistId}`);
 
-    let pageToken = resumeFromToken;
+    let pageToken: string | null = null;
     let allVideoIds: string[] = [];
     let totalFetched = 0;
 
@@ -155,7 +200,7 @@ export async function processChannel(
     while (true) {
       if (isQuotaLow()) {
         logger.warn('Quota running low, saving progress...');
-        await updateProgressVideos(channelId, videosProcessed, null, pageToken);
+        await updateProgressVideos(channelId, videosProcessed, null, null);
         return {
           success: false,
           channelId,
@@ -173,7 +218,7 @@ export async function processChannel(
 
       logger.info(`Fetched ${totalFetched}/${page.totalResults} video IDs`);
 
-      if (!page.nextPageToken) break;
+      if (!page.nextPageToken || (settings.maxVideosPerChannel !== null && totalFetched >= settings.maxVideosPerChannel)) break;
       pageToken = page.nextPageToken;
 
       await delay(config.scraper.apiDelayMs);
@@ -186,108 +231,28 @@ export async function processChannel(
 
     logger.success(`Total video IDs from playlist: ${allVideoIds.length}`);
 
-    // If resuming without a page token, we re-fetched all IDs from scratch.
-    // Skip IDs already processed to avoid duplicate work and inflated counts.
-    if (resumeFromVideoCount > 0 && resumeFromToken === null && existingProgress?.lastProcessedVideoId) {
-      const lastProcessedId = existingProgress.lastProcessedVideoId;
-      const lastIdx = allVideoIds.indexOf(lastProcessedId);
-      if (lastIdx >= 0) {
-        const alreadyChecked = lastIdx + 1;
-        allVideoIds = allVideoIds.slice(alreadyChecked);
-        logger.info(`Resuming: skipping ${alreadyChecked} already-checked IDs, ${allVideoIds.length} remaining`);
-      } else {
-        // lastProcessedVideoId not found in list — reset counter to avoid inflation
-        logger.warn(`Resume marker video not found in playlist, reprocessing all IDs`);
-        videosProcessed = 0;
-      }
-    }
-
-    const totalExpected = videosProcessed + allVideoIds.length;
-
-    // Step 7: Fetch video details in batches
     await updateProgressPhase(channelId, 'scraping');
     const videoChunks = chunk(allVideoIds, config.scraper.batchSize);
-    const allVideos: Video[] = [];
-
-    // Track how many video IDs we've attempted to fetch (for progress tracking)
-    let videoIdsAttempted = 0;
-
-    for (let i = 0; i < videoChunks.length; i++) {
+    for (const batchIds of videoChunks) {
       if (isQuotaLow()) {
-        logger.warn('Quota running low, saving progress...');
-        // Use the last video ID from completed batches
-        const lastProcessedId = videoIdsAttempted > 0 ? allVideoIds[videoIdsAttempted - 1] : null;
-        await updateProgressVideos(channelId, videosProcessed, lastProcessedId, null);
-        return {
-          success: false,
-          channelId,
-          videosProcessed,
-          thumbnailsDownloaded,
-          error: 'Quota exhausted',
-        };
+        await saveQuotaToProgress(channelId);
+        return { success: false, channelId, videosProcessed, thumbnailsDownloaded, error: 'Quota exhausted' };
       }
 
-      const batchIds = videoChunks[i];
-      const videoData = await getVideoDetails(batchIds);
-
-      // Track attempted video IDs (includes deleted/private videos that API didn't return)
-      videoIdsAttempted += batchIds.length;
-
-      // Log if some videos were not returned (deleted/private)
-      if (videoData.length < batchIds.length) {
-        const missing = batchIds.length - videoData.length;
-        logger.warn(`${missing} video(s) in batch were not returned (possibly deleted/private)`);
+      const result = await processVideoBatch(channelId, batchIds, channel.subscriberCount, settings);
+      videosProcessed += result.newVideos;
+      thumbnailsDownloaded += result.thumbnailsDownloaded;
+      await updateProgressVideos(channelId, videosProcessed, batchIds.at(-1) ?? null, null);
+      await updateProgressThumbnails(channelId, thumbnailsDownloaded);
+      if (result.failedThumbnails > 0) {
+        throw new Error(`${result.failedThumbnails} thumbnail(s) failed; run again to retry them`);
       }
-
-      const videos = transformAndFilterVideos(videoData, channelId, channel.subscriberCount, settings.includeShorts);
-
-      allVideos.push(...videos);
-      videosProcessed += videos.length;
-
-      // Save batch to Firestore
-      await saveVideosBatch(channelId, videos);
-
-      logger.info(`Processed ${videosProcessed}/~${totalExpected} videos (${videoIdsAttempted} IDs checked)`);
-      const lastBatchVideoId = batchIds.length > 0 ? batchIds[batchIds.length - 1] : null;
-      await updateProgressVideos(channelId, videosProcessed, lastBatchVideoId, null);
-
+      logger.info(`Saved ${videosProcessed} videos and ${thumbnailsDownloaded} thumbnails`);
       await delay(config.scraper.apiDelayMs);
     }
 
-    // Step 8: Download thumbnails
-    await updateProgressPhase(channelId, 'thumbnails');
-    logger.info('Downloading thumbnails...');
-
-    const videosForThumbnails = settings.skipShortThumbnails
-      ? allVideos.filter((v) => !v.isShort)
-      : allVideos;
-
-    if (videosForThumbnails.length < allVideos.length) {
-      logger.info(`Skipping thumbnails for ${allVideos.length - videosForThumbnails.length} short(s)`);
-    }
-
-    const thumbnailResults = await processThumbnailBatch(
-      videosForThumbnails.map((v) => v.videoId),
-      channelId,
-      (processed, total) => {
-        if (processed % 50 === 0 || processed === total) {
-          logger.info(`Thumbnails: ${processed}/${total}`);
-        }
-      }
-    );
-
-    thumbnailsDownloaded = thumbnailResults.filter((r) => r.success).length;
-    await updateProgressThumbnails(channelId, thumbnailsDownloaded);
-
-    // Update videos with thumbnail paths
-    applyThumbnailPaths(videosForThumbnails, thumbnailResults);
-
-    // Save updated videos with thumbnail paths
-    await saveVideosBatch(channelId, videosForThumbnails);
-
-    // Step 9: Mark as completed
     await updateProgressPhase(channelId, 'calculations');
-    await updateProgressStatus(channelId, 'completed');
+    await completeProgress(channelId, allVideoIds[0] ?? null);
 
     logger.success(`Completed: ${channel.channelTitle}`);
     logger.stats({
@@ -342,11 +307,7 @@ export async function processChannel(
   }
 }
 
-/**
- * Incrementally update a completed channel by fetching only new videos.
- * Exploits the fact that YouTube uploads playlists return newest videos first.
- * Stops fetching playlist pages once an entire page consists of already-known videos.
- */
+/** Fetch videos since the last fully completed playlist scan. */
 export async function updateChannel(
   input: ChannelInput,
   settings: ChannelsConfig['settings']
@@ -358,171 +319,63 @@ export async function updateChannel(
   error?: string;
 }> {
   let channelId: string | undefined;
-
+  let newVideos = 0;
+  let thumbnailsDownloaded = 0;
   try {
-    // Step 1: Resolve channel URL to ID
-    logger.info(`Resolving URL: ${input.url}`);
     const resolved = await resolveChannelUrl(input.url);
     channelId = resolved.channelId;
-    logger.success(`Resolved to channel ID: ${channelId} (${resolved.quotaCost} quota)`);
-
-    // Step 2: Only update completed channels
     const existingProgress = await getProgress(channelId);
     if (!existingProgress || existingProgress.status !== 'completed') {
-      const reason = !existingProgress ? 'never scraped' : `status: ${existingProgress.status}`;
-      logger.info(`Skipping update (${reason}): ${channelId}`);
-      return { success: true, channelId, newVideos: 0, thumbnailsDownloaded: 0 };
+      logger.info(`Skipping update for a channel that has not completed its initial scrape: ${channelId}`);
+      return { success: true, channelId, newVideos, thumbnailsDownloaded };
     }
 
-    // Step 3: Refresh channel metadata (subscriber count, video count, etc.)
-    logger.info('Refreshing channel metadata...');
     const channelData = await getChannelDetails(channelId);
-    if (!channelData) {
-      throw new Error('Channel not found');
-    }
-
-    const channelInfo = transformChannelData(channelData, input);
-    logger.success(`Channel: ${channelInfo.channelTitle}`);
-
-    const channel: Channel = {
-      ...channelInfo,
-      thumbnailStoragePath: '', // Preserved by merge: true in saveChannel
-    };
+    if (!channelData) throw new Error('Channel not found');
+    const channel = transformChannelData(channelData, input);
     await saveChannel(channel);
 
-    // Step 4: Fetch playlist pages, checking each page against Firestore
-    const uploadsPlaylistId = getUploadsPlaylistId(channelId);
-    logger.info(`Checking for new videos in playlist: ${uploadsPlaylistId}`);
-
+    const completedVideoId = existingProgress.lastCompletedPlaylistVideoId;
+    let firstVideoId: string | null = null;
     let pageToken: string | null = null;
-    const newVideoIds: string[] = [];
-
-    while (true) {
+    const candidateIds: string[] = [];
+    do {
       if (isQuotaLow()) {
-        logger.warn('Quota running low, stopping update...');
-        break;
+        await saveQuotaToProgress(channelId);
+        return { success: false, channelId, newVideos, thumbnailsDownloaded, error: 'Quota exhausted' };
       }
-
-      const page = await getPlaylistVideos(uploadsPlaylistId, pageToken || undefined);
-      const items = page.items || [];
-      const pageVideoIds = items.map((item) => item.videoId).filter((id): id is string => !!id);
-
-      if (pageVideoIds.length === 0) break;
-
-      // Check which videos in this page already exist
-      const existingIds = await getExistingVideoIds(channelId, pageVideoIds);
-      const newInPage = pageVideoIds.filter((id) => !existingIds.has(id));
-
-      newVideoIds.push(...newInPage);
-
-      // Stop condition: entire page is all-known videos
-      if (newInPage.length === 0) {
-        logger.info(`All ${pageVideoIds.length} videos on page already known — stopping`);
-        break;
-      }
-
-      logger.info(`Found ${newInPage.length} new video(s) on this page (${newVideoIds.length} total new)`);
-
-      if (!page.nextPageToken) break;
+      const page = await getPlaylistVideos(getUploadsPlaylistId(channelId), pageToken ?? undefined);
+      const ids = page.items.map((item) => item.videoId).filter(Boolean);
+      if (firstVideoId === null) firstVideoId = ids[0] ?? null;
+      const completedIndex = completedVideoId ? ids.indexOf(completedVideoId) : -1;
+      candidateIds.push(...(completedIndex >= 0 ? ids.slice(0, completedIndex) : ids));
+      if (completedIndex >= 0) break;
       pageToken = page.nextPageToken;
+      if (pageToken) await delay(config.scraper.apiDelayMs);
+    } while (pageToken);
 
-      await delay(config.scraper.apiDelayMs);
-    }
-
-    // No new videos found
-    if (newVideoIds.length === 0) {
-      logger.info('No new videos found');
-      await updateProgressForUpdate(channelId, 0, channel.videoCount);
-      return { success: true, channelId, newVideos: 0, thumbnailsDownloaded: 0 };
-    }
-
-    logger.success(`Found ${newVideoIds.length} new video(s) to process`);
-
-    // Step 5: Fetch video details for new IDs only
-    const videoChunks = chunk(newVideoIds, config.scraper.batchSize);
-    const allNewVideos: Video[] = [];
-
-    for (const batchIds of videoChunks) {
+    for (const batchIds of chunk(candidateIds, config.scraper.batchSize)) {
       if (isQuotaLow()) {
-        logger.warn('Quota running low, saving partial update...');
-        break;
+        await saveQuotaToProgress(channelId);
+        return { success: false, channelId, newVideos, thumbnailsDownloaded, error: 'Quota exhausted' };
       }
-
-      const videoData = await getVideoDetails(batchIds);
-
-      if (videoData.length < batchIds.length) {
-        const missing = batchIds.length - videoData.length;
-        logger.warn(`${missing} video(s) not returned (possibly deleted/private)`);
+      const result = await processVideoBatch(channelId, batchIds, channel.subscriberCount, settings);
+      newVideos += result.newVideos;
+      thumbnailsDownloaded += result.thumbnailsDownloaded;
+      if (result.failedThumbnails > 0) {
+        throw new Error(`${result.failedThumbnails} thumbnail(s) failed; run again to retry them`);
       }
-
-      const videos = transformAndFilterVideos(videoData, channelId, channel.subscriberCount, settings.includeShorts);
-
-      allNewVideos.push(...videos);
-      await saveVideosBatch(channelId, videos);
-
+      await saveQuotaToProgress(channelId);
       await delay(config.scraper.apiDelayMs);
     }
 
-    // Step 6: Download thumbnails for new videos only
-    let thumbnailsDownloaded = 0;
-    if (allNewVideos.length > 0) {
-      const newVideosForThumbnails = settings.skipShortThumbnails
-        ? allNewVideos.filter((v) => !v.isShort)
-        : allNewVideos;
-
-      if (newVideosForThumbnails.length < allNewVideos.length) {
-        logger.info(`Skipping thumbnails for ${allNewVideos.length - newVideosForThumbnails.length} short(s)`);
-      }
-
-      if (newVideosForThumbnails.length > 0) {
-        logger.info(`Downloading thumbnails for ${newVideosForThumbnails.length} new video(s)...`);
-
-        const thumbnailResults = await processThumbnailBatch(
-          newVideosForThumbnails.map((v) => v.videoId),
-          channelId,
-          (processed, total) => {
-            if (processed % 50 === 0 || processed === total) {
-              logger.info(`Thumbnails: ${processed}/${total}`);
-            }
-          }
-        );
-
-        thumbnailsDownloaded = thumbnailResults.filter((r) => r.success).length;
-
-        // Update videos with thumbnail paths
-        applyThumbnailPaths(newVideosForThumbnails, thumbnailResults);
-
-        await saveVideosBatch(channelId, newVideosForThumbnails);
-      }
-    }
-
-    // Step 7: Update progress
-    await updateProgressForUpdate(channelId, allNewVideos.length, channel.videoCount);
-
-    logger.success(`Update complete: ${channelInfo.channelTitle}`);
-    logger.stats({
-      'New Videos': allNewVideos.length,
-      'Thumbnails': thumbnailsDownloaded,
-      'Quota Used': `${getQuotaUsed()} / ${config.quota.dailyLimit}`,
-    });
-
-    return {
-      success: true,
-      channelId,
-      newVideos: allNewVideos.length,
-      thumbnailsDownloaded,
-    };
+    await updateProgressForUpdate(channelId, newVideos, channel.videoCount, firstVideoId);
+    logger.success(`Update complete: ${channel.channelTitle} (${newVideos} new videos)`);
+    return { success: true, channelId, newVideos, thumbnailsDownloaded };
   } catch (error) {
-    const errorMessage = (error as Error).message;
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`Update failed: ${errorMessage}`);
-
-    return {
-      success: false,
-      channelId,
-      newVideos: 0,
-      thumbnailsDownloaded: 0,
-      error: errorMessage,
-    };
+    return { success: false, channelId, newVideos, thumbnailsDownloaded, error: errorMessage };
   }
 }
 
@@ -568,12 +421,7 @@ export async function refreshChannel(
     const subscriberCount = channelInfo.subscriberCount;
     logger.success(`Channel: ${channelInfo.channelTitle} (${subscriberCount !== null ? formatNumber(subscriberCount) + ' subs' : 'subs hidden'})`);
 
-    // Save refreshed channel metadata (merge:true preserves thumbnailStoragePath)
-    const channel: Channel = {
-      ...channelInfo,
-      thumbnailStoragePath: '',
-    };
-    await saveChannel(channel);
+    await saveChannel(channelInfo);
 
     // Step 4: Get all existing video IDs from Firestore
     logger.info('Fetching video IDs from Firestore...');
@@ -591,10 +439,13 @@ export async function refreshChannel(
     const videoChunks = chunk(allVideoIds, config.scraper.batchSize);
     const waves = chunk(videoChunks, CONCURRENT_BATCHES);
     let videosRefreshed = 0;
+    let failedBatches = 0;
+    let quotaExhausted = false;
 
     for (const wave of waves) {
       if (isQuotaLow()) {
         logger.warn('Quota running low, stopping refresh...');
+        quotaExhausted = true;
         break;
       }
 
@@ -604,6 +455,7 @@ export async function refreshChannel(
 
       for (const result of waveResults) {
         if (result.status === 'rejected') {
+          failedBatches++;
           logger.warn(`Batch fetch failed: ${result.reason}`);
           continue;
         }
@@ -636,6 +488,14 @@ export async function refreshChannel(
 
       logger.info(`Refreshed ${videosRefreshed}/${allVideoIds.length} videos`);
       await delay(config.scraper.apiDelayMs);
+    }
+
+    if (quotaExhausted || failedBatches > 0) {
+      await saveQuotaToProgress(channelId);
+      return {
+        success: false, channelId, videosRefreshed,
+        error: quotaExhausted ? 'Quota exhausted' : `${failedBatches} video batch(es) failed to refresh`,
+      };
     }
 
     // Step 6: Update progress
@@ -786,8 +646,6 @@ export async function runScraper(options: { updateMode?: boolean; refreshMode?: 
 
   // Print summary
   const duration = Date.now() - startTime;
-  const videoLabel = updateMode ? 'New Videos Found' : refreshMode ? 'Videos Refreshed' : 'Videos Scraped';
-
   const summaryStats: Record<string, string | number> = {
     'Duration': formatDuration(Math.floor(duration / 1000)),
     'Channels Processed': `${channelsProcessed}/${channelsConfig.channels.length}`,

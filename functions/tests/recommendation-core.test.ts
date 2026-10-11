@@ -75,8 +75,8 @@ const fullInsights: Insights = {
     ],
     keywordGaps: {
       highValueKeywords: [
-        { keyword: 'millet', avgViewsPerSubscriber: 2.0, viewsMultiplier: 3.1, usageCount: 5, usageRate: 0.02 },
-        { keyword: 'street food', avgViewsPerSubscriber: 1.5, viewsMultiplier: 2.5, usageCount: 10, usageRate: 0.05 },
+        { keyword: 'millet', avgViewsPerSubscriber: 2.0, viewsMultiplier: 3.1, usageCount: 5, usageRate: 2 },
+        { keyword: 'street food', avgViewsPerSubscriber: 1.5, viewsMultiplier: 2.5, usageCount: 10, usageRate: 5 },
       ],
     },
     formatGaps: {
@@ -484,7 +484,7 @@ describe('generateIdeasFromTemplates', () => {
         saturatedTopics: [],
         keywordGaps: {
           highValueKeywords: [
-            { keyword: 'test-kw', avgViewsPerSubscriber: 2, viewsMultiplier: 3, usageCount: 1, usageRate: 0.01 },
+            { keyword: 'test-kw', avgViewsPerSubscriber: 2, viewsMultiplier: 3, usageCount: 1, usageRate: 1 },
           ],
         },
       },
@@ -508,7 +508,7 @@ describe('generateIdeasFromTemplates', () => {
 
 describe('validateAndFillResponse', () => {
   it('fills missing fields from templates', () => {
-    const result = validateAndFillResponse({}, 'Biryani', 'recipe', emptyInsights, null, 'gemini-2.5-flash');
+    const result = validateAndFillResponse({ tags: { primary: ['custom-tag'] } }, 'Biryani', 'recipe', emptyInsights, null, 'gemini-2.5-flash');
     expect(result.titles).toBeTruthy();
     expect(result.thumbnail).toBeTruthy();
     expect(result.tags).toBeTruthy();

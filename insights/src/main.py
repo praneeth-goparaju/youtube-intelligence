@@ -30,6 +30,7 @@ from .config import config
 from .firebase_client import (
     initialize_firebase,
     get_all_videos_with_analyses,
+    get_saved_profiles_and_gaps,
     save_insights,
 )
 from .profiler import (
@@ -40,13 +41,14 @@ from .profiler import (
     MIN_VIDEOS_PER_TYPE,
 )
 from .gaps import GapAnalyzer
+from .recommender_bridge import generate_recommender_documents
 
 
 def get_views_per_subscriber(video_data: dict) -> float:
     """Get viewsPerSubscriber for a video, computing if not stored."""
     calculated = video_data.get("video", {}).get("calculated", {})
     vps = calculated.get("viewsPerSubscriber")
-    if vps and vps > 0:
+    if vps is not None and vps >= 0:
         return float(vps)
 
     views = video_data.get("video", {}).get("viewCount", 0)
@@ -111,10 +113,9 @@ def remove_outliers(
         winsorized_count = sum(1 for vps in vps_values if vps > cap)
 
         # Cap VPS on copies to avoid mutating original video objects
-        for i, v in enumerate(filtered):
+        for i, (v, vps) in enumerate(zip(filtered, vps_values)):
             calculated = v.get("video", {}).get("calculated", {})
-            vps = calculated.get("viewsPerSubscriber")
-            if vps and vps > cap:
+            if vps > cap:
                 capped_calculated = {**calculated, "viewsPerSubscriber": cap}
                 capped_video = {**v.get("video", {}), "calculated": capped_calculated}
                 filtered[i] = {**v, "video": capped_video}
@@ -318,6 +319,16 @@ def save_to_file(name: str, data: dict) -> None:
     print(f"    Saved to {filepath}")
 
 
+def save_bridge_documents(profiles: dict, gaps: Optional[dict], dry_run: bool) -> None:
+    """Save complete recommender documents, leaving unavailable profiles unchanged."""
+    documents = generate_recommender_documents(profiles, gaps)
+    for name, data in documents.items():
+        save_to_file(f"bridge_{name}", data)
+        if not dry_run:
+            save_insights(name, data)
+            print(f"    Saved to Firestore: insights/{name}")
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="YouTube Intelligence System - Phase 3: Insights")
@@ -346,6 +357,15 @@ def main():
     initialize_firebase()
     print("Connected\n")
 
+    if args.type == "bridge" and not args.channel:
+        profiles, gap_report = get_saved_profiles_and_gaps()
+        if not profiles:
+            print("No saved content profiles found. Run --type profiles or --type all first.")
+            sys.exit(1)
+        save_bridge_documents(profiles, gap_report, dry_run)
+        print(f"\nRecommender bridge rebuilt from {len(profiles)} saved profiles.")
+        return
+
     # Load data
     if args.channel:
         print(f"Loading videos for channel {args.channel}...")
@@ -367,6 +387,10 @@ def main():
     print(f"  Winsorized {outlier_stats['winsorizedCount']} videos at VPS cap {outlier_stats['vpsCap']}")
     print(f"  Remaining: {outlier_stats['filteredCount']} videos")
 
+    if not videos:
+        print("No videos remain after filtering. Existing insights were preserved.")
+        sys.exit(1)
+
     # Group by content type
     groups = group_by_content_type(videos)
     print(f"\n  Found {len(groups)} content types:")
@@ -378,7 +402,7 @@ def main():
     generated_profiles = {}
 
     # Generate per-content-type profiles
-    if args.type in ["all", "profiles"]:
+    if args.type in ["all", "profiles", "bridge"]:
         print("\nGenerating content type profiles...")
 
         for content_type, type_videos in sorted(groups.items(), key=lambda x: -len(x[1])):
@@ -391,16 +415,17 @@ def main():
 
             # Save to file first (for debugging), then Firestore
             doc_name = content_type.replace(" ", "_").replace("/", "_").replace(",", "_").lower()
-            save_to_file(doc_name, profile)
-            if not dry_run:
-                save_insights(doc_name, profile)
-                print(f"    Saved to Firestore: insights/{doc_name}")
+            if args.type != "bridge":
+                save_to_file(doc_name, profile)
+                if not dry_run:
+                    save_insights(doc_name, profile)
+                    print(f"    Saved to Firestore: insights/{doc_name}")
 
             generated_profiles[doc_name] = profile
 
     # Generate content gaps
     gap_report = None
-    if args.type in ["all", "gaps"]:
+    if args.type in ["all", "gaps", "bridge"]:
         print("\nGenerating content gap analysis...")
         gap_analyzer = GapAnalyzer(videos, get_views_per_subscriber)
 
@@ -412,23 +437,12 @@ def main():
             "formatGaps": gap_analyzer.analyze_format_gaps(),
         }
 
-        if not dry_run:
-            save_insights("contentGaps", gap_report)
-            print("    Saved to Firestore: insights/contentGaps")
         save_to_file("contentGaps", gap_report)
 
     # Generate recommender bridge documents
-    if args.type in ["all", "bridge"]:
+    if args.type in ["all", "bridge", "gaps"]:
         print("\nGenerating recommender bridge documents...")
-        from .recommender_bridge import generate_recommender_documents
-
-        bridge_docs = generate_recommender_documents(generated_profiles, gap_report)
-
-        for doc_name, doc_data in bridge_docs.items():
-            if not dry_run:
-                save_insights(doc_name, doc_data)
-                print(f"    Saved to Firestore: insights/{doc_name}")
-            save_to_file(f"bridge_{doc_name}", doc_data)
+        save_bridge_documents(generated_profiles, gap_report, dry_run)
 
     # Generate summary
     summary = {

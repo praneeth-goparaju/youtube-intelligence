@@ -1,6 +1,8 @@
 """Tests for local text feature extraction."""
 
-from src.analyzers.local_text_features import extract_local_features, deep_merge
+import pytest
+
+from analyzer.src.analyzers.local_text_features import extract_local_features, deep_merge
 
 
 class TestExtractLocalFeatures:
@@ -28,6 +30,19 @@ class TestExtractLocalFeatures:
         assert result["language"]["hasLatinScript"] is True
         assert result["language"]["englishRatio"] == 1.0
         assert result["language"]["primaryLanguage"] == "english"
+
+    def test_hindi_only_title(self):
+        language = extract_local_features("घर पर बिरयानी कैसे बनाएं", "")["language"]
+        assert language["languages"] == ["hindi"]
+        assert language["primaryLanguage"] == "hindi"
+        assert language["secondaryLanguage"] == "none"
+        assert language["englishRatio"] == 0
+
+    def test_hindi_dominates_mixed_title(self):
+        language = extract_local_features("घर पर बिरयानी कैसे बनाएं Recipe", "")["language"]
+        assert language["primaryLanguage"] == "hindi"
+        assert language["secondaryLanguage"] == "english"
+        assert 0 < language["englishRatio"] < 0.5
 
     def test_mixed_title(self):
         title = "చికెన్ బిర్యానీ Recipe | Best Hyderabadi Style"
@@ -180,6 +195,32 @@ class TestDescriptionFeatures:
         assert mon["hasDiscountCode"] is True
         assert mon["hasMerchLink"] is True
         assert mon["hasDonationLink"] is True
+
+    @pytest.mark.parametrize(
+        "description",
+        ["Use a large pot to cook the rice.", "I use fresh ingredients.", "There is a discount at the shop."],
+    )
+    def test_ordinary_instructions_are_not_discount_codes(self, description):
+        assert (
+            extract_local_features("Recipe", description)["descriptionAnalysis"]["monetization"]["hasDiscountCode"]
+            is False
+        )
+
+    @pytest.mark.parametrize(
+        "description",
+        [
+            "Use code CHEF20 for 20% off.",
+            "Promo code: SAVE20",
+            "Discount code SAVE20",
+            "Coupon code: SAVE20",
+            "Code: CHEF20",
+        ],
+    )
+    def test_discount_code_phrases(self, description):
+        assert (
+            extract_local_features("Recipe", description)["descriptionAnalysis"]["monetization"]["hasDiscountCode"]
+            is True
+        )
 
     def test_empty_description(self):
         result = extract_local_features("Title", "")

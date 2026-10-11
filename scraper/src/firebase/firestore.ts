@@ -27,7 +27,7 @@ function videoDoc(db: Firestore, channelId: string, videoId: string) {
 /**
  * Save or update channel data
  */
-export async function saveChannel(channel: Channel): Promise<void> {
+export async function saveChannel(channel: Omit<Channel, 'thumbnailStoragePath'> & Partial<Pick<Channel, 'thumbnailStoragePath'>>): Promise<void> {
   const db = getDb();
   await db.collection(CHANNELS_COLLECTION).doc(channel.channelId).set(channel, { merge: true });
 }
@@ -113,6 +113,19 @@ export async function getVideoCount(channelId: string): Promise<number> {
   const db = getDb();
   const snapshot = await videosCollection(db, channelId).count().get();
   return snapshot.data().count;
+}
+
+export async function getThumbnailCount(channelId: string): Promise<number> {
+  const snapshot = await videosCollection(getDb(), channelId)
+    .where('thumbnailStoragePath', '!=', '').count().get();
+  return snapshot.data().count;
+}
+
+export async function getVideosByIds(channelId: string, videoIds: string[]): Promise<Video[]> {
+  if (videoIds.length === 0) return [];
+  const db = getDb();
+  const documents = await db.getAll(...videoIds.map((id) => videoDoc(db, channelId, id)));
+  return documents.filter((document) => document.exists).map((document) => document.data() as Video);
 }
 
 // ===== Progress Tracking =====

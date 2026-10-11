@@ -231,3 +231,16 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"Error saving insights for {insight_type}: {e}")
         raise
+
+
+def get_saved_profiles_and_gaps() -> tuple[dict, Optional[dict]]:
+    """Read previously generated profiles and gap data for a bridge-only run."""
+    profiles = {}
+    gaps = None
+    for snapshot in get_db().collection("insights").stream():
+        data = snapshot.to_dict()
+        if snapshot.id == "contentGaps":
+            gaps = data
+        elif isinstance(data.get("contentType"), str) and data.get("summary", {}).get("totalVideos", 0) > 0:
+            profiles[snapshot.id] = data
+    return profiles, gaps

@@ -93,7 +93,10 @@ _DISCLOSURE_RE = re.compile(
     r"\bincludes?\s+paid\b|#paidpartnership\b)",
     re.IGNORECASE,
 )
-_DISCOUNT_RE = re.compile(r"\b(?:(?:use|promo|discount|coupon)\s*(?:code)?|code\s*:)\b", re.IGNORECASE)
+_DISCOUNT_RE = re.compile(
+    r"\b(?:(?:use|promo|discount|coupon)\s+code\b\s*[:=-]?|code\s*:)\s*[A-Za-z0-9][A-Za-z0-9_-]*",
+    re.IGNORECASE,
+)
 _MERCH_RE = re.compile(r"\b(?:merch(?:andise)?|shop\.?\s|store\.?\s|teespring|spreadshop|bonfire)\b", re.IGNORECASE)
 _DONATION_RE = re.compile(
     r"\b(?:patreon|ko-?fi|buymeacoffee|buy\s*me\s*a\s*coffee|"
@@ -435,7 +438,9 @@ def _extract_title_language(title: str) -> Dict[str, Any]:
     """Extract deterministic language fields from title."""
     telugu_count = _count_chars(title, _TELUGU_RE)
     english_count = _count_chars(title, _LATIN_RE)
-    total_script = telugu_count + english_count
+    hindi_count = _count_chars(title, _DEVANAGARI_RE)
+    language_counts = {"english": english_count, "telugu": telugu_count, "hindi": hindi_count}
+    total_script = sum(language_counts.values())
     telugu_ratio = telugu_count / total_script if total_script > 0 else 0.0
     english_ratio = english_count / total_script if total_script > 0 else 0.0
 
@@ -445,10 +450,10 @@ def _extract_title_language(title: str) -> Dict[str, Any]:
     has_telugu = "telugu" in scripts
     has_latin = "latin" in scripts
 
-    primary = "telugu" if telugu_ratio > 0.5 else "english"
+    primary = max(language_counts, key=language_counts.get)
     secondary = "none"
     if len(languages) > 1:
-        secondary = [lang for lang in languages if lang != primary][0]
+        secondary = max((lang for lang in languages if lang != primary), key=language_counts.get)
 
     return {
         "languages": languages,

@@ -261,6 +261,7 @@ interface ScrapeProgress {
   thumbnailsDownloaded: number;
   lastProcessedVideoId: string | null;
   lastPlaylistPageToken: string | null;
+  lastCompletedPlaylistVideoId?: string | null;
   startedAt: Timestamp;
   lastProcessedAt: Timestamp;
   completedAt: Timestamp | null;
@@ -339,7 +340,7 @@ The analyzer supports two processing modes:
 
 | Mode | SDK | Description | Cost |
 |------|-----|-------------|------|
-| **Sync** (default) | `google-generativeai` | Per-video API calls with `response_schema` | Standard |
+| **Sync** (default) | `google-genai` | Per-video API calls with `response_schema` | Standard |
 | **Batch** | `google-genai` | Gemini Batch API, JSONL file upload | 50% savings |
 
 Both modes use:
@@ -349,62 +350,17 @@ Both modes use:
 
 ### Gemini Client
 
-The Gemini client uses model caching per analysis type and structured output via `response_schema`:
+The synchronous client in `analyzer/src/gemini_client.py` uses `google.genai.Client`
+and calls `client.models.generate_content`. Each request includes the configured
+model name and generation settings. Requests for a specific analysis type also
+include its system instruction and Pydantic response schema.
 
-```python
-# src/gemini_client.py
-
-import google.generativeai as genai
-
-genai.configure(api_key=config.GOOGLE_API_KEY)
-
-# Model instances cached by analysis_type
-_models: Dict[str, genai.GenerativeModel] = {}
-
-def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
-    """Get or create Gemini model with response_schema for structured output."""
-    cache_key = analysis_type or 'default'
-    if cache_key not in _models:
-        gen_config = {
-            'temperature': 0.1,
-            'top_p': 0.95,
-            'top_k': 40,
-            'max_output_tokens': 8192,
-        }
-        model_kwargs = {'model_name': config.GEMINI_MODEL}
-
-        if analysis_type:
-            system_instruction, response_schema = _get_schema_config(analysis_type)
-            if system_instruction:
-                model_kwargs['system_instruction'] = system_instruction
-            if response_schema:
-                gen_config['response_mime_type'] = 'application/json'
-                gen_config['response_schema'] = response_schema
-
-        model_kwargs['generation_config'] = gen_config
-        _models[cache_key] = genai.GenerativeModel(**model_kwargs)
-    return _models[cache_key]
-
-def analyze_image(prompt, image_data, analysis_type=None) -> Dict[str, Any]:
-    """Analyze image with Gemini Vision (uses response_schema when analysis_type set)."""
-    model = get_model(analysis_type)
-    image = Image.open(io.BytesIO(image_data))
-    response = model.generate_content([prompt, image])
-    return parse_json_response(response.text)
-
-def analyze_text(prompt, text, analysis_type=None) -> Dict[str, Any]:
-    """Analyze text with Gemini (uses response_schema when analysis_type set)."""
-    model = get_model(analysis_type)
-    response = model.generate_content(f"{prompt}\n\nText to analyze:\n{text}")
-    return parse_json_response(response.text)
-```
-
-Retry logic handles specific error types:
-- `ResourceExhausted` (rate limit): exponential backoff with 2x multiplier
-- `InvalidArgument`: no retry (request is malformed)
-- `GoogleAPIError`: transient errors, linear backoff
-- `JSONDecodeError`: no retry (response format issue)
-- General `Exception`: logged with type info, linear backoff
+Text and image analysis share response parsing and retry handling. Rate limits
+use exponential backoff with a larger delay. Invalid requests and malformed JSON
+stop immediately. Transient server and connection failures can be retried. The
+client converts SDK failures into the project's `GeminiAPIError`,
+`GeminiRateLimitError`, or `GeminiResponseError` so the batch processor can record
+the correct result.
 
 ### Thumbnail Analysis Schema (~109 fields)
 
@@ -684,7 +640,7 @@ class BatchProcessor:
 
 ### Batch Mode (Gemini Batch API)
 
-The batch mode submits all requests as a JSONL file to the Gemini Batch API for 50% cost savings. Uses the `google-genai` SDK (different from the `google-generativeai` SDK used in sync mode).
+The batch mode submits all requests as a JSONL file to the Gemini Batch API for 50% cost savings. Both batch and synchronous processing use the `google-genai` SDK.
 
 #### 4-Phase Workflow
 
@@ -1182,7 +1138,8 @@ const TITLE_TEMPLATES: Record<string, string[]> = {
   thumbnailsDownloaded: 1547,
 
   lastProcessedVideoId: "abc123xyz",
-  lastPlaylistPageToken: "CGQQAA",
+  lastPlaylistPageToken: null,
+  lastCompletedPlaylistVideoId: null,
 
   startedAt: Timestamp,
   lastProcessedAt: Timestamp,
@@ -1269,9 +1226,9 @@ const response = await youtube.videos.list({
 
 **Model**: `gemini-2.5-flash` (configured in `shared/constants.py`)
 
-**Two SDKs Used**:
-- **Sync mode**: `google-generativeai` SDK — per-video calls with `response_schema` (Pydantic models)
-- **Batch mode**: `google-genai` SDK — JSONL file upload, batch job management
+Both modes use the `google-genai` SDK. Synchronous processing makes per-video
+calls with Pydantic response schemas. Batch processing uploads JSONL files and
+manages batch jobs.
 
 **Authentication**: API Key via `GOOGLE_API_KEY` environment variable
 
@@ -1281,7 +1238,7 @@ generation_config = {
     'temperature': 0.1,           # Low for consistent JSON output
     'top_p': 0.95,
     'top_k': 40,
-    'max_output_tokens': 8192,
+    'max_output_tokens': 16384,
     'response_mime_type': 'application/json',  # When using response_schema
     'response_schema': PydanticModel           # Enforces structured output
 }
@@ -1360,19 +1317,17 @@ export async function retry<T>(
 
 If the scraper is interrupted:
 
-1. Progress is automatically saved to Firestore
-2. On restart, `lastPlaylistPageToken` resumes pagination
-3. Videos already scraped are skipped
-4. Thumbnails already downloaded are skipped
+1. Saved metadata and thumbnail paths remain in Firestore.
+2. On restart, the scraper enumerates the upload playlist from the first page.
+3. It skips saved metadata and retries thumbnails that have no saved path.
+4. It records `lastCompletedPlaylistVideoId` only after all requested work succeeds.
 
-```typescript
-// Check for existing progress
-const existingProgress = await getProgress(channelId);
-if (existingProgress && existingProgress.status !== 'completed') {
-  resumeFromToken = existingProgress.lastPlaylistPageToken;
-  resumeFromVideoCount = existingProgress.videosProcessed;
-}
-```
+Incremental updates stop at `lastCompletedPlaylistVideoId`, which identifies the
+newest video from the previous successful run. An interrupted update leaves this
+value unchanged so the next attempt includes unfinished work. Older progress
+records without this field receive a full scan on their next scrape or update.
+The scraper ignores legacy `lastPlaylistPageToken` values because a saved page
+token does not prove that the videos on earlier pages were stored.
 
 ### Analyzer Error Handling
 

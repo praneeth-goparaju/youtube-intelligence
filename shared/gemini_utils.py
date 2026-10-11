@@ -2,9 +2,14 @@
 
 This module provides common patterns for working with Gemini API responses,
 including JSON extraction and retry logic.
+
+NOTE: The extract_json_from_response function is specifically designed to strip
+ALL markdown code-block wrapping (backticks, language specifiers like ```json) that
+PI.dev and other harness environments struggle to render in terminal views.
 """
 
 import json
+import re
 import time
 from typing import Dict, Any, Callable, TypeVar
 
@@ -12,7 +17,10 @@ T = TypeVar("T")
 
 
 def extract_json_from_response(response_text: str) -> str:
-    """Extract JSON from Gemini response, handling markdown code blocks.
+    """Extract clean JSON from Gemini response, stripping ALL markdown wrapping.
+
+    Handles code blocks like ```json ... ``` and any leftover backtick wrappers
+    that can break terminal/harness display or JSON parsing.
 
     Args:
         response_text: Raw response text from Gemini
@@ -22,13 +30,17 @@ def extract_json_from_response(response_text: str) -> str:
     """
     text = response_text.strip()
 
-    # Handle markdown code blocks
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
+    # Remove a leading code fence and optional language label
+    if text.startswith("```"):
+        text = re.sub(r"^```\w*\s*", "", text, flags=re.IGNORECASE)
+
+    # Remove trailing fence if present
     if text.endswith("```"):
-        text = text[:-3]
+        text = text[:-3].strip()
+
+    # Final safety pass for accidental surrounding fences
+    while text.startswith("```") and text.endswith("```"):
+        text = text[3:-3].strip()
 
     return text.strip()
 

@@ -1,6 +1,6 @@
 """Tests for the shared analysis-provenance metadata helper."""
 
-from src.analysis_metadata import stamp_analysis_metadata
+from analyzer.src.analysis_metadata import stamp_analysis_metadata
 from shared.constants import GEMINI_MODEL, BATCH_ANALYSIS_VERSION
 
 

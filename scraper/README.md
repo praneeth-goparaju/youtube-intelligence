@@ -157,6 +157,7 @@ interface ScrapeProgress {
   videosProcessed: number;
   lastProcessedVideoId: string | null;
   lastPlaylistPageToken: string | null;
+  lastCompletedPlaylistVideoId?: string | null;
   lastUpdateAt: Timestamp | null;       // Last incremental update timestamp
   lastUpdateNewVideos: number;           // Videos found in last update
   startedAt: Timestamp;
@@ -166,8 +167,12 @@ interface ScrapeProgress {
 
 On restart, the scraper:
 1. Checks `scrape_progress/{channelId}` for existing progress
-2. Resumes from `lastPlaylistPageToken` if interrupted
-3. Skips already-processed videos
+2. Enumerates the playlist from the beginning instead of trusting a token for IDs that may never have been saved
+3. Skips existing metadata and retries missing thumbnails before declaring completion
+
+Incremental updates stop at `lastCompletedPlaylistVideoId`, the newest playlist item from the previous successful scan. Interrupted updates leave this marker unchanged, so saving one page cannot hide unfinished later pages. Older progress records without this marker receive one full scan to repair missing videos and thumbnails, including records previously marked completed. This first repair scan costs more playlist requests and Firestore reads than a normal update.
+
+Each metadata batch finishes its required thumbnail downloads before progress advances. Failed downloads keep the scan incomplete and are retried on the next run. A stats refresh reports failure if any batch fails or quota runs out, and does not update the completed refresh timestamp.
 
 ### 5. Calculated Metrics
 
@@ -180,7 +185,7 @@ interface CalculatedMetrics {
   commentRatio: number;        // comments / views * 100
   viewsPerSubscriber: number;  // views / channel subscribers
   viewsPerDay: number;
-  publishDayOfWeek: string;    // "Monday", "Tuesday", etc.
+  publishDayOfWeek: string;    // "Monday", "Tuesday", etc., in IST
   publishHourIST: number;      // 0-23 in IST timezone
   tagCount: number;
 }
@@ -293,13 +298,14 @@ npx tsx scripts/delete-short-thumbnails.ts
 ```
 
 Removes thumbnails for Shorts from Firebase Storage (saves storage space).
+Only references to successfully deleted or already absent files are cleared. Failed deletions retain their paths for another attempt and produce a nonzero exit status.
 
 ### Migrate Unresolved Channels
 ```bash
 npx tsx scripts/migrate-unresolved.ts
 ```
 
-Retries channel URLs that previously failed resolution.
+Moves legacy unresolved entries from `scrape_progress` into `unresolved_channels`. It does not retry YouTube requests.
 
 ### Run Tests
 ```bash
@@ -335,6 +341,10 @@ Edit `config/channels.json`:
   }
 }
 ```
+
+Omitted settings default to no video limit, `includeShorts: false`, `includePrivate: false`, and `skipShortThumbnails: false`. Incorrect setting types are rejected before scraping.
+
+Shorts detection uses explicit `#Shorts` metadata or a link to the same video's Shorts URL. It allows up to three minutes for uploads on or after October 15, 2024, following [YouTube's eligibility documentation](https://support.google.com/youtube/answer/15424877?hl=en). Earlier uploads retain the 60-second limit. The public API does not expose aspect ratio, so classification remains an inference. A brief duration alone does not classify a video as a Short. Existing stored classifications are not automatically rewritten.
 
 ## Error Handling
 
@@ -415,7 +425,7 @@ npm test -- --coverage
 | `dotenv` | ^16.4.1 | Environment configuration |
 | `typescript` | ^5.3.3 | TypeScript compiler |
 | `vitest` | ^1.2.2 | Test runner |
-| `tsx` | ^4.7.0 | TypeScript execution |
+| `tsx` | ^4.23.15 | TypeScript execution |
 
 ## Troubleshooting
 

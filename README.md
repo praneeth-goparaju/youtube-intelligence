@@ -82,11 +82,22 @@ Each phase has more options — see the README in each directory (`scraper/`, `a
 
 ## Testing
 
+After installing the project dependencies, run all checks from the repository root:
+
 ```bash
-cd scraper && npm test           # TypeScript tests
-cd analyzer && pytest tests/     # Analyzer tests
-cd insights && pytest tests/     # Insights tests
+python -m pip install ruff
+python scripts/verify.py
 ```
+
+This runs both Python suites, both TypeScript suites, type checks, Python lint and
+format checks, and an integration check between Python insights and the TypeScript
+recommender. Tests use local data and do not call production services.
+Python deprecation and future warnings fail the tests. Node deprecation warnings
+fail verification and CI checks.
+
+To run only the Python tests, use `python -m pytest` from the repository root.
+To check only the insights output against the recommender, use
+`python scripts/verify.py --contracts-only`.
 
 ## Documentation
 

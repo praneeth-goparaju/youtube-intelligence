@@ -5,6 +5,8 @@ description = "Multi-phase analytics platform for YouTube channel intelligence"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+filterwarnings = ["error::DeprecationWarning", "error::FutureWarning"]
 testpaths = ["analyzer/tests", "insights/tests"]
 pythonpath = ["."]
 

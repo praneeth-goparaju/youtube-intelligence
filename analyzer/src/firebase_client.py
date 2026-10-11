@@ -283,6 +283,12 @@ def get_latest_batch_job(analysis_type: str, state: Optional[str] = None) -> Opt
     return None
 
 
+def get_unimported_batch_job(analysis_type: str) -> Optional[Dict[str, Any]]:
+    """Find the oldest succeeded job with unfinished result processing."""
+    jobs = get_batch_jobs_by_state("JOB_STATE_SUCCEEDED", analysis_type)
+    return next((job for job in reversed(jobs) if not job.get("importedAt")), None)
+
+
 def list_all_batch_jobs(limit: int = 20) -> List[Dict[str, Any]]:
     """List recent batch jobs."""
     db = get_db()

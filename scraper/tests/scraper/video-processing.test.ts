@@ -44,7 +44,7 @@ describe('transformAndFilterVideos', () => {
   it('drops Shorts when includeShorts is false', () => {
     const data = [
       makeVideoData({ id: 'longvideo01', duration: 'PT10M0S' }),
-      makeVideoData({ id: 'shortvid001', duration: 'PT10S' }), // <=15s => Short
+      makeVideoData({ id: 'shortvid001', duration: 'PT10S', title: 'Test #Shorts' }),
     ];
     const result = transformAndFilterVideos(data, 'UC123', 1000, false);
     expect(result.map((v) => v.videoId)).toEqual(['longvideo01']);
@@ -53,7 +53,7 @@ describe('transformAndFilterVideos', () => {
   it('keeps Shorts when includeShorts is true', () => {
     const data = [
       makeVideoData({ id: 'longvideo01', duration: 'PT10M0S' }),
-      makeVideoData({ id: 'shortvid001', duration: 'PT10S' }),
+      makeVideoData({ id: 'shortvid001', duration: 'PT10S', title: 'Test #Shorts' }),
     ];
     const result = transformAndFilterVideos(data, 'UC123', 1000, true);
     expect(result).toHaveLength(2);

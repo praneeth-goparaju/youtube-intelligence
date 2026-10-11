@@ -633,6 +633,7 @@ See [Technical Documentation](TECHNICAL_DOCUMENTATION.md) for full schemas.
   thumbnailsDownloaded: number,
   lastProcessedVideoId: string | null,
   lastPlaylistPageToken: string | null,
+  lastCompletedPlaylistVideoId?: string | null,
   startedAt: Timestamp,
   lastProcessedAt: Timestamp,
   completedAt: Timestamp | null,

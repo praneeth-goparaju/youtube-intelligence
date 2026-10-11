@@ -2,35 +2,27 @@
  * Gemini AI client for generating recommendations
  */
 
-import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { defineString } from 'firebase-functions/params';
+import { ApiError, GoogleGenAI } from '@google/genai';
+import { defineSecret } from 'firebase-functions/params';
+import { generateGeminiJson, GEMINI_MODEL } from './gemini-client';
 
 // Define the API key as a Firebase parameter (set via Firebase Console or CLI)
-const geminiApiKey = defineString('GOOGLE_API_KEY');
+export const geminiApiKey = defineSecret('GOOGLE_API_KEY');
 
-let genAI: GoogleGenerativeAI | null = null;
-let model: GenerativeModel | null = null;
+let client: GoogleGenAI | undefined;
 
 /**
  * Initialize Gemini client (lazy initialization)
  */
-function getModel(): GenerativeModel {
-  if (!model) {
+function getClient(): GoogleGenAI {
+  if (!client) {
     const apiKey = geminiApiKey.value();
     if (!apiKey) {
       throw new Error('GOOGLE_API_KEY not configured. Set it using: firebase functions:secrets:set GOOGLE_API_KEY');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
-    model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      generationConfig: {
-        temperature: 0.7,  // Higher for creative suggestions
-        topP: 0.95,
-        maxOutputTokens: 16384,
-      },
-    });
+    client = new GoogleGenAI({ apiKey });
   }
-  return model;
+  return client;
 }
 
 // Retry configuration
@@ -48,32 +40,19 @@ function delay(ms: number): Promise<void> {
  * Generate recommendation using Gemini with retry logic
  */
 export async function generateWithGemini(prompt: string): Promise<string> {
-  const model = getModel();
+  const client = getClient();
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-
-      // Validate response
-      if (!response) {
-        throw new Error('No response received from Gemini');
-      }
-
-      const text = response.text();
-      if (!text) {
-        throw new Error('Empty response text from Gemini');
-      }
-
-      // Clean up the response (remove markdown code blocks if present)
-      return cleanJsonResponse(text);
+      return await generateGeminiJson(client, prompt);
     } catch (error) {
-      lastError = error as Error;
-      const errorMessage = lastError.message || String(error);
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const errorMessage = lastError.message;
 
       // Check if it's a rate limit error (429) - wait longer
-      const isRateLimit = errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit');
+      const isRateLimit = (error instanceof ApiError && error.status === 429) ||
+        errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit');
 
       if (attempt < MAX_RETRIES - 1) {
         const waitTime = isRateLimit
@@ -92,34 +71,15 @@ export async function generateWithGemini(prompt: string): Promise<string> {
 }
 
 /**
- * Clean JSON response from Gemini (remove markdown formatting)
- */
-function cleanJsonResponse(text: string): string {
-  // Remove markdown code blocks
-  let cleaned = text.trim();
-
-  // Remove ```json and ``` markers
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.slice(7);
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.slice(3);
-  }
-
-  if (cleaned.endsWith('```')) {
-    cleaned = cleaned.slice(0, -3);
-  }
-
-  return cleaned.trim();
-}
-
-/**
  * Test Gemini connection
  */
 export async function testGeminiConnection(): Promise<boolean> {
   try {
-    const model = getModel();
-    const result = await model.generateContent('Say "OK" if you can read this.');
-    return result.response.text().toLowerCase().includes('ok');
+    const response = await getClient().models.generateContent({
+      model: GEMINI_MODEL,
+      contents: 'Say "OK" if you can read this.',
+    });
+    return response.text?.toLowerCase().includes('ok') ?? false;
   } catch {
     return false;
   }

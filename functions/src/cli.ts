@@ -9,7 +9,7 @@
  */
 
 import * as admin from 'firebase-admin';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
@@ -41,8 +41,8 @@ import {
 } from './recommendation-core';
 import { formatRecommendation, formatIdeas } from './formatter';
 import { generateThumbnails } from './thumbnail-gen';
-
-const GEMINI_MODEL = 'gemini-2.5-flash';
+import { parseIdeas } from './response-validation';
+import { generateGeminiJson, GEMINI_MODEL } from './gemini-client';
 
 // ============================================
 // Environment Setup
@@ -147,45 +147,26 @@ function getInsightsVersion(insights: Insights): string | null {
 // Gemini Setup (for CLI)
 // ============================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _cachedModel: any = null;
+let geminiClient: GoogleGenAI | undefined;
 
-function getGeminiModel() {
-  if (_cachedModel) return _cachedModel;
+function getGeminiClient(): GoogleGenAI {
+  if (geminiClient) return geminiClient;
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     throw new Error('GOOGLE_API_KEY not found in environment variables');
   }
-  const genAI = new GoogleGenerativeAI(apiKey);
-  _cachedModel = genAI.getGenerativeModel({
-    model: GEMINI_MODEL,
-    generationConfig: {
-      temperature: 0.7,
-      topP: 0.95,
-      maxOutputTokens: 16384,
-    },
-  });
-  return _cachedModel;
+  geminiClient = new GoogleGenAI({ apiKey });
+  return geminiClient;
 }
 
 async function generateWithGemini(prompt: string): Promise<string> {
-  const model = getGeminiModel();
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-
-  // Clean markdown formatting
-  let cleaned = text.trim();
-  if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
-  else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
-  if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
-
-  return cleaned.trim();
+  return generateGeminiJson(getGeminiClient(), prompt);
 }
 
 // ============================================
 // CLI Recommendation Engine
 // Uses shared logic from recommendation-core.ts
-// ============================================
+// ===========================================
 
 class CLIRecommendationEngine {
   private insights: Insights = {};
@@ -260,9 +241,7 @@ class CLIRecommendationEngine {
         const context = buildIdeasContext(this.insights);
         const prompt = buildIdeasPrompt(type, context);
         const responseText = await generateWithGemini(prompt);
-        const parsed = JSON.parse(responseText);
-        ideas = parsed.ideas || [];
-        if (ideas.length === 0) throw new Error('No ideas in AI response');
+        ideas = parseIdeas(JSON.parse(responseText), type);
         console.log(`✓ AI generated ${ideas.length} ideas`);
       } else {
         console.log('Using template-based idea generation...');

@@ -5,9 +5,9 @@ BaseGeminiConfig (rather than re-declaring credential fields) and that loading
 still populates every field with the expected values.
 """
 
-# Import src.config first: importing it inserts the project root onto sys.path,
+# Import analyzer.src.config first: importing it inserts the project root onto sys.path,
 # which makes the top-level `shared` package importable below.
-from src.config import Config
+from analyzer.src.config import Config
 from shared.config import BaseGeminiConfig, BaseFirebaseConfig
 
 

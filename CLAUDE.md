@@ -121,8 +121,8 @@ curl -X POST http://localhost:5001/PROJECT/us-central1/recommend \
 
 # Additional API endpoints
 # POST /ideas              - Generate video ideas
-# POST /generations-save   - Save a generation result
-# GET  /generations-list   - List saved generations
+# POST /generationsSave   - Save a generation result
+# GET  /generationsList   - List saved generations
 # GET  /health             - Health check
 
 # Deploy to Firebase
@@ -142,8 +142,11 @@ For Firebase Functions deployment, set these secrets:
 ```bash
 firebase functions:secrets:set GOOGLE_API_KEY        # Required: Gemini API key
 firebase functions:secrets:set RECOMMEND_API_KEY     # Required: API key for authentication
-firebase functions:secrets:set ALLOWED_ORIGINS       # Optional: Comma-separated allowed origins for CORS
 ```
+
+Set the ordinary `ALLOWED_ORIGINS` parameter in `functions/.env` to a
+comma-separated list of allowed origins. For local Firebase emulators, put
+`GOOGLE_API_KEY` and `RECOMMEND_API_KEY` in `functions/.secret.local`.
 
 API Authentication:
 - All `/recommend` and `/ideas` endpoint calls require `Authorization: Bearer <API_KEY>` header
@@ -169,7 +172,7 @@ API Authentication:
 - **Scraper**: Vitest — `cd scraper && npm test` (tests in `scraper/tests/`)
 - **Analyzer**: pytest — `cd analyzer && python3 -m pytest tests/` (fixtures in `conftest.py`)
 - **Insights**: pytest — `cd insights && python3 -m pytest tests/` (fixtures in `conftest.py`)
-- No linting/formatting tools are configured in this project
+- Run all tests, type checks, Python lint and formatting checks, and the insights integration check with `python scripts/verify.py` from the repository root. Install Ruff first with `python -m pip install ruff`.
 
 ## Firebase Collections
 
@@ -209,7 +212,7 @@ All analysis uses Gemini 2.5 Flash (`gemini-2.5-flash`) with 2 API calls per vid
 
 ### Two Processing Modes
 
-- **Sync mode** (default): Per-video API calls using `google-generativeai` SDK. Uses `response_schema` (Pydantic models) and `system_instruction` for structured JSON output. Local features computed inline and merged before saving.
+- **Sync mode** (default): Per-video API calls using the `google-genai` SDK. Uses `response_schema` (Pydantic models) and `system_instruction` for structured JSON output. Local features computed inline and merged before saving.
 - **Batch mode**: Gemini Batch API using `google-genai` SDK. Builds JSONL request files, submits as batch jobs, polls for completion, imports results. 50% cost savings. Works on all tiers but batch size is constrained by enqueued token limits (Tier 1: ~680 requests/job, Tier 2: ~90K requests/job). Local features computed during the import phase.
 
 ### Batch Mode Workflow

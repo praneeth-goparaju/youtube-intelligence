@@ -6,7 +6,7 @@ job metadata in the batch_jobs Firestore collection.
 
 import random
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional, Dict, Any
 
 from ..config import config
@@ -50,7 +50,7 @@ def submit_batch(
     if job_name:
         display_name = job_name
     else:
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         nonce = random.randint(1000, 9999)
         display_name = f"batch_{analysis_type}_{timestamp}_{nonce}"
 
@@ -74,7 +74,7 @@ def submit_batch(
     # job.name format: "batches/abc123"
     job_id = job.name.replace("/", "_") if "/" in job.name else job.name
 
-    # Save to Firestore
+    # Preserve the UTC string format used by existing Firestore createdAt ordering.
     job_record = {
         "jobName": job.name,
         "displayName": display_name,
@@ -85,7 +85,7 @@ def submit_batch(
         "requestCount": request_count,
         "srcFileName": file_name,
         "jsonlPath": jsonl_path,
-        "createdAt": datetime.utcnow().isoformat(),
+        "createdAt": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         "completedAt": None,
         "importedAt": None,
         "importStats": None,
@@ -149,7 +149,7 @@ def poll_and_update(
     state = _state_str(job.state)
     updates = {"state": state}
     if state == "JOB_STATE_SUCCEEDED":
-        updates["completedAt"] = datetime.utcnow().isoformat()
+        updates["completedAt"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
         # Store destination info for result import
         if job.dest:
             if hasattr(job.dest, "file_name") and job.dest.file_name:

@@ -6,7 +6,7 @@ with the proper request format for thumbnail and title_description analysis.
 
 import json
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, Any, Optional, Tuple
 
 from ..config import config, logger
@@ -150,7 +150,7 @@ def prepare_batch_requests(
         channels = get_all_channels()
 
     # Create temp JSONL file
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(config.PROJECT_ROOT, "data", "batch")
     os.makedirs(output_dir, exist_ok=True)
     jsonl_path = os.path.join(output_dir, f"batch_{analysis_type}_{timestamp}.jsonl")

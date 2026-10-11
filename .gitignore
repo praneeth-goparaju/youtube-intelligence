@@ -83,4 +83,5 @@ data/batch/
 
 # Functions
 functions/.env*
+functions/.secret.local
 functions/outputs/

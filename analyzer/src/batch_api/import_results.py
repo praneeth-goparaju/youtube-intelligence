@@ -7,7 +7,7 @@ data to the appropriate Firestore subcollection.
 import json
 import os
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional, Dict, Any, Tuple, FrozenSet
 
 from ..config import config, logger
@@ -16,7 +16,7 @@ from ..firebase_client import (
     get_channel_video_texts,
     get_all_channels_unfiltered,
     get_batch_job as get_batch_job_record,
-    get_latest_batch_job,
+    get_unimported_batch_job,
     update_batch_job,
 )
 from ..analyzers.local_text_features import extract_local_features, deep_merge
@@ -31,13 +31,21 @@ from .client import (
 from ..analysis_metadata import stamp_analysis_metadata
 
 
+class InvalidBatchResult(ValueError):
+    """A result row cannot be imported, regardless of whether processing is retried."""
+
+    def __init__(self, message: str, *, invalid_key: bool = False):
+        super().__init__(message)
+        self.invalid_key = invalid_key
+
+
 def import_batch_results(
     analysis_type: str,
     job_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Import results from a completed batch job into Firestore.
 
-    Finds the latest succeeded-but-not-imported job for the analysis type,
+    Finds the oldest succeeded-but-not-imported job for the analysis type,
     or uses the provided job_name. Downloads the result file and processes
     each line into Firestore.
 
@@ -56,7 +64,7 @@ def import_batch_results(
             print(f"Batch job not found in Firestore: {job_name}")
             return {"error": "Job not found"}
     else:
-        job_record = _find_importable_job(analysis_type)
+        job_record = get_unimported_batch_job(analysis_type)
         if not job_record:
             print(f"No completed batch job found to import for {analysis_type}")
             return {"error": "No importable job found"}
@@ -92,19 +100,24 @@ def import_batch_results(
     # Process results
     stats = _process_result_file(output_path, analysis_type, valid_channel_ids)
 
+    if isinstance(request_count, int) and stats["total"] != request_count and not stats["aborted"]:
+        stats["aborted"] = True
+        stats["abortReason"] = f"Expected {request_count} results, received {stats['total']}"
+
     if stats.get("aborted"):
         print(f"\n  IMPORT ABORTED: {stats.get('abortReason', 'Unknown reason')}")
 
+    complete = not stats["aborted"] and not stats["retryableFailures"]
     # Update job record
     update_batch_job(
         job_id,
         {
-            "importedAt": datetime.utcnow().isoformat(),
+            "importedAt": datetime.now(UTC).replace(tzinfo=None).isoformat() if complete else None,
             "importStats": stats,
         },
     )
 
-    print("\n  Import complete:")
+    print("\n  Import complete:" if complete else "\n  Import incomplete; retry this job to finish:")
     print(f"    Total results:       {stats['total']}")
     print(f"    Successful imports:  {stats['imported']}")
     print(f"    Failed imports:      {stats['failed']}")
@@ -117,20 +130,12 @@ def import_batch_results(
     return stats
 
 
-def _find_importable_job(analysis_type: str) -> Optional[Dict[str, Any]]:
-    """Find the latest succeeded job that hasn't been imported yet."""
-    job = get_latest_batch_job(analysis_type, state="JOB_STATE_SUCCEEDED")
-    if job and not job.get("importedAt"):
-        return job
-    return None
-
-
 def _download_results(job, job_record: Dict[str, Any], analysis_type: str) -> Optional[str]:
     """Download result file from a completed batch job."""
     output_dir = os.path.join(config.PROJECT_ROOT, "data", "batch", "results")
     os.makedirs(output_dir, exist_ok=True)
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(output_dir, f"results_{analysis_type}_{timestamp}.jsonl")
 
     # Try dest.file_name (Gemini Developer API)
@@ -193,6 +198,7 @@ def _process_result_file(
         "total": 0,
         "imported": 0,
         "failed": 0,
+        "retryableFailures": 0,
         "parseErrors": 0,
         "invalidKeys": 0,
         "localFeaturesMerged": 0,
@@ -219,29 +225,39 @@ def _process_result_file(
             stats["parseErrors"] += 1
             continue
 
+        if not isinstance(result, dict):
+            logger.error(f"Expected a result object on line {line_num}")
+            stats["parseErrors"] += 1
+            continue
+
         # Track channel changes for progress display and cache refresh
         key = result.get("key", "")
-        if key and len(key) >= 24 and key[0:2] == "UC":
-            ch_id = key[:24]
-            if ch_id != current_channel:
+        try:
+            if isinstance(key, str) and len(key) >= 24 and key[:24] in valid_channel_ids:
+                ch_id = key[:24]
                 current_channel = ch_id
                 # Pre-fetch all video texts for this channel (batch read)
                 if analysis_type == "title_description" and ch_id != cached_channel:
                     video_text_cache = get_channel_video_texts(ch_id)
                     cached_channel = ch_id
 
-        try:
             merged_local = _import_single_result(result, analysis_type, valid_channel_ids, video_text_cache)
             stats["imported"] += 1
             if merged_local:
                 stats["localFeaturesMerged"] += 1
+        except InvalidBatchResult as e:
+            logger.error(f"Invalid result on line {line_num}: {e}")
+            stats["failed"] += 1
+            if e.invalid_key:
+                stats["invalidKeys"] += 1
         except Exception as e:
             logger.error(f"Import error on line {line_num}: {e}")
             stats["failed"] += 1
+            stats["retryableFailures"] += 1
 
-        # Abort if failure rate exceeds threshold (after minimum sample)
+        # Stop on persistent processing errors; terminal response errors cannot improve on retry.
         if stats["total"] >= 10:
-            failure_rate = stats["failed"] / stats["total"]
+            failure_rate = stats["retryableFailures"] / stats["total"]
             if failure_rate > failure_threshold:
                 logger.error(
                     f"Failure rate {failure_rate:.1%} exceeds threshold "
@@ -285,19 +301,19 @@ def _import_single_result(
 
     if not channel_id or not video_id:
         logger.debug(f"Unparseable key: {key}")
-        raise ValueError("Could not parse result key")
+        raise InvalidBatchResult("Could not parse result key", invalid_key=True)
 
     # Validate channel exists in Firestore
     if channel_id not in valid_channel_ids:
         logger.warning(f"Unknown channel ID in batch result: {channel_id}")
-        raise ValueError("Unknown channel ID in batch result")
+        raise InvalidBatchResult("Unknown channel ID in batch result", invalid_key=True)
 
     # Extract response text from Gemini response structure
     analysis_data = _extract_analysis_data(response)
 
     if not analysis_data:
         logger.debug(f"Empty response for key: {key}")
-        raise ValueError("No analysis data in response")
+        raise InvalidBatchResult("No analysis data in response")
 
     # For title_description, merge locally-computed deterministic features
     merged_local = False
@@ -326,8 +342,9 @@ def _parse_result_key(key: str, analysis_type: str) -> Tuple[str, str]:
     """
     # Remove the analysis type suffix
     suffix = f"_{analysis_type}"
-    if key.endswith(suffix):
-        key = key[: -len(suffix)]
+    if not isinstance(key, str) or not key.endswith(suffix):
+        return "", ""
+    key = key[: -len(suffix)]
 
     # Channel ID is 24 chars, video ID is 11 chars, separated by _
     # Format: UC<22chars>_<11chars>
@@ -351,30 +368,30 @@ def _extract_analysis_data(response: Dict[str, Any]) -> Optional[Dict[str, Any]]
     with content parts. The text part contains our JSON analysis.
     """
     # Handle different response formats
+    if not isinstance(response, dict):
+        return None
     candidates = response.get("candidates", [])
-    if not candidates:
+    if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], dict):
         return None
 
     candidate = candidates[0]
     content = candidate.get("content", {})
+    if not isinstance(content, dict):
+        return None
     parts = content.get("parts", [])
 
-    if not parts:
+    if not isinstance(parts, list) or not parts or not isinstance(parts[0], dict):
         return None
 
     text = parts[0].get("text", "")
-    if not text:
+    if not isinstance(text, str) or not text:
         return None
 
+    from shared.gemini_utils import extract_json_from_response
+
     try:
-        return json.loads(text)
+        clean = extract_json_from_response(text)
+        analysis = json.loads(clean)
+        return analysis if isinstance(analysis, dict) else None
     except json.JSONDecodeError:
-        # Try cleaning markdown formatting
-        clean = text.strip()
-        if clean.startswith("```json"):
-            clean = clean[7:]
-        elif clean.startswith("```"):
-            clean = clean[3:]
-        if clean.endswith("```"):
-            clean = clean[:-3]
-        return json.loads(clean.strip())
+        return None

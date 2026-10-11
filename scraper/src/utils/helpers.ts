@@ -29,19 +29,16 @@ export function daysBetween(date1: Date, date2: Date): number {
  * Get day of week from date
  */
 export function getDayOfWeek(date: Date): string {
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  return days[date.getDay()];
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(date);
 }
 
 /**
  * Get hour in IST (UTC+5:30)
  */
 export function getHourIST(date: Date): number {
-  // Create a date string in IST timezone and extract the hour
-  const istOffset = 5.5 * 60; // IST is UTC+5:30
-  const utcOffset = date.getTimezoneOffset();
-  const istDate = new Date(date.getTime() + (istOffset + utcOffset) * 60 * 1000);
-  return istDate.getHours();
+  return Number(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', hourCycle: 'h23',
+  }).format(date));
 }
 
 /**
