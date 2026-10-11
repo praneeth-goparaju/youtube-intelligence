@@ -42,6 +42,7 @@ def _run_batch_loop(phase: str, analysis_type: str, args):
 
     batch_num = 0
     total_processed = 0
+    loop_args = argparse.Namespace(**vars(args))
 
     while True:
         batch_num += 1
@@ -49,7 +50,7 @@ def _run_batch_loop(phase: str, analysis_type: str, args):
         print(f"  BATCH JOB #{batch_num}  |  {total_processed:,} processed so far")
         print(f"{'=' * 60}")
 
-        result = _run_batch_phase_with_stats(analysis_type, args)
+        result = _run_batch_phase_with_stats(analysis_type, loop_args)
 
         if result is None:
             # No requests to process — all done
@@ -57,10 +58,12 @@ def _run_batch_loop(phase: str, analysis_type: str, args):
 
         if not result.get("success"):
             print(f"\n  Batch #{batch_num} failed. Stopping loop.")
-            break
+            print(f"  Total imported before stopping: {total_processed + result.get('imported', 0):,}")
+            return
 
         imported = result.get("imported", 0)
         total_processed += imported
+        loop_args.job_name = None
         print(f"\n  Batch #{batch_num} complete: {imported} imported  |  Running total: {total_processed:,}")
 
     print(f"\n{'=' * 60}")
@@ -70,7 +73,7 @@ def _run_batch_loop(phase: str, analysis_type: str, args):
     print(f"{'=' * 60}")
 
 
-def _run_batch_phase_with_stats(analysis_type: str, args) -> dict:
+def _run_batch_phase_with_stats(analysis_type: str, args) -> dict | None:
     """Run all batch phases and return stats. Returns None if no work to do.
 
     First checks for any succeeded-but-not-imported jobs and imports them
@@ -82,80 +85,69 @@ def _run_batch_phase_with_stats(analysis_type: str, args) -> dict:
         poll_and_update,
         import_batch_results,
     )
-    from .firebase_client import get_latest_batch_job
+    from .firebase_client import get_batch_job, get_latest_batch_job, get_unimported_batch_job
 
-    # Check for existing jobs before preparing new work
     try:
-        # Check for unimported succeeded jobs first
-        existing = get_latest_batch_job(analysis_type, state="JOB_STATE_SUCCEEDED")
-        if existing and not existing.get("importedAt"):
-            job_name = existing["jobName"]
-            print(f"\n  Found unimported succeeded job: {job_name}")
-            stats = import_batch_results(
+        if args.job_name:
+            job_record = get_batch_job(args.job_name.replace("/", "_"))
+            if not job_record:
+                raise ValueError(f"Batch job not found: {args.job_name}")
+            if job_record["analysisType"] != analysis_type:
+                raise ValueError(f"Batch job {args.job_name} is for {job_record['analysisType']}, not {analysis_type}")
+        else:
+            job_record = get_unimported_batch_job(analysis_type)
+            if not job_record:
+                for state in ("JOB_STATE_RUNNING", "JOB_STATE_PENDING", "JOB_STATE_QUEUED"):
+                    job_record = get_latest_batch_job(analysis_type, state=state)
+                    if job_record:
+                        break
+
+        if job_record:
+            print(f"\n  Resuming batch job: {job_record['jobName']}")
+        else:
+            jsonl_path, count = prepare_batch_requests(
                 analysis_type=analysis_type,
+                channel_id=args.channel,
+                batch_size=args.batch_size,
+            )
+            if count == 0:
+                return None
+            job_record = submit_batch(
+                jsonl_path=jsonl_path,
+                analysis_type=analysis_type,
+                request_count=count,
+            )
+
+        job_name = job_record["jobName"]
+        if job_record.get("state") != "JOB_STATE_SUCCEEDED":
+            result = poll_and_update(
+                analysis_type=analysis_type,
+                poll_interval=args.poll_interval,
                 job_name=job_name,
             )
-            return {"success": True, "imported": stats.get("imported", 0)}
+            if not result or result.get("state") != "JOB_STATE_SUCCEEDED":
+                return {"success": False}
 
-        # Check for active jobs that need polling
-        for state in ("JOB_STATE_RUNNING", "JOB_STATE_PENDING", "JOB_STATE_QUEUED"):
-            active = get_latest_batch_job(analysis_type, state=state)
-            if active:
-                job_name = active["jobName"]
-                print(f"\n  Found active job: {job_name} ({state})")
-                result = poll_and_update(
-                    analysis_type=analysis_type,
-                    poll_interval=args.poll_interval,
-                    job_name=job_name,
-                )
-                if not result or result.get("state") != "JOB_STATE_SUCCEEDED":
-                    return {"success": False}
-                stats = import_batch_results(
-                    analysis_type=analysis_type,
-                    job_name=job_name,
-                )
-                return {"success": True, "imported": stats.get("imported", 0)}
+        stats = import_batch_results(analysis_type=analysis_type, job_name=job_name)
+        success = (
+            not stats.get("error")
+            and not stats.get("aborted")
+            and not stats.get("failed")
+            and not stats.get("parseErrors")
+            and stats.get("imported", 0) > 0
+        )
+        return {"success": success, "imported": stats.get("imported", 0)}
+
     except Exception as e:
-        print(f"  Could not check existing jobs: {e}")
-        print("  Proceeding with new batch...")
-
-    # No existing jobs — prepare new batch
-    jsonl_path, count = prepare_batch_requests(
-        analysis_type=analysis_type,
-        channel_id=args.channel,
-        batch_size=args.batch_size,
-    )
-    if count == 0:
-        return None
-
-    # Submit
-    job_record = submit_batch(
-        jsonl_path=jsonl_path,
-        analysis_type=analysis_type,
-        request_count=count,
-    )
-    job_name = job_record.get("jobName")
-
-    # Poll
-    result = poll_and_update(
-        analysis_type=analysis_type,
-        poll_interval=args.poll_interval,
-        job_name=job_name,
-    )
-    if not result or result.get("state") != "JOB_STATE_SUCCEEDED":
-        return {"success": False}
-
-    # Import
-    stats = import_batch_results(
-        analysis_type=analysis_type,
-        job_name=job_name,
-    )
-
-    return {"success": True, "imported": stats.get("imported", 0)}
+        print(f"  Batch processing failed: {e}")
+        return {"success": False, "error": str(e)}
 
 
 def _run_batch_phase(phase: str, analysis_type: str, args):
     """Execute a specific batch phase for an analysis type."""
+    if phase == "all":
+        return _run_batch_phase_with_stats(analysis_type, args)
+
     from .batch_api import (
         prepare_batch_requests,
         submit_batch,
@@ -163,55 +155,41 @@ def _run_batch_phase(phase: str, analysis_type: str, args):
         import_batch_results,
     )
 
-    # Track job name across phases so poll/import target the correct job
-    active_job_name = args.job_name
-
-    if phase in ("all", "prepare"):
-        jsonl_path, count = prepare_batch_requests(
+    if phase == "prepare":
+        prepare_batch_requests(
             analysis_type=analysis_type,
             channel_id=args.channel,
             batch_size=args.batch_size,
         )
-        if phase == "prepare" or count == 0:
-            if phase == "all" and count == 0:
-                print("No requests to submit — skipping remaining phases.")
+        return
+
+    if phase == "submit":
+        import os
+        import glob
+
+        batch_dir = os.path.join(config.PROJECT_ROOT, "data", "batch")
+        pattern = os.path.join(batch_dir, f"batch_{analysis_type}_*.jsonl")
+        files = sorted(glob.glob(pattern), reverse=True)
+        if not files:
+            print(f"No prepared JSONL file found for {analysis_type}")
             return
+        jsonl_path = files[0]
+        with open(jsonl_path) as f:
+            count = sum(1 for _ in f)
+        print(f"Using prepared file: {jsonl_path} ({count} requests)")
 
-    if phase in ("all", "submit"):
-        if phase == "submit":
-            # Need to find the most recent prepared JSONL
-            import os
-            import glob
-
-            batch_dir = os.path.join(config.PROJECT_ROOT, "data", "batch")
-            pattern = os.path.join(batch_dir, f"batch_{analysis_type}_*.jsonl")
-            files = sorted(glob.glob(pattern), reverse=True)
-            if not files:
-                print(f"No prepared JSONL file found for {analysis_type}")
-                return
-            jsonl_path = files[0]
-            # Count lines
-            with open(jsonl_path) as f:
-                count = sum(1 for _ in f)
-            print(f"Using prepared file: {jsonl_path} ({count} requests)")
-
-        job_record = submit_batch(
+        return submit_batch(
             jsonl_path=jsonl_path,
             analysis_type=analysis_type,
             request_count=count,
-            job_name=active_job_name,
+            job_name=args.job_name,
         )
-        # Use the actual job name from submit for subsequent phases
-        if not active_job_name:
-            active_job_name = job_record.get("jobName")
-        if phase == "submit":
-            return
 
-    if phase in ("all", "poll"):
+    if phase == "poll":
         result = poll_and_update(
             analysis_type=analysis_type,
             poll_interval=args.poll_interval,
-            job_name=active_job_name,
+            job_name=args.job_name,
         )
         if not result:
             return
@@ -219,13 +197,12 @@ def _run_batch_phase(phase: str, analysis_type: str, args):
         if state != "JOB_STATE_SUCCEEDED":
             print(f"Job did not succeed (state: {state}). Stopping.")
             return
-        if phase == "poll":
-            return
+        return result
 
-    if phase in ("all", "import"):
-        import_batch_results(
+    if phase == "import":
+        return import_batch_results(
             analysis_type=analysis_type,
-            job_name=active_job_name,
+            job_name=args.job_name,
         )
 
 

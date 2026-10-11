@@ -61,7 +61,7 @@ export async function getPlaylistVideos(
   });
 }
 
-interface YouTubeVideoData {
+export interface YouTubeVideoData {
   id: string;
   snippet: {
     title: string;
@@ -242,7 +242,7 @@ export function transformVideoData(
     topicCategories: data.topicDetails?.topicCategories || [],
 
     // Derived Fields
-    isShort: isShortVideoDetailed(durationSeconds, data.snippet.title, data.snippet.description).isShort,
+    isShort: isShortVideoDetailed({ durationSeconds, title: data.snippet.title, description: data.snippet.description, publishedAt, videoId: data.id }).isShort,
     videoUrl: `https://www.youtube.com/watch?v=${data.id}`,
 
     // Scraping Info

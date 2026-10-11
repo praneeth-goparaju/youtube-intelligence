@@ -1,7 +1,7 @@
 """Progress tracking for analysis jobs."""
 
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ..firebase_client import save_analysis_progress, get_analysis_progress
 
@@ -26,7 +26,7 @@ class ProgressTracker:
 
     def start(self, total_videos: int) -> None:
         """Start tracking a new job."""
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(UTC)
         self.total_videos = total_videos
         self.processed = 0
         self.successful = 0
@@ -66,7 +66,7 @@ class ProgressTracker:
         """Get current statistics."""
         elapsed = None
         if self.start_time:
-            elapsed = (datetime.utcnow() - self.start_time).total_seconds()
+            elapsed = (datetime.now(UTC) - self.start_time).total_seconds()
 
         return {
             "analysisType": self.analysis_type,
@@ -77,7 +77,7 @@ class ProgressTracker:
             "skipped": self.skipped,
             "progress": self.get_progress(),
             "elapsedSeconds": elapsed,
-            "startTime": self.start_time.isoformat() if self.start_time else None,
+            "startTime": self.start_time.astimezone(UTC).replace(tzinfo=None).isoformat() if self.start_time else None,
         }
 
     def _save(self, force: bool = False) -> None:
@@ -101,7 +101,11 @@ class ProgressTracker:
             self.failed = data.get("failed", 0)
             self.skipped = data.get("skipped", 0)
             if data.get("startTime"):
-                self.start_time = datetime.fromisoformat(data["startTime"])
+                start_time = datetime.fromisoformat(data["startTime"])
+                # Older progress records store UTC without an explicit offset.
+                self.start_time = (
+                    start_time.replace(tzinfo=UTC) if start_time.tzinfo is None else start_time.astimezone(UTC)
+                )
             return True
         return False
 

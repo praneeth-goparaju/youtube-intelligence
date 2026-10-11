@@ -5,6 +5,7 @@ import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import * as readline from 'readline';
+import { deleteThumbnailFiles, ThumbnailToDelete } from '../src/scraper/thumbnail-cleanup.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: resolve(__dirname, '../../.env') });
@@ -49,15 +50,9 @@ async function askConfirmation(message: string): Promise<boolean> {
   });
 }
 
-interface ShortWithThumbnail {
-  channelId: string;
-  videoId: string;
-  thumbnailStoragePath: string;
-}
-
-async function findShortsWithThumbnails(db: Firestore): Promise<ShortWithThumbnail[]> {
+async function findShortsWithThumbnails(db: Firestore): Promise<ThumbnailToDelete[]> {
   const channelsSnapshot = await db.collection('channels').get();
-  const results: ShortWithThumbnail[] = [];
+  const results: ThumbnailToDelete[] = [];
 
   for (const channelDoc of channelsSnapshot.docs) {
     const channelId = channelDoc.id;
@@ -118,49 +113,23 @@ async function main(): Promise<void> {
 
     // Delete files from Storage with concurrency limit
     log('\nDeleting thumbnail files from Storage...', COLORS.cyan);
-    const CONCURRENCY = 20;
-    let storageDeleted = 0;
-    let storageErrors = 0;
-    let nextIndex = 0;
-
-    async function deleteWorker(): Promise<void> {
-      while (nextIndex < shorts.length) {
-        const idx = nextIndex++;
-        const entry = shorts[idx];
-
-        try {
-          await bucket.file(entry.thumbnailStoragePath).delete();
-          storageDeleted++;
-        } catch (error: any) {
-          if (error?.code === 404 || error?.errors?.[0]?.reason === 'notFound') {
-            // File already gone, count as success
-            storageDeleted++;
-          } else {
-            storageErrors++;
-            log(`  Failed to delete ${entry.thumbnailStoragePath}: ${(error as Error).message}`, COLORS.red);
-          }
-        }
-
-        const total = storageDeleted + storageErrors;
-        if (total % 100 === 0 || total === shorts.length) {
-          log(`  Storage: ${total}/${shorts.length} processed`, COLORS.cyan);
-        }
-      }
+    const { deleted, failed } = await deleteThumbnailFiles(shorts, async (storagePath) => {
+      await bucket.file(storagePath).delete();
+    });
+    const storageDeleted = deleted.length;
+    const storageErrors = failed.length;
+    for (const { thumbnail, error } of failed) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`  Failed to delete ${thumbnail.thumbnailStoragePath}: ${message}`, COLORS.red);
     }
-
-    const workers = Array.from(
-      { length: Math.min(CONCURRENCY, shorts.length) },
-      () => deleteWorker()
-    );
-    await Promise.all(workers);
 
     // Batch-update Firestore documents to clear thumbnailStoragePath
     log('\nClearing thumbnailStoragePath in Firestore...', COLORS.cyan);
     const BATCH_SIZE = 500;
     let firestoreUpdated = 0;
 
-    for (let i = 0; i < shorts.length; i += BATCH_SIZE) {
-      const chunk = shorts.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < deleted.length; i += BATCH_SIZE) {
+      const chunk = deleted.slice(i, i + BATCH_SIZE);
       const batch = db.batch();
 
       for (const entry of chunk) {
@@ -174,7 +143,7 @@ async function main(): Promise<void> {
 
       await batch.commit();
       firestoreUpdated += chunk.length;
-      log(`  Firestore: ${firestoreUpdated}/${shorts.length} updated`, COLORS.cyan);
+      log(`  Firestore: ${firestoreUpdated}/${deleted.length} updated`, COLORS.cyan);
     }
 
     log('', COLORS.reset);
@@ -184,13 +153,14 @@ async function main(): Promise<void> {
       log(`Storage errors: ${storageErrors}`, COLORS.red);
     }
     log(`Firestore paths cleared: ${firestoreUpdated}`, COLORS.green);
+    if (storageErrors > 0) process.exitCode = 1;
   } catch (error) {
     log(`\nError: ${(error as Error).message}`, COLORS.red);
     process.exit(1);
   }
 
   console.log('\n' + '='.repeat(60) + '\n');
-  process.exit(0);
+  process.exit(process.exitCode ?? 0);
 }
 
 main();

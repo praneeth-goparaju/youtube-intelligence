@@ -49,9 +49,10 @@ def generate_recommender_documents(
 
     docs = {}
 
-    docs["thumbnails"] = _build_thumbnail_insights(profiles, timestamp, total_videos)
-    docs["titles"] = _build_title_insights(profiles, timestamp, total_videos)
-    docs["timing"] = _build_timing_insights(profiles, timestamp, total_videos)
+    if total_videos > 0:
+        docs["thumbnails"] = _build_thumbnail_insights(profiles, timestamp, total_videos)
+        docs["titles"] = _build_title_insights(profiles, timestamp, total_videos)
+        docs["timing"] = _build_timing_insights(profiles, timestamp, total_videos)
 
     if content_gaps:
         docs["contentGaps"] = _build_content_gap_insights(content_gaps, timestamp)
@@ -477,15 +478,16 @@ def _build_content_gap_insights(
     Maps avgViewsPerSubscriber → avgViews.
     Ensures saturated topics have {topic, competition} structure.
     """
-    gaps = content_gaps.get("contentGaps", {})
+    gaps = content_gaps.get("contentGaps", content_gaps)
 
     # Flatten high opportunity
     high_opp = []
     for opp in gaps.get("highOpportunity", []):
         high_opp.append(
             {
+                **opp,
                 "topic": opp.get("topic", ""),
-                "avgViews": opp.get("avgViewsPerSubscriber", 0),
+                "avgViews": opp.get("avgViews", opp.get("avgViewsPerSubscriber", 0)),
                 "videoCount": opp.get("videoCount", 0),
                 "opportunityScore": opp.get("opportunityScore", 0),
             }
@@ -497,12 +499,16 @@ def _build_content_gap_insights(
         content_share = topic.get("contentShare", 0)
         saturated.append(
             {
+                **topic,
                 "topic": topic.get("topic", ""),
-                "competition": "high" if content_share > 20 else "medium",
+                "competition": topic.get("competition", "high" if content_share > 20 else "medium"),
             }
         )
 
+    result = {**content_gaps, **gaps}
+    result.pop("contentGaps", None)
     return {
+        **result,
         "generatedAt": timestamp,
         "highOpportunity": high_opp,
         "saturatedTopics": saturated,

@@ -486,8 +486,7 @@ class TestGenerateRecommenderDocuments:
 
     def test_empty_profiles(self):
         result = generate_recommender_documents({}, None)
-        assert "thumbnails" in result
-        assert result["thumbnails"]["basedOnVideos"] == 0
+        assert result == {}
 
 
 class TestHelpers:

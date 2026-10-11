@@ -1,10 +1,11 @@
 """Gemini API client wrapper."""
 
+import atexit
 import time
 import json
 from typing import Optional, Dict, Any, Union
-import google.generativeai as genai
-from google.api_core import exceptions as google_exceptions
+from google import genai
+from google.genai import errors, types
 from PIL import Image
 import io
 
@@ -32,61 +33,46 @@ class GeminiResponseError(GeminiAPIError):
     pass
 
 
-# Model instances: keyed by (analysis_type or 'default')
-_models: Dict[str, genai.GenerativeModel] = {}
-_configured: bool = False
+_client: Optional[genai.Client] = None
 
 
-def _ensure_configured() -> None:
-    """Configure the Gemini SDK on first use (after Config.load() has run)."""
-    global _configured
-    if not _configured:
-        genai.configure(api_key=config.GOOGLE_API_KEY)
-        _configured = True
+def get_client() -> genai.Client:
+    """Create the reusable SDK client after application configuration is loaded."""
+    global _client
+    if _client is None:
+        _client = genai.Client(
+            api_key=config.GOOGLE_API_KEY,
+            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)),
+        )
+    return _client
 
 
-def get_model(analysis_type: Optional[str] = None) -> genai.GenerativeModel:
-    """Get or create Gemini model instance.
+def close_client() -> None:
+    """Release the SDK's HTTP connections when processing exits."""
+    global _client
+    if _client is not None:
+        _client.close()
+        _client = None
 
-    When analysis_type is provided and response_schema models are available,
-    creates a model with system_instruction and response_schema for structured output.
-    Falls back to the default model configuration otherwise.
 
-    Args:
-        analysis_type: Optional analysis type ('thumbnail' or 'title_description')
-                       for schema-aware model creation.
-    """
-    _ensure_configured()
-    cache_key = analysis_type or "default"
+atexit.register(close_client)
 
-    if cache_key not in _models:
-        model_kwargs = {
-            "model_name": config.GEMINI_MODEL,
-        }
-        gen_config = {
-            "temperature": 0.1,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 16384,
-        }
 
-        # Try to use structured output for specific analysis types
-        if analysis_type:
-            try:
-                system_instruction, response_schema = _get_schema_config(analysis_type)
-                if system_instruction:
-                    model_kwargs["system_instruction"] = system_instruction
-                if response_schema:
-                    gen_config["response_mime_type"] = "application/json"
-                    gen_config["response_schema"] = response_schema
-            except ImportError:
-                # Pydantic not available — fall back to default
-                pass
-
-        model_kwargs["generation_config"] = gen_config
-        _models[cache_key] = genai.GenerativeModel(**model_kwargs)
-
-    return _models[cache_key]
+def _generation_config(analysis_type: Optional[str] = None) -> types.GenerateContentConfig:
+    """Keep the same sampling settings and structured schemas for every request."""
+    generation_config = types.GenerateContentConfig(
+        temperature=0.1,
+        top_p=0.95,
+        top_k=40,
+        max_output_tokens=16384,
+    )
+    if analysis_type:
+        system_instruction, response_schema = _get_schema_config(analysis_type)
+        generation_config.system_instruction = system_instruction
+        if response_schema:
+            generation_config.response_mime_type = "application/json"
+            generation_config.response_schema = response_schema
+    return generation_config
 
 
 def _get_schema_config(analysis_type: str):
@@ -115,7 +101,7 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
     """Execute a Gemini generation with retry logic.
 
     Args:
-        generate_func: Function that calls model.generate_content()
+        generate_func: Function that calls client.models.generate_content()
         retries: Number of retry attempts
 
     Returns:
@@ -137,41 +123,35 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
                 raise GeminiResponseError("Gemini returned None response")
 
             # Check for blocked responses
-            if hasattr(response, "prompt_feedback") and response.prompt_feedback:
-                if hasattr(response.prompt_feedback, "block_reason") and response.prompt_feedback.block_reason:
+            if response.prompt_feedback:
+                if response.prompt_feedback.block_reason not in (None, types.BlockedReason.BLOCKED_REASON_UNSPECIFIED):
                     raise GeminiResponseError(f"Response blocked: {response.prompt_feedback.block_reason}")
 
             # Validate response text exists
-            if not hasattr(response, "text") or not response.text:
+            text = response.text
+            if not text:
                 raise GeminiResponseError("Gemini response has no text content")
 
-            return parse_json_response(response.text)
+            return parse_json_response(text)
 
         except json.JSONDecodeError as e:
             # JSON parsing error - don't retry, it won't help
             logger.error(f"JSON parsing error: {e}")
             raise GeminiResponseError(f"Failed to parse JSON response: {e}")
 
-        except google_exceptions.ResourceExhausted as e:
-            # Rate limit - wait longer before retry
-            logger.warning(f"Rate limit hit (attempt {attempt + 1}/{retries}): {e}")
-            last_error = GeminiRateLimitError(str(e))
+        except errors.APIError as e:
+            if e.code == 400:
+                raise GeminiAPIError(f"Invalid request: {e}") from e
+            if e.code == 429:
+                logger.warning(f"Rate limit hit (attempt {attempt + 1}/{retries}): {e}")
+                last_error = GeminiRateLimitError(str(e))
+                wait_time = config.RETRY_DELAY * (2**attempt) * 2
+            else:
+                logger.warning(f"Google API error (attempt {attempt + 1}/{retries}): {e}")
+                last_error = GeminiAPIError(str(e))
+                wait_time = config.RETRY_DELAY * (attempt + 1)
             if attempt < retries - 1:
-                wait_time = config.RETRY_DELAY * (2**attempt) * 2  # Longer wait for rate limits
-                logger.info(f"Waiting {wait_time}s before retry...")
                 time.sleep(wait_time)
-
-        except google_exceptions.InvalidArgument as e:
-            # Invalid request - don't retry
-            logger.error(f"Invalid argument error: {e}")
-            raise GeminiAPIError(f"Invalid request: {e}")
-
-        except google_exceptions.GoogleAPIError as e:
-            # Other Google API errors - may be transient
-            logger.warning(f"Google API error (attempt {attempt + 1}/{retries}): {e}")
-            last_error = GeminiAPIError(str(e))
-            if attempt < retries - 1:
-                time.sleep(config.RETRY_DELAY * (attempt + 1))
 
         except GeminiResponseError:
             # Re-raise response errors without retry
@@ -202,7 +182,8 @@ def analyze_text(prompt: str, text: str, retries: int = 3, analysis_type: Option
     Returns:
         Parsed JSON response from Gemini
     """
-    model = get_model(analysis_type)
+    client = get_client()
+    generation_config = _generation_config(analysis_type)
 
     # When using response_schema, use the concise user prompt
     if analysis_type:
@@ -212,7 +193,12 @@ def analyze_text(prompt: str, text: str, retries: int = 3, analysis_type: Option
     else:
         full_prompt = f"{prompt}\n\nText to analyze:\n{text}"
 
-    return _execute_with_retry(lambda: model.generate_content(full_prompt), retries)
+    return _execute_with_retry(
+        lambda: client.models.generate_content(
+            model=config.GEMINI_MODEL, contents=full_prompt, config=generation_config
+        ),
+        retries,
+    )
 
 
 def analyze_image(
@@ -230,7 +216,8 @@ def analyze_image(
     Returns:
         Parsed JSON response from Gemini
     """
-    model = get_model(analysis_type)
+    client = get_client()
+    generation_config = _generation_config(analysis_type)
     image = None
     should_close = False
 
@@ -251,7 +238,12 @@ def analyze_image(
         else:
             effective_prompt = prompt
 
-        return _execute_with_retry(lambda: model.generate_content([effective_prompt, image]), retries)
+        return _execute_with_retry(
+            lambda: client.models.generate_content(
+                model=config.GEMINI_MODEL, contents=[effective_prompt, image], config=generation_config
+            ),
+            retries,
+        )
     finally:
         # Clean up image resource if we created it
         if should_close and image is not None:
@@ -264,8 +256,11 @@ def analyze_image(
 def test_connection() -> bool:
     """Test the Gemini API connection."""
     try:
-        model = get_model()
-        response = model.generate_content("Say 'OK' if you can hear me.")
+        response = get_client().models.generate_content(
+            model=config.GEMINI_MODEL,
+            contents="Say 'OK' if you can hear me.",
+            config=_generation_config(),
+        )
 
         # Validate response exists and has text
         if response is None:
@@ -278,7 +273,7 @@ def test_connection() -> bool:
 
         return "ok" in response.text.lower()
 
-    except google_exceptions.GoogleAPIError as e:
+    except errors.APIError as e:
         logger.error(f"Gemini connection test failed (API error): {e}")
         return False
     except Exception as e:

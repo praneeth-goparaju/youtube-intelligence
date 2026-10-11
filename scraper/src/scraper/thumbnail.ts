@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import { delay } from '../utils/helpers.js';
 import { logger } from '../utils/logger.js';
 
-interface ThumbnailResult {
+export interface ThumbnailResult {
   videoId: string;
   success: boolean;
   storagePath?: string;

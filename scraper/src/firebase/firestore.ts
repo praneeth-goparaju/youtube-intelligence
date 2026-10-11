@@ -1,6 +1,6 @@
 import { getDb } from './client.js';
 import { Channel, Video, CalculatedMetrics, ScrapeProgress, UnresolvedChannel } from '../types/index.js';
-import { Timestamp } from 'firebase-admin/firestore';
+import { Timestamp, Firestore } from 'firebase-admin/firestore';
 
 // Collection names
 const CHANNELS_COLLECTION = 'channels';
@@ -9,9 +9,25 @@ const PROGRESS_COLLECTION = 'scrape_progress';
 const UNRESOLVED_COLLECTION = 'unresolved_channels';
 
 /**
+ * Reference to a channel's videos subcollection.
+ * Single source of truth for the channels/{id}/videos path so the nested
+ * collection chain can't drift between the many methods that use it.
+ */
+function videosCollection(db: Firestore, channelId: string) {
+  return db.collection(CHANNELS_COLLECTION).doc(channelId).collection(VIDEOS_SUBCOLLECTION);
+}
+
+/**
+ * Reference to a single video document within a channel.
+ */
+function videoDoc(db: Firestore, channelId: string, videoId: string) {
+  return videosCollection(db, channelId).doc(videoId);
+}
+
+/**
  * Save or update channel data
  */
-export async function saveChannel(channel: Channel): Promise<void> {
+export async function saveChannel(channel: Omit<Channel, 'thumbnailStoragePath'> & Partial<Pick<Channel, 'thumbnailStoragePath'>>): Promise<void> {
   const db = getDb();
   await db.collection(CHANNELS_COLLECTION).doc(channel.channelId).set(channel, { merge: true });
 }
@@ -30,12 +46,7 @@ export async function getChannel(channelId: string): Promise<Channel | null> {
  */
 export async function saveVideo(channelId: string, video: Video): Promise<void> {
   const db = getDb();
-  await db
-    .collection(CHANNELS_COLLECTION)
-    .doc(channelId)
-    .collection(VIDEOS_SUBCOLLECTION)
-    .doc(video.videoId)
-    .set(video, { merge: true });
+  await videoDoc(db, channelId, video.videoId).set(video, { merge: true });
 }
 
 // Firestore batch size limit
@@ -56,11 +67,7 @@ export async function saveVideosBatch(channelId: string, videos: Video[]): Promi
     const batch = db.batch();
 
     for (const video of chunk) {
-      const ref = db
-        .collection(CHANNELS_COLLECTION)
-        .doc(channelId)
-        .collection(VIDEOS_SUBCOLLECTION)
-        .doc(video.videoId);
+      const ref = videoDoc(db, channelId, video.videoId);
       batch.set(ref, video, { merge: true });
     }
 
@@ -77,12 +84,7 @@ export async function saveVideosBatch(channelId: string, videos: Video[]): Promi
  */
 export async function getVideo(channelId: string, videoId: string): Promise<Video | null> {
   const db = getDb();
-  const doc = await db
-    .collection(CHANNELS_COLLECTION)
-    .doc(channelId)
-    .collection(VIDEOS_SUBCOLLECTION)
-    .doc(videoId)
-    .get();
+  const doc = await videoDoc(db, channelId, videoId).get();
   return doc.exists ? (doc.data() as Video) : null;
 }
 
@@ -91,12 +93,7 @@ export async function getVideo(channelId: string, videoId: string): Promise<Vide
  */
 export async function videoExists(channelId: string, videoId: string): Promise<boolean> {
   const db = getDb();
-  const doc = await db
-    .collection(CHANNELS_COLLECTION)
-    .doc(channelId)
-    .collection(VIDEOS_SUBCOLLECTION)
-    .doc(videoId)
-    .get();
+  const doc = await videoDoc(db, channelId, videoId).get();
   return doc.exists;
 }
 
@@ -105,11 +102,7 @@ export async function videoExists(channelId: string, videoId: string): Promise<b
  */
 export async function getChannelVideos(channelId: string): Promise<Video[]> {
   const db = getDb();
-  const snapshot = await db
-    .collection(CHANNELS_COLLECTION)
-    .doc(channelId)
-    .collection(VIDEOS_SUBCOLLECTION)
-    .get();
+  const snapshot = await videosCollection(db, channelId).get();
   return snapshot.docs.map((doc) => doc.data() as Video);
 }
 
@@ -118,13 +111,21 @@ export async function getChannelVideos(channelId: string): Promise<Video[]> {
  */
 export async function getVideoCount(channelId: string): Promise<number> {
   const db = getDb();
-  const snapshot = await db
-    .collection(CHANNELS_COLLECTION)
-    .doc(channelId)
-    .collection(VIDEOS_SUBCOLLECTION)
-    .count()
-    .get();
+  const snapshot = await videosCollection(db, channelId).count().get();
   return snapshot.data().count;
+}
+
+export async function getThumbnailCount(channelId: string): Promise<number> {
+  const snapshot = await videosCollection(getDb(), channelId)
+    .where('thumbnailStoragePath', '!=', '').count().get();
+  return snapshot.data().count;
+}
+
+export async function getVideosByIds(channelId: string, videoIds: string[]): Promise<Video[]> {
+  if (videoIds.length === 0) return [];
+  const db = getDb();
+  const documents = await db.getAll(...videoIds.map((id) => videoDoc(db, channelId, id)));
+  return documents.filter((document) => document.exists).map((document) => document.data() as Video);
 }
 
 // ===== Progress Tracking =====
@@ -225,9 +226,7 @@ export async function getExistingVideoIds(channelId: string, videoIds: string[])
   const BATCH_SIZE = 100;
   for (let i = 0; i < videoIds.length; i += BATCH_SIZE) {
     const batch = videoIds.slice(i, i + BATCH_SIZE);
-    const refs = batch.map((id) =>
-      db.collection(CHANNELS_COLLECTION).doc(channelId).collection(VIDEOS_SUBCOLLECTION).doc(id)
-    );
+    const refs = batch.map((id) => videoDoc(db, channelId, id));
 
     const docs = await db.getAll(...refs);
     for (const doc of docs) {
@@ -263,12 +262,7 @@ export async function updateChannelStats(
  */
 export async function getAllVideoIdsForChannel(channelId: string): Promise<string[]> {
   const db = getDb();
-  const snapshot = await db
-    .collection(CHANNELS_COLLECTION)
-    .doc(channelId)
-    .collection(VIDEOS_SUBCOLLECTION)
-    .select()
-    .get();
+  const snapshot = await videosCollection(db, channelId).select().get();
   return snapshot.docs.map((doc) => doc.id);
 }
 
@@ -296,11 +290,7 @@ export async function updateVideoStatsBatch(
     const batch = db.batch();
 
     for (const update of chunk) {
-      const ref = db
-        .collection(CHANNELS_COLLECTION)
-        .doc(channelId)
-        .collection(VIDEOS_SUBCOLLECTION)
-        .doc(update.videoId);
+      const ref = videoDoc(db, channelId, update.videoId);
       batch.set(ref, {
         viewCount: update.viewCount,
         likeCount: update.likeCount,

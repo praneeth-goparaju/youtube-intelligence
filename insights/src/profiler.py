@@ -65,23 +65,28 @@ def is_significant(all_rate: float, top_rate: float, threshold: float = 0.05) ->
     return abs(top_rate - all_rate) > threshold
 
 
-def compute_recency_weight(published_at: str, half_life_days: float = 365.0) -> float:
+def compute_recency_weight(published_at: str | datetime, half_life_days: float = 365.0) -> float:
     """Compute exponential decay weight based on publish date.
 
     Args:
-        published_at: ISO 8601 date string.
+        published_at: ISO 8601 date string or Firestore datetime.
         half_life_days: Days for the weight to halve (default 365).
 
     Returns:
         Weight between 0 and 1 (1.0 = just published, 0.5 = one half-life ago).
     """
     try:
-        if isinstance(published_at, str):
+        if isinstance(published_at, datetime):
+            pub_date = published_at
+        elif isinstance(published_at, str):
             # Handle both Z and +00:00 suffixes
             dt_str = published_at.replace("Z", "+00:00")
             pub_date = datetime.fromisoformat(dt_str)
         else:
-            return 1.0  # Default weight if not a string
+            return 1.0
+
+        if pub_date.tzinfo is None:
+            pub_date = pub_date.replace(tzinfo=timezone.utc)
 
         now = datetime.now(timezone.utc)
         days_ago = (now - pub_date).total_seconds() / 86400.0
@@ -316,6 +321,9 @@ def _collect_weights(analyses: List[Dict], weights: List[float]) -> Dict[str, Li
 
 def _traverse(obj: Any, prefix: str, collected: Dict[str, List]):
     """Recursively traverse analysis dict and collect leaf values."""
+    if prefix == "hooks.powerWords" and isinstance(obj, (str, list)):
+        words = obj.split(",") if isinstance(obj, str) else obj
+        obj = list(dict.fromkeys(word.strip().casefold() for word in words if isinstance(word, str) and word.strip()))
     if isinstance(obj, dict):
         for key, value in obj.items():
             if not key or key in SKIP_FIELDS:
@@ -437,7 +445,7 @@ def _list_stats(all_vals: List[List], top_vals: List[List]) -> Dict:
     # Item frequency for string items
     all_items = [item for sublist in all_vals for item in sublist if isinstance(item, str)]
 
-    if all_items and len(set(all_items)) <= 50:
+    if all_items:
         top_items = [item for sublist in top_vals for item in sublist if isinstance(item, str)]
         all_total = len(all_vals)  # Number of videos, not items
         top_total = len(top_vals)

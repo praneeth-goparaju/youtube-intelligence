@@ -2,13 +2,14 @@
 
 from typing import Optional, Dict, Any, List
 import firebase_admin
-from firebase_admin import credentials, firestore, storage
+from firebase_admin import firestore, storage
 from google.cloud.firestore_v1 import FieldFilter
 
 from .config import config
 
 # shared module path is set up by config.py (imported above)
 from shared.constants import COLLECTION_BATCH_JOBS
+from shared.firebase_utils import get_firebase_credentials
 
 
 _app: Optional[firebase_admin.App] = None
@@ -23,15 +24,7 @@ def initialize_firebase() -> None:
     if _app is not None:
         return
 
-    cred = credentials.Certificate(
-        {
-            "type": "service_account",
-            "project_id": config.FIREBASE_PROJECT_ID,
-            "client_email": config.FIREBASE_CLIENT_EMAIL,
-            "private_key": config.FIREBASE_PRIVATE_KEY,
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    )
+    cred = get_firebase_credentials(config)
 
     _app = firebase_admin.initialize_app(cred, {"storageBucket": config.FIREBASE_STORAGE_BUCKET})
 
@@ -288,6 +281,12 @@ def get_latest_batch_job(analysis_type: str, state: Optional[str] = None) -> Opt
     if docs:
         return {"id": docs[0].id, **docs[0].to_dict()}
     return None
+
+
+def get_unimported_batch_job(analysis_type: str) -> Optional[Dict[str, Any]]:
+    """Find the oldest succeeded job with unfinished result processing."""
+    jobs = get_batch_jobs_by_state("JOB_STATE_SUCCEEDED", analysis_type)
+    return next((job for job in reversed(jobs) if not job.get("importedAt")), None)
 
 
 def list_all_batch_jobs(limit: int = 20) -> List[Dict[str, Any]]:

@@ -4,10 +4,14 @@ This module provides common Firebase initialization and access patterns
 used across all phases.
 """
 
+import logging
 import threading
 from typing import Optional, Dict, Any, List
 import firebase_admin
 from firebase_admin import credentials, firestore
+
+
+logger = logging.getLogger(__name__)
 
 
 # Global state for Firebase singleton
@@ -75,7 +79,7 @@ def initialize_firebase_app(config, options: Optional[Dict[str, Any]] = None) ->
             _app = firebase_admin.get_app()
             _db = firestore.client()
         except Exception as e:
-            print(f"Error initializing Firebase: {e}")
+            logger.error(f"Error initializing Firebase: {e}")
             raise RuntimeError(f"Failed to initialize Firebase: {e}")
 
     return _app
@@ -112,7 +116,7 @@ def fetch_document(collection: str, doc_id: str) -> Optional[Dict[str, Any]]:
             return {"id": doc.id, **doc.to_dict()}
         return None
     except Exception as e:
-        print(f"Error fetching document {collection}/{doc_id}: {e}")
+        logger.error(f"Error fetching document {collection}/{doc_id}: {e}")
         return None
 
 
@@ -134,7 +138,7 @@ def fetch_collection(collection: str, limit: Optional[int] = None) -> List[Dict[
         docs = query.stream()
         return [{"id": doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
-        print(f"Error fetching collection {collection}: {e}")
+        logger.error(f"Error fetching collection {collection}: {e}")
         return []
 
 
@@ -160,7 +164,7 @@ def fetch_subcollection(
         docs = query.stream()
         return [{"id": doc.id, **doc.to_dict()} for doc in docs]
     except Exception as e:
-        print(f"Error fetching subcollection {parent_collection}/{parent_id}/{subcollection}: {e}")
+        logger.error(f"Error fetching subcollection {parent_collection}/{parent_id}/{subcollection}: {e}")
         return []
 
 
@@ -181,5 +185,5 @@ def save_document(collection: str, doc_id: str, data: Dict[str, Any], merge: boo
         db.collection(collection).document(doc_id).set(data, merge=merge)
         return True
     except Exception as e:
-        print(f"Error saving document {collection}/{doc_id}: {e}")
+        logger.error(f"Error saving document {collection}/{doc_id}: {e}")
         return False

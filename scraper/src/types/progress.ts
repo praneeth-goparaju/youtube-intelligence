@@ -21,6 +21,9 @@ export interface ScrapeProgress {
   // Resume Point
   lastProcessedVideoId: string | null;
   lastPlaylistPageToken: string | null;
+  // The newest playlist item at the end of a fully successful scan.
+  // Missing on older records, which need one full scan to repair partial work.
+  lastCompletedPlaylistVideoId?: string | null;
 
   // Quota Tracking (for resuming within same day)
   quotaUsed?: number;

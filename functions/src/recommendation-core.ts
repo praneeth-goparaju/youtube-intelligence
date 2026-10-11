@@ -25,6 +25,10 @@ import {
   DEFAULT_POSTING,
   PRODUCTION_TOOLKIT_TEMPLATES,
 } from './templates';
+import {
+  isRecord, isStringArray, isTitles, isThumbnail, isPosting, isPrediction,
+  isProduction, isOptimalTiming, parseSection,
+} from './response-validation';
 
 // ============================================
 // Input Sanitization
@@ -128,7 +132,7 @@ export function buildContext(insights: Insights): string {
     }
   }
 
-  if (insights.timing?.bestTimes?.optimal) {
+  if (isOptimalTiming(insights.timing?.bestTimes?.optimal)) {
     const optimal = insights.timing.bestTimes.optimal;
     parts.push(`\nOPTIMAL POSTING: ${optimal.day} at ${optimal.hourIST}:00 IST (${optimal.multiplier.toFixed(1)}x performance)`);
   }
@@ -315,27 +319,43 @@ Respond ONLY with valid JSON. No markdown, no explanation, no wrapping.`;
 /**
  * Validate and complete tag recommendations, filling missing fields with defaults.
  */
-export function validateTags(tags: Partial<TagRecommendations> | undefined, type: ContentType): TagRecommendations {
+export function validateTags(tags: unknown, type: ContentType): TagRecommendations {
   const defaults = DEFAULT_TAGS[type];
+  if (tags !== undefined && !isRecord(tags)) throw new Error('Invalid tags in AI response');
+  const values = tags || {};
+  return selectTags({
+    primary: parseSection(values.primary, defaults.primary || [], isStringArray, 'primary tags'),
+    secondary: parseSection(values.secondary, defaults.secondary || [], isStringArray, 'secondary tags'),
+    telugu: parseSection(values.telugu, defaults.telugu || [], isStringArray, 'Telugu tags'),
+    longtail: parseSection(values.longtail, defaults.longtail || [], isStringArray, 'longtail tags'),
+    brand: parseSection(values.brand, [], isStringArray, 'brand tags'),
+  });
+}
 
-  const primary = tags?.primary || defaults.primary || [];
-  const secondary = tags?.secondary || defaults.secondary || [];
-  const telugu = tags?.telugu || defaults.telugu || [];
-  const longtail = tags?.longtail || defaults.longtail || [];
-  const brand = tags?.brand || [];
+type TagGroups = Pick<TagRecommendations, 'primary' | 'secondary' | 'telugu' | 'longtail' | 'brand'>;
 
-  const allTags = [...primary, ...secondary, ...telugu, ...longtail, ...brand];
+function selectTags(groups: TagGroups): TagRecommendations {
+  const selected: TagGroups = { primary: [], secondary: [], telugu: [], longtail: [], brand: [] };
+  const seen = new Set<string>();
+  let remaining = 500;
+  for (const group of ['primary', 'secondary', 'telugu', 'longtail', 'brand'] as const) {
+    for (const value of groups[group]) {
+      const tag = value.trim();
+      const key = tag.toLocaleLowerCase();
+      const length = tag.length + (seen.size ? 2 : 0);
+      if (!tag || seen.has(key) || length > remaining) continue;
+      selected[group].push(tag);
+      seen.add(key);
+      remaining -= length;
+    }
+  }
+  const allTags = [...selected.primary, ...selected.secondary, ...selected.telugu, ...selected.longtail, ...selected.brand];
   const fullTagString = allTags.join(', ');
-
   return {
-    primary,
-    secondary,
-    telugu,
-    longtail,
-    brand,
+    ...selected,
     fullTagString,
     characterCount: fullTagString.length,
-    utilizationPercent: Math.min(100, (fullTagString.length / 500) * 100),
+    utilizationPercent: (fullTagString.length / 500) * 100,
   };
 }
 
@@ -343,7 +363,7 @@ export function validateTags(tags: Partial<TagRecommendations> | undefined, type
  * Get posting recommendation from insights or defaults.
  */
 export function getPostingRecommendation(insights: Insights): PostingRecommendation {
-  if (insights.timing?.bestTimes?.optimal) {
+  if (isOptimalTiming(insights.timing?.bestTimes?.optimal)) {
     const optimal = insights.timing.bestTimes.optimal;
     const byDay = insights.timing.bestTimes.byDayOfWeek || [];
 
@@ -494,19 +514,7 @@ export function generateTagsFromTemplates(topic: string, type: ContentType): Tag
     ...(defaults.longtail || []),
   ];
 
-  const allTags = [...primary, ...secondary, ...telugu, ...longtail];
-  const fullTagString = allTags.join(', ');
-
-  return {
-    primary,
-    secondary,
-    telugu,
-    longtail,
-    brand: [],
-    fullTagString,
-    characterCount: fullTagString.length,
-    utilizationPercent: Math.min(100, (fullTagString.length / 500) * 100),
-  };
+  return selectTags({ primary, secondary, telugu, longtail, brand: [] });
 }
 
 /**
@@ -556,7 +564,7 @@ export function buildIdeasContext(insights: Insights): string {
   if (insights.contentGaps?.keywordGaps?.highValueKeywords) {
     parts.push('\nHIGH VALUE KEYWORDS:');
     for (const kw of insights.contentGaps.keywordGaps.highValueKeywords.slice(0, 15)) {
-      parts.push(`  - "${kw.keyword}" (${kw.viewsMultiplier.toFixed(1)}x views, used ${kw.usageCount} times, ${(kw.usageRate * 100).toFixed(1)}% usage)`);
+      parts.push(`  - "${kw.keyword}" (${kw.viewsMultiplier.toFixed(1)}x views, used ${kw.usageCount} times, ${kw.usageRate.toFixed(1)}% usage)`);
     }
   }
 
@@ -664,7 +672,7 @@ export function generateIdeasFromTemplates(
       ideas.push({
         topic: kw.keyword,
         angle: `High-value keyword with ${kw.viewsMultiplier.toFixed(1)}x view multiplier`,
-        whyItWorks: `Keyword "${kw.keyword}" drives ${kw.viewsMultiplier.toFixed(1)}x more views but is only used in ${(kw.usageRate * 100).toFixed(0)}% of videos.`,
+        whyItWorks: `Keyword "${kw.keyword}" drives ${kw.viewsMultiplier.toFixed(1)}x more views but is only used in ${kw.usageRate.toFixed(0)}% of videos.`,
         opportunityScore: Math.min(100, kw.viewsMultiplier * 20),
         suggestedType: type || 'recipe',
         keywords: [kw.keyword, ...topKeywords.filter((k) => k !== kw.keyword).slice(0, 2)],
@@ -679,22 +687,28 @@ export function generateIdeasFromTemplates(
  * Validate and fill missing fields from an AI-parsed response using template defaults.
  */
 export function validateAndFillResponse(
-  parsed: Partial<RecommendationResponse>,
+  parsed: unknown,
   topic: string,
   type: ContentType,
   insights: Insights,
   insightsVersion: string | null,
   modelUsed: string
 ): RecommendationResponse {
+  if (!isRecord(parsed)) throw new Error('AI response must be a JSON object');
+  const parsedTags = parsed.tags;
+  const hasContent = ['titles', 'thumbnail', 'prediction', 'production'].some((field) => parsed[field] !== undefined) ||
+    (isRecord(parsedTags) && ['primary', 'secondary', 'telugu', 'longtail', 'brand'].some((field) =>
+      isStringArray(parsedTags[field]) && parsedTags[field].length > 0));
+  if (!hasContent) throw new Error('AI response contains no recommendation content');
   const template = generateFromTemplates(topic, type, undefined, 'Telugu audience', insights, insightsVersion);
 
   return {
-    titles: parsed.titles || template.titles,
-    thumbnail: parsed.thumbnail || template.thumbnail,
+    titles: parseSection(parsed.titles, template.titles, isTitles, 'titles'),
+    thumbnail: parseSection(parsed.thumbnail, template.thumbnail, isThumbnail, 'thumbnail'),
     tags: validateTags(parsed.tags, type),
-    posting: parsed.posting || template.posting,
-    prediction: parsed.prediction || template.prediction,
-    production: parsed.production || template.production,
+    posting: parseSection(parsed.posting, template.posting, isPosting, 'posting'),
+    prediction: parseSection(parsed.prediction, template.prediction, isPrediction, 'prediction'),
+    production: parseSection(parsed.production, template.production, isProduction, 'production'),
     metadata: {
       generatedAt: new Date().toISOString(),
       modelUsed,

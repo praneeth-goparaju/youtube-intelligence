@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDuration, formatDuration, isShortVideo } from '../../src/utils/duration.js';
+import { parseDuration, formatDuration, isShortVideoDetailed } from '../../src/utils/duration.js';
 
 describe('parseDuration', () => {
   it('should parse minutes and seconds', () => {
@@ -53,16 +53,22 @@ describe('formatDuration', () => {
   });
 });
 
-describe('isShortVideo', () => {
-  it('should return true for videos <= 60 seconds', () => {
-    expect(isShortVideo(60)).toBe(true);
-    expect(isShortVideo(30)).toBe(true);
-    expect(isShortVideo(1)).toBe(true);
+describe('isShortVideoDetailed', () => {
+  const base = { durationSeconds: 120, title: 'Recipe #Shorts', description: '', publishedAt: new Date('2025-01-01T00:00:00Z'), videoId: 'abcdefghijk' };
+  it.each([61, 120, 180])('recognizes explicit Shorts metadata for an eligible %i-second upload', (durationSeconds) => {
+    expect(isShortVideoDetailed({ ...base, durationSeconds })).toMatchObject({ isShort: true, confidence: 'medium' });
   });
-
-  it('should return false for videos > 60 seconds', () => {
-    expect(isShortVideo(61)).toBe(false);
-    expect(isShortVideo(120)).toBe(false);
-    expect(isShortVideo(3600)).toBe(false);
+  it('does not classify a pre-expansion two-minute video as a Short', () => {
+    expect(isShortVideoDetailed({ ...base, publishedAt: new Date('2024-01-01T00:00:00Z') }).isShort).toBe(false);
+  });
+  it('rejects a video longer than three minutes', () => {
+    expect(isShortVideoDetailed({ ...base, durationSeconds: 181 }).isShort).toBe(false);
+  });
+  it.each([0, 10, 45, 120])('does not infer Shorts solely from a %i-second duration', (durationSeconds) => {
+    expect(isShortVideoDetailed({ ...base, title: 'Recipe', durationSeconds })).toMatchObject({ isShort: false, confidence: 'low' });
+  });
+  it('accepts a link to the video itself but not a link to somebody else’s Short', () => {
+    expect(isShortVideoDetailed({ ...base, title: 'Recipe', description: 'https://www.youtube.com/shorts/abcdefghijk' }).isShort).toBe(true);
+    expect(isShortVideoDetailed({ ...base, title: 'Recipe', description: 'https://www.youtube.com/shorts/other-video' }).isShort).toBe(false);
   });
 });

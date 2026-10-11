@@ -17,6 +17,8 @@ import type {
 
 import { getAllInsights } from './firebase';
 import { generateWithGemini } from './gemini';
+import { parseIdeas } from './response-validation';
+import { GEMINI_MODEL } from './gemini-client';
 import {
   buildContext,
   buildPrompt,
@@ -27,8 +29,6 @@ import {
   generateFromTemplates,
   getPostingRecommendation,
 } from './recommendation-core';
-
-const GEMINI_MODEL = 'gemini-2.5-flash';
 
 /**
  * Main recommendation engine class
@@ -98,9 +98,7 @@ export class RecommendationEngine {
         const context = buildIdeasContext(this.insights);
         const prompt = buildIdeasPrompt(type, context);
         const responseText = await generateWithGemini(prompt);
-        const parsed = JSON.parse(responseText);
-        ideas = parsed.ideas || [];
-        if (ideas.length === 0) throw new Error('No ideas in AI response');
+        ideas = parseIdeas(JSON.parse(responseText), type);
       } else {
         ideas = generateIdeasFromTemplates(type, this.insights);
         fallbackUsed = true;

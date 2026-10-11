@@ -23,7 +23,19 @@ python3 -m src.main
 # Generate specific insight type
 python3 -m src.main --type profiles
 python3 -m src.main --type gaps
+
+# Rebuild recommender documents from saved profiles
+python3 -m src.main --type bridge
 ```
+
+`--type bridge` loads the saved content profiles and content gaps from Firestore.
+It stops without writing when no profiles are available. Use `--dry-run` to save
+local output files without updating Firestore. With `--channel`, the command
+builds temporary profiles for that channel and writes only local files.
+
+Both `--type all` and `--type gaps` publish the same `contentGaps` format, including
+top-level opportunities, saturated topics, keyword analysis, and format analysis.
+Empty datasets do not replace existing insights.
 
 ## Architecture
 
