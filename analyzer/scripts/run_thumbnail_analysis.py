@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Run thumbnail analysis on all videos."""
 
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import validate_config, Config
+from src.config import Config, validate_config
 from src.firebase_client import initialize_firebase
 from src.gemini_client import test_connection
 from src.processors.batch import BatchProcessor

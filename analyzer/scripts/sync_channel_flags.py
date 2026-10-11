@@ -19,8 +19,8 @@ from pathlib import Path
 # Add parent to path so we can import src
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import validate_config, Config
-from src.firebase_client import initialize_firebase, get_db
+from src.config import Config, validate_config
+from src.firebase_client import get_db, initialize_firebase
 
 
 def extract_handle(url: str) -> str:
@@ -52,7 +52,7 @@ def load_csv(csv_path: str) -> list:
 
         for row in reader:
             # Case-insensitive column access
-            def col(name):
+            def col(name, row=row):
                 key = lower_map.get(name.lower(), name)
                 return (row.get(key, "") or "").strip()
 

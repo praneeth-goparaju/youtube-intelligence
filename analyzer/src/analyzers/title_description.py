@@ -6,13 +6,13 @@ Merges title and description into a single API call for:
 - Same output quality for title fields, plus lean description insights
 """
 
-from typing import Dict, Any, Optional
+from typing import Any
 
-from ..gemini_client import analyze_text, GeminiResponseError
-from ..firebase_client import save_analysis, has_analysis
-from ..prompts import TITLE_DESCRIPTION_ANALYSIS_PROMPT, build_title_description_input
 from ..analysis_metadata import stamp_analysis_metadata
-from .local_text_features import extract_local_features, deep_merge
+from ..firebase_client import has_analysis, save_analysis
+from ..gemini_client import GeminiResponseError, analyze_text
+from ..prompts import TITLE_DESCRIPTION_ANALYSIS_PROMPT, build_title_description_input
+from .local_text_features import deep_merge, extract_local_features
 
 
 class TitleDescriptionAnalyzer:
@@ -22,7 +22,7 @@ class TitleDescriptionAnalyzer:
 
     def analyze(
         self, channel_id: str, video_id: str, title: str, description: str, force: bool = False
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Analyze a video title and description together.
 

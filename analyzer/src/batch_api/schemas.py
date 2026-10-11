@@ -16,9 +16,7 @@ use plain str (comma-separated) to minimize states. Nested List[Object] types
 (segments, allKeywords) are removed entirely for the same reason.
 """
 
-from typing import List
 from pydantic import BaseModel
-
 
 # =============================================================================
 # Thumbnail Analysis Schema
@@ -28,9 +26,9 @@ from pydantic import BaseModel
 class ThumbnailScene(BaseModel):
     settingType: str
     location: str
-    backgroundElements: List[str]
+    backgroundElements: list[str]
     timeOfDay: str
-    props: List[str]
+    props: list[str]
     thumbnailStyle: str
     contentCategory: str
 
@@ -41,7 +39,7 @@ class ThumbnailComposition(BaseModel):
     visualBalance: str
     negativeSpace: str
     complexity: str
-    focalPoint: List[str]
+    focalPoint: list[str]
     depthOfField: str
 
 
@@ -82,15 +80,15 @@ class ThumbnailTextElements(BaseModel):
     hasText: bool
     textCount: int
     primaryText: ThumbnailPrimaryText
-    languages: List[str]
+    languages: list[str]
     hasTeluguScript: bool
     hasEnglishText: bool
     hasNumbers: bool
     numberValue: str
     numberType: str
     hasEmoji: bool
-    emojiList: List[str]
-    textPurpose: List[str]
+    emojiList: list[str]
+    textPurpose: list[str]
     totalTextCoverage: float
 
 
@@ -101,7 +99,7 @@ class ThumbnailDominantColor(BaseModel):
 
 
 class ThumbnailColors(BaseModel):
-    dominantColors: List[ThumbnailDominantColor]
+    dominantColors: list[ThumbnailDominantColor]
     palette: str
     mood: str
     contrast: str
@@ -125,7 +123,7 @@ class ThumbnailFood(BaseModel):
     steam: bool
     sizzle: bool
     garnished: bool
-    garnishes: List[str]
+    garnishes: list[str]
     freshness: str
     appetiteAppeal: int
     colorVibrancy: str
@@ -182,8 +180,8 @@ class ThumbnailPsychology(BaseModel):
     relatability: bool
     primaryEmotion: str
     emotionalIntensity: str
-    clickMotivation: List[str]
-    targetAudience: List[str]
+    clickMotivation: list[str]
+    targetAudience: list[str]
 
 
 class ThumbnailTechnicalQuality(BaseModel):

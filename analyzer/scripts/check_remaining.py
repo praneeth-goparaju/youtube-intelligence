@@ -1,7 +1,7 @@
 """Check remaining unanalyzed videos per channel and category."""
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 # Set up paths exactly like src/config.py does
@@ -12,7 +12,7 @@ sys.path.insert(0, str(_project_root))
 sys.path.insert(0, str(_analyzer_dir))
 
 from src.config import config
-from src.firebase_client import initialize_firebase, get_db
+from src.firebase_client import get_db, initialize_firebase
 
 CHANNELS_JSON = _project_root / "config" / "channels.json"
 

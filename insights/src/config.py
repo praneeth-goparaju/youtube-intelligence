@@ -6,7 +6,7 @@ from pathlib import Path
 # Add shared module to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from shared.config import load_env_file, BaseFirebaseConfig
+from shared.config import BaseFirebaseConfig, load_env_file
 
 # Load .env from project root
 PROJECT_ROOT = load_env_file(__file__)

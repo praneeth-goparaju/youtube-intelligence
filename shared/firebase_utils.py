@@ -6,17 +6,17 @@ used across all phases.
 
 import logging
 import threading
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 import firebase_admin
 from firebase_admin import credentials, firestore
-
 
 logger = logging.getLogger(__name__)
 
 
 # Global state for Firebase singleton
-_app: Optional[firebase_admin.App] = None
-_db: Optional[firestore.Client] = None
+_app: firebase_admin.App | None = None
+_db: firestore.Client | None = None
 _init_lock = threading.Lock()
 
 
@@ -40,7 +40,7 @@ def get_firebase_credentials(config) -> credentials.Certificate:
     )
 
 
-def initialize_firebase_app(config, options: Optional[Dict[str, Any]] = None) -> firebase_admin.App:
+def initialize_firebase_app(config, options: dict[str, Any] | None = None) -> firebase_admin.App:
     """Initialize Firebase Admin SDK.
 
     Thread-safe singleton: uses double-checked locking to ensure only one
@@ -80,7 +80,7 @@ def initialize_firebase_app(config, options: Optional[Dict[str, Any]] = None) ->
             _db = firestore.client()
         except Exception as e:
             logger.error(f"Error initializing Firebase: {e}")
-            raise RuntimeError(f"Failed to initialize Firebase: {e}")
+            raise RuntimeError(f"Failed to initialize Firebase: {e}") from e
 
     return _app
 
@@ -99,7 +99,7 @@ def get_firestore_client() -> firestore.Client:
     return _db
 
 
-def fetch_document(collection: str, doc_id: str) -> Optional[Dict[str, Any]]:
+def fetch_document(collection: str, doc_id: str) -> dict[str, Any] | None:
     """Fetch a single document from Firestore.
 
     Args:
@@ -120,7 +120,7 @@ def fetch_document(collection: str, doc_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def fetch_collection(collection: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+def fetch_collection(collection: str, limit: int | None = None) -> list[dict[str, Any]]:
     """Fetch all documents from a collection.
 
     Args:
@@ -143,8 +143,8 @@ def fetch_collection(collection: str, limit: Optional[int] = None) -> List[Dict[
 
 
 def fetch_subcollection(
-    parent_collection: str, parent_id: str, subcollection: str, limit: Optional[int] = None
-) -> List[Dict[str, Any]]:
+    parent_collection: str, parent_id: str, subcollection: str, limit: int | None = None
+) -> list[dict[str, Any]]:
     """Fetch documents from a subcollection.
 
     Args:
@@ -168,7 +168,7 @@ def fetch_subcollection(
         return []
 
 
-def save_document(collection: str, doc_id: str, data: Dict[str, Any], merge: bool = True) -> bool:
+def save_document(collection: str, doc_id: str, data: dict[str, Any], merge: bool = True) -> bool:
     """Save a document to Firestore.
 
     Args:

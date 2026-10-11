@@ -9,7 +9,6 @@ import pytest
 from analyzer.src import firebase_client, main
 from analyzer.src.batch_api import client, import_results, prepare, submit
 
-
 CHANNEL_ID = "UC" + "a" * 22
 
 

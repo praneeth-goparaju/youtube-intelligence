@@ -1,18 +1,19 @@
 """Gemini API client wrapper."""
 
 import atexit
-import time
+import io
 import json
-from typing import Optional, Dict, Any, Union
+import time
+from typing import Any
+
 from google import genai
 from google.genai import errors, types
 from PIL import Image
-import io
-
-from .config import config, logger
 
 # shared module path is set up by config.py (imported above)
 from shared.gemini_utils import parse_json_response
+
+from .config import config, logger
 
 
 class GeminiAPIError(Exception):
@@ -33,7 +34,7 @@ class GeminiResponseError(GeminiAPIError):
     pass
 
 
-_client: Optional[genai.Client] = None
+_client: genai.Client | None = None
 
 
 def get_client() -> genai.Client:
@@ -58,7 +59,7 @@ def close_client() -> None:
 atexit.register(close_client)
 
 
-def _generation_config(analysis_type: Optional[str] = None) -> types.GenerateContentConfig:
+def _generation_config(analysis_type: str | None = None) -> types.GenerateContentConfig:
     """Keep the same sampling settings and structured schemas for every request."""
     generation_config = types.GenerateContentConfig(
         temperature=0.1,
@@ -81,13 +82,13 @@ def _get_schema_config(analysis_type: str):
     Returns:
         Tuple of (system_instruction_string, pydantic_model_class_or_None).
     """
-    from .prompts import (
-        THUMBNAIL_SYSTEM_INSTRUCTION,
-        TITLE_DESC_SYSTEM_INSTRUCTION,
-    )
     from .batch_api.schemas import (
         ThumbnailAnalysisSchema,
         TitleDescriptionAnalysisSchema,
+    )
+    from .prompts import (
+        THUMBNAIL_SYSTEM_INSTRUCTION,
+        TITLE_DESC_SYSTEM_INSTRUCTION,
     )
 
     if analysis_type == "thumbnail":
@@ -97,7 +98,7 @@ def _get_schema_config(analysis_type: str):
     return None, None
 
 
-def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
+def _execute_with_retry(generate_func, retries: int = 3) -> dict[str, Any]:
     """Execute a Gemini generation with retry logic.
 
     Args:
@@ -137,7 +138,7 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
         except json.JSONDecodeError as e:
             # JSON parsing error - don't retry, it won't help
             logger.error(f"JSON parsing error: {e}")
-            raise GeminiResponseError(f"Failed to parse JSON response: {e}")
+            raise GeminiResponseError(f"Failed to parse JSON response: {e}") from e
 
         except errors.APIError as e:
             if e.code == 400:
@@ -169,7 +170,7 @@ def _execute_with_retry(generate_func, retries: int = 3) -> Dict[str, Any]:
     raise last_error
 
 
-def analyze_text(prompt: str, text: str, retries: int = 3, analysis_type: Optional[str] = None) -> Dict[str, Any]:
+def analyze_text(prompt: str, text: str, retries: int = 3, analysis_type: str | None = None) -> dict[str, Any]:
     """
     Analyze text using Gemini.
 
@@ -202,8 +203,8 @@ def analyze_text(prompt: str, text: str, retries: int = 3, analysis_type: Option
 
 
 def analyze_image(
-    prompt: str, image_data: Union[bytes, Image.Image], retries: int = 3, analysis_type: Optional[str] = None
-) -> Dict[str, Any]:
+    prompt: str, image_data: bytes | Image.Image, retries: int = 3, analysis_type: str | None = None
+) -> dict[str, Any]:
     """
     Analyze an image using Gemini Vision.
 

@@ -7,15 +7,21 @@ with the proper request format for thumbnail and title_description analysis.
 import json
 import os
 from datetime import UTC, datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Any
+
+from shared.constants import (
+    ANALYSIS_TYPE_THUMBNAIL,
+    ANALYSIS_TYPE_TITLE_DESCRIPTION,
+    GEMINI_MODEL,
+)
 
 from ..config import config, logger
 from ..firebase_client import (
-    get_all_channels,
-    get_channel,
-    get_analyzed_video_ids,
-    get_all_channel_videos_for_batch,
     download_thumbnail,
+    get_all_channel_videos_for_batch,
+    get_all_channels,
+    get_analyzed_video_ids,
+    get_channel,
 )
 from ..prompts import (
     THUMBNAIL_SYSTEM_INSTRUCTION,
@@ -26,14 +32,8 @@ from ..prompts import (
 )
 from .schemas import ThumbnailAnalysisSchema, TitleDescriptionAnalysisSchema
 
-from shared.constants import (
-    ANALYSIS_TYPE_THUMBNAIL,
-    ANALYSIS_TYPE_TITLE_DESCRIPTION,
-    GEMINI_MODEL,
-)
 
-
-def _build_thumbnail_request(channel_id: str, video_id: str, image_bytes: bytes) -> Dict[str, Any]:
+def _build_thumbnail_request(channel_id: str, video_id: str, image_bytes: bytes) -> dict[str, Any]:
     """Build a single thumbnail batch request.
 
     Embeds the image as inline base64 data. GCS URIs don't work because the
@@ -71,7 +71,7 @@ def _build_thumbnail_request(channel_id: str, video_id: str, image_bytes: bytes)
     }
 
 
-def _build_title_description_request(channel_id: str, video_id: str, title: str, description: str) -> Dict[str, Any]:
+def _build_title_description_request(channel_id: str, video_id: str, title: str, description: str) -> dict[str, Any]:
     """Build a single title+description batch request."""
     input_text = build_title_description_input(title, description)
     user_prompt = f"{TITLE_DESC_USER_PROMPT}\n\nText to analyze:\n{input_text}"
@@ -92,7 +92,7 @@ def _build_title_description_request(channel_id: str, video_id: str, title: str,
     }
 
 
-def _pydantic_to_schema(model_class) -> Dict[str, Any]:
+def _pydantic_to_schema(model_class) -> dict[str, Any]:
     """Convert a Pydantic model to JSON Schema dict for the Batch API.
 
     The Batch API JSONL format requires a raw JSON Schema dict (not a Pydantic
@@ -107,7 +107,7 @@ def _pydantic_to_schema(model_class) -> Dict[str, Any]:
     return schema
 
 
-def _resolve_refs(node: Any, defs: Dict[str, Any]) -> Any:
+def _resolve_refs(node: Any, defs: dict[str, Any]) -> Any:
     """Recursively resolve all $ref pointers by inlining from $defs."""
     if isinstance(node, dict):
         if "$ref" in node:
@@ -124,9 +124,9 @@ def _resolve_refs(node: Any, defs: Dict[str, Any]) -> Any:
 
 def prepare_batch_requests(
     analysis_type: str,
-    channel_id: Optional[str] = None,
+    channel_id: str | None = None,
     batch_size: int = 50000,
-) -> Tuple[str, int]:
+) -> tuple[str, int]:
     """Prepare a JSONL file with batch requests for unanalyzed videos.
 
     Args:
@@ -232,9 +232,7 @@ def prepare_batch_requests(
     return jsonl_path, request_count
 
 
-def _build_request(
-    analysis_type: str, channel_id: str, video_id: str, video: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+def _build_request(analysis_type: str, channel_id: str, video_id: str, video: dict[str, Any]) -> dict[str, Any] | None:
     """Build a single batch request based on analysis type."""
     if analysis_type == ANALYSIS_TYPE_THUMBNAIL:
         thumbnail_path = video.get("thumbnailStoragePath", "")

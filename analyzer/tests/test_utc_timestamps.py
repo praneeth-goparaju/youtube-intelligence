@@ -11,7 +11,6 @@ from analyzer.src import analysis_metadata
 from analyzer.src.batch_api import import_results, prepare, submit
 from analyzer.src.processors import progress
 
-
 NOW = datetime(2026, 10, 11, 6, 0, 0, 123456, tzinfo=UTC)
 STORED_NOW = "2026-10-11T06:00:00.123456"
 CHANNEL_ID = "UC" + "a" * 22

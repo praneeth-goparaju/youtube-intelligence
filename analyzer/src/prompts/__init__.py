@@ -5,9 +5,9 @@ from .thumbnail_prompt import (
     THUMBNAIL_USER_PROMPT,
 )
 from .title_description_prompt import (
-    TITLE_DESCRIPTION_ANALYSIS_PROMPT,
     TITLE_DESC_SYSTEM_INSTRUCTION,
     TITLE_DESC_USER_PROMPT,
+    TITLE_DESCRIPTION_ANALYSIS_PROMPT,
 )
 
 # Max description length to avoid token limits (shared between sync and batch)

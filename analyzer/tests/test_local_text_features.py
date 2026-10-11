@@ -2,7 +2,7 @@
 
 import pytest
 
-from analyzer.src.analyzers.local_text_features import extract_local_features, deep_merge
+from analyzer.src.analyzers.local_text_features import deep_merge, extract_local_features
 
 
 class TestExtractLocalFeatures:

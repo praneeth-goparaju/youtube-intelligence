@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from .config import validate_config, config, Config
+from .config import Config, config, validate_config
 from .firebase_client import initialize_firebase
 from .gemini_client import test_connection
 from .processors.batch import BatchProcessor, run_all_analysis
@@ -80,10 +80,10 @@ def _run_batch_phase_with_stats(analysis_type: str, args) -> dict | None:
     before preparing new work (avoids duplicate submissions).
     """
     from .batch_api import (
+        import_batch_results,
+        poll_and_update,
         prepare_batch_requests,
         submit_batch,
-        poll_and_update,
-        import_batch_results,
     )
     from .firebase_client import get_batch_job, get_latest_batch_job, get_unimported_batch_job
 
@@ -149,10 +149,10 @@ def _run_batch_phase(phase: str, analysis_type: str, args):
         return _run_batch_phase_with_stats(analysis_type, args)
 
     from .batch_api import (
+        import_batch_results,
+        poll_and_update,
         prepare_batch_requests,
         submit_batch,
-        poll_and_update,
-        import_batch_results,
     )
 
     if phase == "prepare":
@@ -164,8 +164,8 @@ def _run_batch_phase(phase: str, analysis_type: str, args):
         return
 
     if phase == "submit":
-        import os
         import glob
+        import os
 
         batch_dir = os.path.join(config.PROJECT_ROOT, "data", "batch")
         pattern = os.path.join(batch_dir, f"batch_{analysis_type}_*.jsonl")
@@ -208,8 +208,8 @@ def _run_batch_phase(phase: str, analysis_type: str, args):
 
 def _show_batch_status():
     """Show status of all batch jobs."""
-    from .firebase_client import list_all_batch_jobs
     from .batch_api.client import list_batch_jobs as list_api_jobs
+    from .firebase_client import list_all_batch_jobs
 
     print("\n" + "=" * 70)
     print("  BATCH JOB STATUS")

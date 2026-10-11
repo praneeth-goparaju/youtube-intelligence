@@ -1,13 +1,13 @@
 """Exercise insights generation with the data shapes produced by the other phases."""
 
+import sys
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-import sys
 
-from google.api_core.datetime_helpers import DatetimeWithNanoseconds
 import pytest
+from google.api_core.datetime_helpers import DatetimeWithNanoseconds
 
 from insights.src import firebase_client, main
 from insights.src.profiler import compute_feature_profile, compute_recency_weight
@@ -147,9 +147,7 @@ def test_power_word_profiles_keep_bounded_frequencies_with_many_distinct_words()
 
 
 def test_firestore_timestamps_receive_the_same_recency_weight_as_strings():
-    old = DatetimeWithNanoseconds.fromtimestamp(
-        (datetime.now(timezone.utc) - timedelta(days=365)).timestamp(), tz=timezone.utc
-    )
+    old = DatetimeWithNanoseconds.fromtimestamp((datetime.now(UTC) - timedelta(days=365)).timestamp(), tz=UTC)
     assert compute_recency_weight(old) == pytest.approx(0.5, abs=0.001)
     assert compute_recency_weight(old) == pytest.approx(compute_recency_weight(old.isoformat()))
 

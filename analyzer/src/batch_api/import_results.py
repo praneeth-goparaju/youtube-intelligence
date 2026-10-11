@@ -8,27 +8,30 @@ import json
 import os
 import re
 from datetime import UTC, datetime
-from typing import Optional, Dict, Any, Tuple, FrozenSet
+from typing import Any
 
+from ..analyzers.local_text_features import deep_merge, extract_local_features
 from ..config import config, logger
 from ..firebase_client import (
-    save_analysis,
-    get_channel_video_texts,
     get_all_channels_unfiltered,
-    get_batch_job as get_batch_job_record,
+    get_channel_video_texts,
     get_unimported_batch_job,
+    save_analysis,
     update_batch_job,
 )
-from ..analyzers.local_text_features import extract_local_features, deep_merge
-
-_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
-from .client import (
-    get_batch_job as get_batch_job_status,
-    download_result_file,
-    _state_str,
+from ..firebase_client import (
+    get_batch_job as get_batch_job_record,
 )
 
+_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 from ..analysis_metadata import stamp_analysis_metadata
+from .client import (
+    _state_str,
+    download_result_file,
+)
+from .client import (
+    get_batch_job as get_batch_job_status,
+)
 
 
 class InvalidBatchResult(ValueError):
@@ -41,8 +44,8 @@ class InvalidBatchResult(ValueError):
 
 def import_batch_results(
     analysis_type: str,
-    job_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    job_name: str | None = None,
+) -> dict[str, Any]:
     """Import results from a completed batch job into Firestore.
 
     Finds the oldest succeeded-but-not-imported job for the analysis type,
@@ -130,7 +133,7 @@ def import_batch_results(
     return stats
 
 
-def _download_results(job, job_record: Dict[str, Any], analysis_type: str) -> Optional[str]:
+def _download_results(job, job_record: dict[str, Any], analysis_type: str) -> str | None:
     """Download result file from a completed batch job."""
     output_dir = os.path.join(config.PROJECT_ROOT, "data", "batch", "results")
     os.makedirs(output_dir, exist_ok=True)
@@ -170,7 +173,7 @@ def _download_results(job, job_record: Dict[str, Any], analysis_type: str) -> Op
     return None
 
 
-def _serialize_response(resp) -> Dict[str, Any]:
+def _serialize_response(resp) -> dict[str, Any]:
     """Serialize a batch response object to dict."""
     if isinstance(resp, dict):
         return resp
@@ -182,9 +185,9 @@ def _serialize_response(resp) -> Dict[str, Any]:
 def _process_result_file(
     file_path: str,
     analysis_type: str,
-    valid_channel_ids: FrozenSet[str],
+    valid_channel_ids: frozenset[str],
     failure_threshold: float = 0.2,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Process a JSONL result file and import each result to Firestore.
 
     Each line in the JSONL is expected to have:
@@ -206,14 +209,14 @@ def _process_result_file(
     }
 
     # Read all lines once (avoids double file read)
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         lines = [line for line in f if line.strip()]
     total_lines = len(lines)
 
     current_channel = None
     # Cache video texts per channel to avoid N+1 Firestore reads
-    video_text_cache: Dict[str, Dict[str, str]] = {}
-    cached_channel: Optional[str] = None
+    video_text_cache: dict[str, dict[str, str]] = {}
+    cached_channel: str | None = None
 
     for line_num, line in enumerate(lines, 1):
         stats["total"] += 1
@@ -279,10 +282,10 @@ def _process_result_file(
 
 
 def _import_single_result(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     analysis_type: str,
-    valid_channel_ids: FrozenSet[str],
-    video_text_cache: Dict[str, Dict[str, str]],
+    valid_channel_ids: frozenset[str],
+    video_text_cache: dict[str, dict[str, str]],
 ) -> bool:
     """Import a single batch result into Firestore.
 
@@ -333,7 +336,7 @@ def _import_single_result(
     return merged_local
 
 
-def _parse_result_key(key: str, analysis_type: str) -> Tuple[str, str]:
+def _parse_result_key(key: str, analysis_type: str) -> tuple[str, str]:
     """Parse a batch result key into channel_id and video_id.
 
     Key format: "{channelId}_{videoId}_{analysisType}"
@@ -361,7 +364,7 @@ def _parse_result_key(key: str, analysis_type: str) -> Tuple[str, str]:
     return "", ""
 
 
-def _extract_analysis_data(response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _extract_analysis_data(response: dict[str, Any]) -> dict[str, Any] | None:
     """Extract analysis JSON from a Gemini batch response.
 
     The response structure from the batch API contains candidates
