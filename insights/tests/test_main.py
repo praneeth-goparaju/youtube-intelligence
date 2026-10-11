@@ -1,13 +1,13 @@
 """Tests for insights main module helper functions."""
 
 from insights.src.main import (
-    get_views_per_subscriber,
-    get_engagement_rate,
-    get_content_type,
-    group_by_content_type,
-    split_top_performers,
-    remove_outliers,
     _extract_description_analysis,
+    get_content_type,
+    get_engagement_rate,
+    get_views_per_subscriber,
+    group_by_content_type,
+    remove_outliers,
+    split_top_performers,
 )
 
 

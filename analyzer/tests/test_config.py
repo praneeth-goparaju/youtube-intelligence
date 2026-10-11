@@ -8,7 +8,7 @@ still populates every field with the expected values.
 # Import analyzer.src.config first: importing it inserts the project root onto sys.path,
 # which makes the top-level `shared` package importable below.
 from analyzer.src.config import Config
-from shared.config import BaseGeminiConfig, BaseFirebaseConfig
+from shared.config import BaseFirebaseConfig, BaseGeminiConfig
 
 
 def _fresh_load():

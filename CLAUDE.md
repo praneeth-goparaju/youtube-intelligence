@@ -181,7 +181,7 @@ API Authentication:
 - **Scraper**: Vitest — `cd scraper && npm test` (tests in `scraper/tests/`)
 - **Analyzer**: pytest — `cd analyzer && python -m pytest tests/` (fixtures in `conftest.py`)
 - **Insights**: pytest — `cd insights && python -m pytest tests/` (fixtures in `conftest.py`)
-- Run all tests, type checks, Python lint and formatting checks, and the insights integration check with `python scripts/verify.py` from the repository root. Install Ruff first with `python -m pip install ruff`.
+- Run all tests, type checks, Python lint and formatting checks, and the insights integration check with `python scripts/verify.py` from the repository root. Install Ruff first with `python -m pip install ruff==0.17.0` (the version CI pins).
 
 ## Lint & typecheck (CI-enforced)
 

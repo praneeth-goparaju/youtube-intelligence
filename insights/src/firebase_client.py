@@ -1,14 +1,15 @@
 """Firebase client for insights module."""
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 import firebase_admin
 from firebase_admin import firestore
 
 from shared.constants import ANALYSIS_TYPE_THUMBNAIL, ANALYSIS_TYPE_TITLE_DESCRIPTION
 from shared.firebase_utils import get_firebase_credentials
-from .config import config
 
+from .config import config
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,8 @@ logger = logging.getLogger(__name__)
 _LEGACY_TITLE_TYPE = "title"
 
 
-_app: Optional[firebase_admin.App] = None
-_db: Optional[firestore.Client] = None
+_app: firebase_admin.App | None = None
+_db: firestore.Client | None = None
 
 
 def initialize_firebase() -> None:
@@ -41,7 +42,7 @@ def initialize_firebase() -> None:
         _db = firestore.client()
     except Exception as e:
         logger.error(f"Error initializing Firebase: {e}")
-        raise RuntimeError(f"Failed to initialize Firebase: {e}")
+        raise RuntimeError(f"Failed to initialize Firebase: {e}") from e
 
 
 def get_db() -> firestore.Client:
@@ -51,7 +52,7 @@ def get_db() -> firestore.Client:
     return _db
 
 
-def get_all_channels() -> List[Dict[str, Any]]:
+def get_all_channels() -> list[dict[str, Any]]:
     """Get all channels.
 
     Returns:
@@ -68,7 +69,7 @@ def get_all_channels() -> List[Dict[str, Any]]:
         raise RuntimeError(f"Failed to fetch channels from Firestore: {e}") from e
 
 
-def get_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
+def get_channel_videos(channel_id: str) -> list[dict[str, Any]]:
     """Get all videos for a channel.
 
     Args:
@@ -90,10 +91,10 @@ def get_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
 
 def _batch_get_analyses_for_channel(
     channel_id: str,
-    video_ids: List[str],
-    analysis_types: List[str],
+    video_ids: list[str],
+    analysis_types: list[str],
     batch_size: int = 500,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Batch-fetch analysis documents for a channel's videos.
 
     Args:
@@ -116,7 +117,7 @@ def _batch_get_analyses_for_channel(
             refs.append(video_ref.collection("analysis").document(atype))
 
     # Fetch in batches
-    results: Dict[str, Dict[str, Any]] = {}
+    results: dict[str, dict[str, Any]] = {}
     for i in range(0, len(refs), batch_size):
         batch_refs = refs[i : i + batch_size]
         snapshots = db.get_all(batch_refs)
@@ -135,7 +136,7 @@ def _batch_get_analyses_for_channel(
     return results
 
 
-def get_all_videos_with_analyses(channel_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_all_videos_with_analyses(channel_id: str | None = None) -> list[dict[str, Any]]:
     """Load videos with both thumbnail and title analyses.
 
     Uses batch reads (db.get_all) instead of per-video document fetches
@@ -223,7 +224,7 @@ def get_all_videos_with_analyses(channel_id: Optional[str] = None) -> List[Dict[
     return all_videos
 
 
-def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
+def save_insights(insight_type: str, data: dict[str, Any]) -> None:
     """Save insights to Firestore."""
     try:
         db = get_db()
@@ -233,7 +234,7 @@ def save_insights(insight_type: str, data: Dict[str, Any]) -> None:
         raise
 
 
-def get_saved_profiles_and_gaps() -> tuple[dict, Optional[dict]]:
+def get_saved_profiles_and_gaps() -> tuple[dict, dict | None]:
     """Read previously generated profiles and gap data for a bridge-only run."""
     profiles = {}
     gaps = None

@@ -6,11 +6,11 @@ without interpretation — the recommender's LLM handles interpretation.
 """
 
 import math
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
 from collections import Counter, defaultdict
-import numpy as np
+from datetime import UTC, datetime
+from typing import Any
 
+import numpy as np
 
 # Metadata fields to skip during profiling
 SKIP_FIELDS = {
@@ -86,9 +86,9 @@ def compute_recency_weight(published_at: str | datetime, half_life_days: float =
             return 1.0
 
         if pub_date.tzinfo is None:
-            pub_date = pub_date.replace(tzinfo=timezone.utc)
+            pub_date = pub_date.replace(tzinfo=UTC)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         days_ago = (now - pub_date).total_seconds() / 86400.0
         if days_ago < 0:
             days_ago = 0
@@ -99,11 +99,11 @@ def compute_recency_weight(published_at: str | datetime, half_life_days: float =
 
 
 def compute_feature_profile(
-    all_analyses: List[Dict],
-    top_analyses: List[Dict],
-    all_weights: Optional[List[float]] = None,
-    top_weights: Optional[List[float]] = None,
-) -> Dict[str, Any]:
+    all_analyses: list[dict],
+    top_analyses: list[dict],
+    all_weights: list[float] | None = None,
+    top_weights: list[float] | None = None,
+) -> dict[str, Any]:
     """
     Compare feature distributions between all and top performing videos.
 
@@ -147,7 +147,7 @@ def compute_feature_profile(
     return profile
 
 
-def compute_timing_profile(videos: List[Dict], get_vps) -> Dict[str, Any]:
+def compute_timing_profile(videos: list[dict], get_vps) -> dict[str, Any]:
     """
     Compute posting time patterns for a group of videos.
 
@@ -209,8 +209,8 @@ def compute_timing_profile(videos: List[Dict], get_vps) -> Dict[str, Any]:
 
 
 def compute_feature_correlations(
-    all_analyses: List[Dict], top_analyses: List[Dict], top_n_features: int = 20, top_n_pairs: int = 10
-) -> List[Dict[str, Any]]:
+    all_analyses: list[dict], top_analyses: list[dict], top_n_features: int = 20, top_n_pairs: int = 10
+) -> list[dict[str, Any]]:
     """Compute pairwise boolean co-occurrence for top-performing features.
 
     Finds the boolean features with the highest lift (top10_rate / all_rate),
@@ -297,7 +297,7 @@ def compute_feature_correlations(
     return pairs[:top_n_pairs]
 
 
-def _collect_values(analyses: List[Dict]) -> Dict[str, List]:
+def _collect_values(analyses: list[dict]) -> dict[str, list]:
     """Collect all values per dot-path key across analyses."""
     collected = defaultdict(list)
     for analysis in analyses:
@@ -305,21 +305,21 @@ def _collect_values(analyses: List[Dict]) -> Dict[str, List]:
     return collected
 
 
-def _collect_weights(analyses: List[Dict], weights: List[float]) -> Dict[str, List[float]]:
+def _collect_weights(analyses: list[dict], weights: list[float]) -> dict[str, list[float]]:
     """Collect weights aligned to each dot-path key.
 
     For each analysis, we record the corresponding weight for every
     leaf value that analysis contributes.
     """
     path_weights = defaultdict(list)
-    for analysis, weight in zip(analyses, weights):
+    for analysis, weight in zip(analyses, weights, strict=False):
         paths = _collect_values([analysis]).keys()
         for path in paths:
             path_weights[path].append(weight)
     return path_weights
 
 
-def _traverse(obj: Any, prefix: str, collected: Dict[str, List]):
+def _traverse(obj: Any, prefix: str, collected: dict[str, list]):
     """Recursively traverse analysis dict and collect leaf values."""
     if prefix == "hooks.powerWords" and isinstance(obj, (str, list)):
         words = obj.split(",") if isinstance(obj, str) else obj
@@ -338,22 +338,22 @@ def _traverse(obj: Any, prefix: str, collected: Dict[str, List]):
 
 
 def _compute_stats(
-    all_values: List,
-    top_values: List,
-    all_weights: Optional[List[float]] = None,
-    top_weights: Optional[List[float]] = None,
-) -> Optional[Dict]:
+    all_values: list,
+    top_values: list,
+    all_weights: list[float] | None = None,
+    top_weights: list[float] | None = None,
+) -> dict | None:
     """Compute appropriate stats based on detected value type."""
     all_clean = [v for v in all_values if v is not None]
     top_clean = [v for v in top_values if v is not None]
 
     # Also filter weights to match clean values
     if all_weights is not None:
-        all_w_clean = [w for v, w in zip(all_values, all_weights) if v is not None]
+        all_w_clean = [w for v, w in zip(all_values, all_weights, strict=False) if v is not None]
     else:
         all_w_clean = None
     if top_weights is not None:
-        top_w_clean = [w for v, w in zip(top_values, top_weights) if v is not None]
+        top_w_clean = [w for v, w in zip(top_values, top_weights, strict=False) if v is not None]
     else:
         top_w_clean = None
 
@@ -374,7 +374,7 @@ def _compute_stats(
     return None
 
 
-def _bool_stats(all_vals: List[bool], top_vals: List[bool]) -> Dict:
+def _bool_stats(all_vals: list[bool], top_vals: list[bool]) -> dict:
     """Boolean feature: rate of True in all vs top 10%."""
     all_rate = sum(1 for v in all_vals if v) / len(all_vals) if all_vals else 0
     top_rate = sum(1 for v in top_vals if v) / len(top_vals) if top_vals else 0
@@ -387,8 +387,8 @@ def _bool_stats(all_vals: List[bool], top_vals: List[bool]) -> Dict:
 
 
 def _numeric_stats(
-    all_vals: List, top_vals: List, all_weights: Optional[List[float]] = None, top_weights: Optional[List[float]] = None
-) -> Dict:
+    all_vals: list, top_vals: list, all_weights: list[float] | None = None, top_weights: list[float] | None = None
+) -> dict:
     """Numeric feature: average in all vs top 10%."""
     if all_weights and len(all_weights) == len(all_vals):
         all_avg = float(np.average(all_vals, weights=all_weights))
@@ -407,7 +407,7 @@ def _numeric_stats(
     }
 
 
-def _categorical_stats(all_vals: List[str], top_vals: List[str]) -> Optional[Dict]:
+def _categorical_stats(all_vals: list[str], top_vals: list[str]) -> dict | None:
     """Categorical feature: value distribution in all vs top 10%.
 
     Skips fields with too many unique values (free text).
@@ -431,7 +431,7 @@ def _categorical_stats(all_vals: List[str], top_vals: List[str]) -> Optional[Dic
     }
 
 
-def _list_stats(all_vals: List[List], top_vals: List[List]) -> Dict:
+def _list_stats(all_vals: list[list], top_vals: list[list]) -> dict:
     """List feature: average length + item frequency for string items."""
     all_avg_len = float(np.mean([len(v) for v in all_vals])) if all_vals else 0
     top_avg_len = float(np.mean([len(v) for v in top_vals])) if top_vals else 0
@@ -465,7 +465,7 @@ def _list_stats(all_vals: List[List], top_vals: List[List]) -> Dict:
     return result
 
 
-def _get_nested(d: Dict, path: str) -> Any:
+def _get_nested(d: dict, path: str) -> Any:
     """Get a value from a nested dict using dot-path notation."""
     keys = path.split(".")
     current = d
@@ -476,7 +476,7 @@ def _get_nested(d: Dict, path: str) -> Any:
     return current
 
 
-def _set_nested(d: Dict, path: str, value: Any):
+def _set_nested(d: dict, path: str, value: Any):
     """Set a value in a nested dict using dot-path notation."""
     keys = path.split(".")
     current = d

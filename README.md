@@ -85,7 +85,7 @@ Each phase has more options — see the README in each directory (`scraper/`, `a
 After installing the project dependencies, run all checks from the repository root:
 
 ```bash
-python -m pip install ruff
+python -m pip install ruff==0.17.0
 python scripts/verify.py
 ```
 

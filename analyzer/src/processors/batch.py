@@ -2,18 +2,19 @@
 
 import os
 import time
-from typing import Dict, Any, Optional, Callable
-from tqdm import tqdm
+from collections.abc import Callable
+from typing import Any
 
-from ..firebase_client import get_all_channels, get_unanalyzed_videos_paginated
-from ..analyzers import ThumbnailAnalyzer, TitleDescriptionAnalyzer
-from ..gemini_client import GeminiAPIError, GeminiRateLimitError, GeminiResponseError
-from ..config import config, logger
-from .progress import ProgressTracker
+from tqdm import tqdm
 
 # shared module path is set up by config.py (imported above)
 from shared.constants import ANALYSIS_TYPES
 
+from ..analyzers import ThumbnailAnalyzer, TitleDescriptionAnalyzer
+from ..config import config, logger
+from ..firebase_client import get_all_channels, get_unanalyzed_videos_paginated
+from ..gemini_client import GeminiAPIError, GeminiRateLimitError, GeminiResponseError
+from .progress import ProgressTracker
 
 # Default limit configurable via DEFAULT_VIDEO_LIMIT env var (default: 10000)
 DEFAULT_VIDEO_LIMIT = int(os.environ.get("DEFAULT_VIDEO_LIMIT", "10000"))
@@ -44,8 +45,8 @@ class BatchProcessor:
         self.analyzer = analyzers[analysis_type]
 
     def process_all_channels(
-        self, limit: Optional[int] = None, channel_filter: Optional[Callable[[Dict], bool]] = None
-    ) -> Dict[str, Any]:
+        self, limit: int | None = None, channel_filter: Callable[[dict], bool] | None = None
+    ) -> dict[str, Any]:
         """
         Process all channels.
 
@@ -93,7 +94,7 @@ class BatchProcessor:
             "skipped": total_skipped,
         }
 
-    def process_channel(self, channel_id: str, limit: Optional[int] = None) -> Dict[str, Any]:
+    def process_channel(self, channel_id: str, limit: int | None = None) -> dict[str, Any]:
         """
         Process all videos in a channel.
 
@@ -162,7 +163,7 @@ class BatchProcessor:
             "skipped": stats["skipped"],
         }
 
-    def _analyze_video(self, channel_id: str, video: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _analyze_video(self, channel_id: str, video: dict[str, Any]) -> dict[str, Any] | None:
         """
         Analyze a single video.
 
@@ -194,7 +195,7 @@ class BatchProcessor:
         return None
 
 
-def run_all_analysis(limit_per_channel: Optional[int] = None) -> Dict[str, Any]:
+def run_all_analysis(limit_per_channel: int | None = None) -> dict[str, Any]:
     """
     Run all analysis types on all channels.
 

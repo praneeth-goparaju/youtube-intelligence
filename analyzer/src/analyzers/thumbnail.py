@@ -1,13 +1,13 @@
 """Thumbnail analysis using Gemini Vision."""
 
-from typing import Dict, Any, Optional
+from typing import Any
 
 import requests
 
-from ..gemini_client import analyze_image, GeminiResponseError
-from ..firebase_client import download_thumbnail, save_analysis, has_analysis
-from ..prompts import THUMBNAIL_ANALYSIS_PROMPT
 from ..analysis_metadata import stamp_analysis_metadata
+from ..firebase_client import download_thumbnail, has_analysis, save_analysis
+from ..gemini_client import GeminiResponseError, analyze_image
+from ..prompts import THUMBNAIL_ANALYSIS_PROMPT
 
 
 class ThumbnailAnalyzer:
@@ -17,7 +17,7 @@ class ThumbnailAnalyzer:
 
     def analyze(
         self, channel_id: str, video_id: str, thumbnail_path: str, force: bool = False
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Analyze a video thumbnail.
 
@@ -61,7 +61,7 @@ class ThumbnailAnalyzer:
 
     def analyze_from_url(
         self, channel_id: str, video_id: str, thumbnail_url: str, force: bool = False
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Analyze a thumbnail from URL (for testing without storage).
 

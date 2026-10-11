@@ -11,7 +11,8 @@ PI.dev and other harness environments struggle to render in terminal views.
 import json
 import re
 import time
-from typing import Dict, Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -45,7 +46,7 @@ def extract_json_from_response(response_text: str) -> str:
     return text.strip()
 
 
-def parse_json_response(response_text: str) -> Dict[str, Any]:
+def parse_json_response(response_text: str) -> dict[str, Any]:
     """Parse Gemini response as JSON, handling markdown formatting.
 
     Args:

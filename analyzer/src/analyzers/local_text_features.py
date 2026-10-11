@@ -10,8 +10,7 @@ complete title_description analysis document.
 
 import re
 import unicodedata
-from typing import Dict, Any, List
-
+from typing import Any
 
 # ── Unicode range patterns ──────────────────────────────────────────────────
 
@@ -114,7 +113,7 @@ def _count_chars(text: str, pattern: re.Pattern) -> int:
     return len(pattern.findall(text))
 
 
-def _extract_emojis(text: str) -> List[str]:
+def _extract_emojis(text: str) -> list[str]:
     """Extract individual emoji characters from text."""
     emojis = []
     for char in text:
@@ -159,7 +158,7 @@ def _classify_emoji_positions(text: str) -> str:
     return ", ".join(p for p in order if p in positions)
 
 
-def _detect_capitalization(text: str) -> Dict[str, Any]:
+def _detect_capitalization(text: str) -> dict[str, Any]:
     """Detect capitalization style of a title."""
     latin_chars = _LATIN_RE.findall(text)
     if not latin_chars:
@@ -194,7 +193,7 @@ def _detect_capitalization(text: str) -> Dict[str, Any]:
     }
 
 
-def _detect_brackets(text: str) -> Dict[str, Any]:
+def _detect_brackets(text: str) -> dict[str, Any]:
     """Detect bracket usage in title."""
     has_round = bool(_ROUND_BRACKET_RE.search(text))
     has_square = bool(_SQUARE_BRACKET_RE.search(text))
@@ -221,7 +220,7 @@ def _detect_brackets(text: str) -> Dict[str, Any]:
     }
 
 
-def _detect_special_chars(text: str) -> Dict[str, Any]:
+def _detect_special_chars(text: str) -> dict[str, Any]:
     """Detect special characters (non-alphanumeric, non-space, non-script chars)."""
     # Remove emojis first to avoid counting them as special chars
     no_emoji = _EMOJI_RE.sub("", text)
@@ -260,7 +259,7 @@ def _detect_special_chars(text: str) -> Dict[str, Any]:
     }
 
 
-def _detect_punctuation(text: str) -> Dict[str, Any]:
+def _detect_punctuation(text: str) -> dict[str, Any]:
     """Detect ending punctuation type."""
     text = text.rstrip()
     if not text:
@@ -291,7 +290,7 @@ def _detect_punctuation(text: str) -> Dict[str, Any]:
     }
 
 
-def _classify_url(url: str) -> Dict[str, bool]:
+def _classify_url(url: str) -> dict[str, bool]:
     """Classify a URL into categories."""
     url_lower = url.lower()
     result = {
@@ -353,7 +352,7 @@ def _detect_hashtag_position(description: str) -> str:
     return positions.pop()
 
 
-def _detect_scripts(text: str) -> List[str]:
+def _detect_scripts(text: str) -> list[str]:
     """Detect which scripts are present in text."""
     scripts = []
     if _LATIN_RE.search(text):
@@ -365,7 +364,7 @@ def _detect_scripts(text: str) -> List[str]:
     return scripts
 
 
-def _detect_languages(text: str) -> List[str]:
+def _detect_languages(text: str) -> list[str]:
     """Detect which languages are likely present based on scripts."""
     languages = []
     if _LATIN_RE.search(text):
@@ -380,7 +379,7 @@ def _detect_languages(text: str) -> List[str]:
 # ── Main extraction ─────────────────────────────────────────────────────────
 
 
-def extract_local_features(title: str, description: str) -> Dict[str, Any]:
+def extract_local_features(title: str, description: str) -> dict[str, Any]:
     """Extract all deterministic (non-LLM) features from title and description.
 
     Returns a nested dict matching the analysis document structure, ready
@@ -405,7 +404,7 @@ def extract_local_features(title: str, description: str) -> Dict[str, Any]:
     }
 
 
-def _extract_title_structure(title: str) -> Dict[str, Any]:
+def _extract_title_structure(title: str) -> dict[str, Any]:
     """Extract deterministic structure fields from title."""
     # Segment detection: common separators
     separators = ["|", " - ", " – ", " — ", ":", " / "]
@@ -434,7 +433,7 @@ def _extract_title_structure(title: str) -> Dict[str, Any]:
     }
 
 
-def _extract_title_language(title: str) -> Dict[str, Any]:
+def _extract_title_language(title: str) -> dict[str, Any]:
     """Extract deterministic language fields from title."""
     telugu_count = _count_chars(title, _TELUGU_RE)
     english_count = _count_chars(title, _LATIN_RE)
@@ -467,7 +466,7 @@ def _extract_title_language(title: str) -> Dict[str, Any]:
     }
 
 
-def _extract_title_hooks(title: str) -> Dict[str, Any]:
+def _extract_title_hooks(title: str) -> dict[str, Any]:
     """Extract deterministic hook fields from title."""
     is_question = bool(_QUESTION_RE.search(title))
     numbers = _NUMBER_RE.findall(title)
@@ -478,7 +477,7 @@ def _extract_title_hooks(title: str) -> Dict[str, Any]:
     }
 
 
-def _extract_title_formatting(title: str) -> Dict[str, Any]:
+def _extract_title_formatting(title: str) -> dict[str, Any]:
     """Extract all formatting fields from title."""
     emojis = _extract_emojis(title)
     emoji_positions = _classify_emoji_positions(title)
@@ -507,7 +506,7 @@ def _extract_title_formatting(title: str) -> Dict[str, Any]:
     return result
 
 
-def _extract_description_features(description: str) -> Dict[str, Any]:
+def _extract_description_features(description: str) -> dict[str, Any]:
     """Extract all deterministic description features."""
     if not description.strip():
         return {
@@ -594,7 +593,7 @@ def _extract_description_features(description: str) -> Dict[str, Any]:
 # ── Merge utility ───────────────────────────────────────────────────────────
 
 
-def deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """Deep merge overlay dict into base dict. Overlay values win for conflicts.
 
     For nested dicts, merges recursively. For non-dict values, overlay wins.

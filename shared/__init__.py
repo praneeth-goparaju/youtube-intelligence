@@ -10,27 +10,27 @@ should be imported directly from their submodules to avoid dependency issues:
 """
 
 from .constants import (
-    # Collection names
-    COLLECTION_CHANNELS,
-    COLLECTION_VIDEOS,
-    COLLECTION_ANALYSIS,
-    COLLECTION_INSIGHTS,
-    COLLECTION_SCRAPE_PROGRESS,
-    COLLECTION_ANALYSIS_PROGRESS,
     # Analysis types
     ANALYSIS_TYPE_THUMBNAIL,
     ANALYSIS_TYPE_TITLE_DESCRIPTION,
     ANALYSIS_TYPES,
+    COLLECTION_ANALYSIS,
+    COLLECTION_ANALYSIS_PROGRESS,
+    # Collection names
+    COLLECTION_CHANNELS,
+    COLLECTION_INSIGHTS,
+    COLLECTION_SCRAPE_PROGRESS,
+    COLLECTION_VIDEOS,
+    # Model
+    GEMINI_MODEL,
     # Insight types
     INSIGHT_TYPE_CONTENT_GAPS,
     INSIGHT_TYPE_SUMMARY,
-    # Model
-    GEMINI_MODEL,
     # Timestamp
     TIMESTAMP_FORMAT,
+    VIDEO_CALCULATED_FIELDS,
     # Video fields
     VIDEO_REQUIRED_FIELDS,
-    VIDEO_CALCULATED_FIELDS,
 )
 
 __all__ = [

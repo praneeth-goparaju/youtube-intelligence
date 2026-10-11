@@ -1,9 +1,9 @@
 """Tests for the content gap analysis module."""
 
 from insights.src.gaps import (
-    GapAnalyzer,
-    MIN_VIDEOS_FOR_TOPIC,
     MIN_VIDEOS_FOR_KEYWORD,
+    MIN_VIDEOS_FOR_TOPIC,
+    GapAnalyzer,
 )
 
 

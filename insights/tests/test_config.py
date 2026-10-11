@@ -5,8 +5,8 @@ These verify that insights' Config inherits from the shared BaseFirebaseConfig
 populates every field with the expected values.
 """
 
-from shared.config import BaseFirebaseConfig
 from insights.src.config import Config, config
+from shared.config import BaseFirebaseConfig
 
 
 class TestInsightsConfigInheritance:

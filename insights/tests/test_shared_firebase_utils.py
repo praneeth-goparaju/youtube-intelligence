@@ -10,7 +10,7 @@ their documented "safe" fallbacks when Firebase has not been initialized.
 
 import logging
 
-from shared.firebase_utils import fetch_document, fetch_collection, save_document
+from shared.firebase_utils import fetch_collection, fetch_document, save_document
 
 
 def test_fetch_document_logs_and_returns_none_when_uninitialized(caplog):

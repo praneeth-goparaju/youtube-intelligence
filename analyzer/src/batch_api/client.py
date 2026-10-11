@@ -5,13 +5,12 @@ Uses the Gemini Developer API (not Vertex AI).
 """
 
 import time
-from typing import Optional, List, Any
+from typing import Any
 
 from google import genai
 from google.genai import types
 
 from ..config import config, logger
-
 
 # Terminal states for batch jobs
 COMPLETED_STATES = {
@@ -22,7 +21,7 @@ COMPLETED_STATES = {
 }
 
 # Client singleton
-_client: Optional[genai.Client] = None
+_client: genai.Client | None = None
 
 
 def _state_str(state) -> str:
@@ -137,7 +136,7 @@ def poll_batch_job(job_name: str, poll_interval: int = 60, max_polls: int = 1440
     return job
 
 
-def list_batch_jobs(limit: int = 20) -> List[Any]:
+def list_batch_jobs(limit: int = 20) -> list[Any]:
     """List recent batch jobs.
 
     Args:

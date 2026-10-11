@@ -1,21 +1,24 @@
 """Tests for the feature profiler module."""
 
+from datetime import UTC
+
 import pytest
+
 from insights.src.profiler import (
-    compute_feature_profile,
-    compute_timing_profile,
-    compute_feature_correlations,
-    compute_confidence,
-    compute_recency_weight,
-    is_significant,
+    MAX_CATEGORICAL_VALUES,
+    _bool_stats,
+    _categorical_stats,
     _collect_values,
     _compute_stats,
-    _bool_stats,
-    _numeric_stats,
-    _categorical_stats,
     _list_stats,
+    _numeric_stats,
     _set_nested,
-    MAX_CATEGORICAL_VALUES,
+    compute_confidence,
+    compute_feature_correlations,
+    compute_feature_profile,
+    compute_recency_weight,
+    compute_timing_profile,
+    is_significant,
 )
 
 
@@ -57,9 +60,9 @@ class TestSignificance:
 
 class TestRecencyWeight:
     def test_recent_date(self):
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
 
-        recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        recent = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         weight = compute_recency_weight(recent)
         assert weight > 0.99
 
@@ -68,9 +71,9 @@ class TestRecencyWeight:
         assert weight < 0.5
 
     def test_one_half_life(self):
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
 
-        one_year_ago = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
+        one_year_ago = (datetime.now(UTC) - timedelta(days=365)).isoformat()
         weight = compute_recency_weight(one_year_ago, half_life_days=365)
         assert abs(weight - 0.5) < 0.05
 

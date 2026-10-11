@@ -1,19 +1,19 @@
 """Firebase client for accessing Firestore and Storage."""
 
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 import firebase_admin
 from firebase_admin import firestore, storage
 from google.cloud.firestore_v1 import FieldFilter
-
-from .config import config
 
 # shared module path is set up by config.py (imported above)
 from shared.constants import COLLECTION_BATCH_JOBS
 from shared.firebase_utils import get_firebase_credentials
 
+from .config import config
 
-_app: Optional[firebase_admin.App] = None
-_db: Optional[firestore.Client] = None
+_app: firebase_admin.App | None = None
+_db: firestore.Client | None = None
 _bucket = None
 
 
@@ -49,7 +49,7 @@ def get_bucket():
 # ===== Channel Operations =====
 
 
-def get_all_channels() -> List[Dict[str, Any]]:
+def get_all_channels() -> list[dict[str, Any]]:
     """Get channels with analyzeEnabled == True from Firestore.
 
     Channels without the analyzeEnabled field are excluded.
@@ -60,14 +60,14 @@ def get_all_channels() -> List[Dict[str, Any]]:
     return [{"id": doc.id, **doc.to_dict()} for doc in query.stream()]
 
 
-def get_all_channels_unfiltered() -> List[Dict[str, Any]]:
+def get_all_channels_unfiltered() -> list[dict[str, Any]]:
     """Get all channels from Firestore (no analyzeEnabled filter)."""
     db = get_db()
     docs = db.collection("channels").stream()
     return [{"id": doc.id, **doc.to_dict()} for doc in docs]
 
 
-def get_channel(channel_id: str) -> Optional[Dict[str, Any]]:
+def get_channel(channel_id: str) -> dict[str, Any] | None:
     """Get a single channel by ID."""
     db = get_db()
     doc = db.collection("channels").document(channel_id).get()
@@ -79,7 +79,7 @@ def get_channel(channel_id: str) -> Optional[Dict[str, Any]]:
 # ===== Video Operations =====
 
 
-def get_unanalyzed_videos(channel_id: str, analysis_type: str, limit: int = 100) -> List[Dict[str, Any]]:
+def get_unanalyzed_videos(channel_id: str, analysis_type: str, limit: int = 100) -> list[dict[str, Any]]:
     """Get videos that haven't been analyzed yet for a specific analysis type.
 
     Note: For large channels, prefer get_unanalyzed_videos_paginated() which
@@ -93,7 +93,7 @@ def get_unanalyzed_videos_paginated(
     analysis_type: str,
     limit: int = 100,
     page_size: int = 1000,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Get unanalyzed videos using paginated Firestore queries.
 
     Fetches videos in pages and uses batch get (db.get_all) to check
@@ -154,7 +154,7 @@ def get_unanalyzed_videos_paginated(
     return unanalyzed
 
 
-def get_video(channel_id: str, video_id: str) -> Optional[Dict[str, Any]]:
+def get_video(channel_id: str, video_id: str) -> dict[str, Any] | None:
     """Fetch a single video document."""
     db = get_db()
     doc = db.collection("channels").document(channel_id).collection("videos").document(video_id).get()
@@ -163,7 +163,7 @@ def get_video(channel_id: str, video_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_channel_video_texts(channel_id: str) -> Dict[str, Dict[str, str]]:
+def get_channel_video_texts(channel_id: str) -> dict[str, dict[str, str]]:
     """Fetch title and description for all videos in a channel.
 
     Returns a dict keyed by video_id with {title, description} values.
@@ -184,7 +184,7 @@ def get_channel_video_texts(channel_id: str) -> Dict[str, Dict[str, str]]:
 # ===== Analysis Operations =====
 
 
-def save_analysis(channel_id: str, video_id: str, analysis_type: str, data: Dict[str, Any]) -> None:
+def save_analysis(channel_id: str, video_id: str, analysis_type: str, data: dict[str, Any]) -> None:
     """Save analysis results for a video."""
     db = get_db()
     (
@@ -226,13 +226,13 @@ def download_thumbnail(storage_path: str) -> bytes:
 # ===== Progress Tracking =====
 
 
-def save_analysis_progress(analysis_type: str, data: Dict[str, Any]) -> None:
+def save_analysis_progress(analysis_type: str, data: dict[str, Any]) -> None:
     """Save analysis progress."""
     db = get_db()
     db.collection("analysis_progress").document(analysis_type).set(data, merge=True)
 
 
-def get_analysis_progress(analysis_type: str) -> Optional[Dict[str, Any]]:
+def get_analysis_progress(analysis_type: str) -> dict[str, Any] | None:
     """Get analysis progress."""
     db = get_db()
     doc = db.collection("analysis_progress").document(analysis_type).get()
@@ -244,13 +244,13 @@ def get_analysis_progress(analysis_type: str) -> Optional[Dict[str, Any]]:
 # ===== Batch Job Operations =====
 
 
-def save_batch_job(job_id: str, data: Dict[str, Any]) -> None:
+def save_batch_job(job_id: str, data: dict[str, Any]) -> None:
     """Save or update a batch job record."""
     db = get_db()
     db.collection(COLLECTION_BATCH_JOBS).document(job_id).set(data, merge=True)
 
 
-def get_batch_job(job_id: str) -> Optional[Dict[str, Any]]:
+def get_batch_job(job_id: str) -> dict[str, Any] | None:
     """Get a batch job record by ID."""
     db = get_db()
     doc = db.collection(COLLECTION_BATCH_JOBS).document(job_id).get()
@@ -259,7 +259,7 @@ def get_batch_job(job_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_batch_jobs_by_state(state: str, analysis_type: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_batch_jobs_by_state(state: str, analysis_type: str | None = None) -> list[dict[str, Any]]:
     """Get batch jobs filtered by state and optionally analysis type."""
     db = get_db()
     query = db.collection(COLLECTION_BATCH_JOBS).where(filter=FieldFilter("state", "==", state))
@@ -270,7 +270,7 @@ def get_batch_jobs_by_state(state: str, analysis_type: Optional[str] = None) -> 
     return [{"id": doc.id, **doc.to_dict()} for doc in docs]
 
 
-def get_latest_batch_job(analysis_type: str, state: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def get_latest_batch_job(analysis_type: str, state: str | None = None) -> dict[str, Any] | None:
     """Get the most recent batch job for an analysis type."""
     db = get_db()
     query = db.collection(COLLECTION_BATCH_JOBS).where(filter=FieldFilter("analysisType", "==", analysis_type))
@@ -283,13 +283,13 @@ def get_latest_batch_job(analysis_type: str, state: Optional[str] = None) -> Opt
     return None
 
 
-def get_unimported_batch_job(analysis_type: str) -> Optional[Dict[str, Any]]:
+def get_unimported_batch_job(analysis_type: str) -> dict[str, Any] | None:
     """Find the oldest succeeded job with unfinished result processing."""
     jobs = get_batch_jobs_by_state("JOB_STATE_SUCCEEDED", analysis_type)
     return next((job for job in reversed(jobs) if not job.get("importedAt")), None)
 
 
-def list_all_batch_jobs(limit: int = 20) -> List[Dict[str, Any]]:
+def list_all_batch_jobs(limit: int = 20) -> list[dict[str, Any]]:
     """List recent batch jobs."""
     db = get_db()
     query = (
@@ -299,13 +299,13 @@ def list_all_batch_jobs(limit: int = 20) -> List[Dict[str, Any]]:
     return [{"id": doc.id, **doc.to_dict()} for doc in docs]
 
 
-def update_batch_job(job_id: str, updates: Dict[str, Any]) -> None:
+def update_batch_job(job_id: str, updates: dict[str, Any]) -> None:
     """Update specific fields on a batch job record."""
     db = get_db()
     db.collection(COLLECTION_BATCH_JOBS).document(job_id).update(updates)
 
 
-def get_all_channel_videos_for_batch(channel_id: str) -> List[Dict[str, Any]]:
+def get_all_channel_videos_for_batch(channel_id: str) -> list[dict[str, Any]]:
     """Get all videos for a channel (used during batch prepare to check analysis status).
 
     Returns minimal video data needed for batch preparation.
@@ -321,7 +321,7 @@ def get_all_channel_videos_for_batch(channel_id: str) -> List[Dict[str, Any]]:
     return videos
 
 
-def get_analyzed_video_ids(channel_id: str, analysis_type: str, video_ids: List[str]) -> set:
+def get_analyzed_video_ids(channel_id: str, analysis_type: str, video_ids: list[str]) -> set:
     """Get the set of video IDs that already have a given analysis type.
 
     Uses Firestore batch get (db.get_all) to check all videos in a single

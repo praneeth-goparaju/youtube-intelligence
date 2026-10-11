@@ -1,9 +1,9 @@
 """Progress tracking for analysis jobs."""
 
-from typing import Dict, Any, Optional
 from datetime import UTC, datetime
+from typing import Any
 
-from ..firebase_client import save_analysis_progress, get_analysis_progress
+from ..firebase_client import get_analysis_progress, save_analysis_progress
 
 
 class ProgressTracker:
@@ -17,7 +17,7 @@ class ProgressTracker:
             analysis_type: Type of analysis (thumbnail, title_description)
         """
         self.analysis_type = analysis_type
-        self.start_time: Optional[datetime] = None
+        self.start_time: datetime | None = None
         self.total_videos: int = 0
         self.processed: int = 0
         self.successful: int = 0
@@ -62,7 +62,7 @@ class ProgressTracker:
             return 0.0
         return (self.processed / self.total_videos) * 100
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get current statistics."""
         elapsed = None
         if self.start_time:

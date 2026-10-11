@@ -1,14 +1,14 @@
 """Configuration management for the analyzer."""
 
+import logging
 import os
 import sys
-import logging
 from pathlib import Path
 
 # Add shared module to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from shared.config import load_env_file, get_env, BaseGeminiConfig
+from shared.config import BaseGeminiConfig, get_env, load_env_file
 from shared.constants import GEMINI_MODEL
 
 

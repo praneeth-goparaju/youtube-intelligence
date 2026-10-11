@@ -7,12 +7,12 @@ sync analyzers and the batch import path (as analysisVersion previously did).
 """
 
 from datetime import UTC, datetime
-from typing import Any, Dict
+from typing import Any
 
-from shared.constants import GEMINI_MODEL, BATCH_ANALYSIS_VERSION
+from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
 
 
-def stamp_analysis_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
+def stamp_analysis_metadata(result: dict[str, Any]) -> dict[str, Any]:
     """Stamp standard provenance fields onto an analysis result in place.
 
     Sets analyzedAt (UTC ISO timestamp), modelUsed, and analysisVersion, then

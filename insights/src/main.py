@@ -16,10 +16,10 @@ Firestore output structure:
 import argparse
 import json
 import sys
-from pathlib import Path
 from collections import defaultdict
-from datetime import datetime, timezone
-from typing import Callable, List, Optional, Tuple
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 
 # Add shared module to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -28,19 +28,19 @@ import numpy as np
 
 from .config import config
 from .firebase_client import (
-    initialize_firebase,
     get_all_videos_with_analyses,
     get_saved_profiles_and_gaps,
+    initialize_firebase,
     save_insights,
 )
-from .profiler import (
-    compute_feature_profile,
-    compute_timing_profile,
-    compute_feature_correlations,
-    compute_recency_weight,
-    MIN_VIDEOS_PER_TYPE,
-)
 from .gaps import GapAnalyzer
+from .profiler import (
+    MIN_VIDEOS_PER_TYPE,
+    compute_feature_correlations,
+    compute_feature_profile,
+    compute_recency_weight,
+    compute_timing_profile,
+)
 from .recommender_bridge import generate_recommender_documents
 
 
@@ -88,7 +88,7 @@ def remove_outliers(
     get_vps_fn: Callable,
     min_subscribers: int = 1000,
     cap_percentile: int = 95,
-) -> Tuple[list, dict]:
+) -> tuple[list, dict]:
     """Remove outlier videos based on channel size and winsorize VPS.
 
     Args:
@@ -113,7 +113,7 @@ def remove_outliers(
         winsorized_count = sum(1 for vps in vps_values if vps > cap)
 
         # Cap VPS on copies to avoid mutating original video objects
-        for i, (v, vps) in enumerate(zip(filtered, vps_values)):
+        for i, (v, vps) in enumerate(zip(filtered, vps_values, strict=True)):
             calculated = v.get("video", {}).get("calculated", {})
             if vps > cap:
                 capped_calculated = {**calculated, "viewsPerSubscriber": cap}
@@ -138,7 +138,7 @@ def remove_outliers(
 def split_top_performers(
     videos: list,
     percentile: int = 90,
-    metric_fn: Optional[Callable] = None,
+    metric_fn: Callable | None = None,
 ) -> tuple:
     """Split videos into all and top performers by a metric.
 
@@ -159,7 +159,7 @@ def split_top_performers(
         return videos, [], 0.0
 
     threshold = float(np.percentile(metric_values, percentile))
-    top_videos = [v for v, val in zip(videos, metric_values) if val >= threshold]
+    top_videos = [v for v, val in zip(videos, metric_values, strict=True) if val >= threshold]
 
     return videos, top_videos, threshold
 
@@ -176,7 +176,7 @@ def _extract_description_analysis(title_analysis: dict) -> dict:
     return title_analysis.get("descriptionAnalysis", {})
 
 
-def _compute_recency_weights(videos: list) -> List[float]:
+def _compute_recency_weights(videos: list) -> list[float]:
     """Compute recency weights for a list of videos."""
     weights = []
     for v in videos:
@@ -185,9 +185,9 @@ def _compute_recency_weights(videos: list) -> List[float]:
     return weights
 
 
-def _align_weights(videos: list, all_weights: List[float], has_analysis_fn: Callable) -> List[float]:
+def _align_weights(videos: list, all_weights: list[float], has_analysis_fn: Callable) -> list[float]:
     """Return weights only for videos that pass the has_analysis_fn filter."""
-    return [w for v, w in zip(videos, all_weights) if has_analysis_fn(v)]
+    return [w for v, w in zip(videos, all_weights, strict=True) if has_analysis_fn(v)]
 
 
 def generate_content_type_profile(content_type: str, videos: list) -> dict:
@@ -197,7 +197,7 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
     timing patterns, feature correlations, and engagement profile.
     Each compares all videos vs top 10% performers.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     all_videos, top_videos, threshold = split_top_performers(videos)
     vps_values = [get_views_per_subscriber(v) for v in all_videos]
@@ -205,7 +205,7 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
 
     # Compute recency weights (top_videos is a subset — reuse weights by identity)
     all_weights = _compute_recency_weights(all_videos)
-    weight_by_id = {id(v): w for v, w in zip(all_videos, all_weights)}
+    weight_by_id = {id(v): w for v, w in zip(all_videos, all_weights, strict=True)}
     top_weights = [weight_by_id[id(v)] for v in top_videos]
 
     profile = {
@@ -310,7 +310,7 @@ def generate_content_type_profile(content_type: str, videos: list) -> dict:
 
 def save_to_file(name: str, data: dict) -> None:
     """Save report to local JSON file."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     filepath = config.OUTPUTS_DIR / f"{name}_{timestamp}.json"
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -319,7 +319,7 @@ def save_to_file(name: str, data: dict) -> None:
     print(f"    Saved to {filepath}")
 
 
-def save_bridge_documents(profiles: dict, gaps: Optional[dict], dry_run: bool) -> None:
+def save_bridge_documents(profiles: dict, gaps: dict | None, dry_run: bool) -> None:
     """Save complete recommender documents, leaving unavailable profiles unchanged."""
     documents = generate_recommender_documents(profiles, gaps)
     for name, data in documents.items():
@@ -430,7 +430,7 @@ def main():
         gap_analyzer = GapAnalyzer(videos, get_views_per_subscriber)
 
         gap_report = {
-            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "generatedAt": datetime.now(UTC).isoformat(),
             "totalVideos": len(videos),
             "contentGaps": gap_analyzer.find_content_gaps(),
             "keywordGaps": gap_analyzer.analyze_keyword_gaps(),
@@ -446,7 +446,7 @@ def main():
 
     # Generate summary
     summary = {
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "generatedAt": datetime.now(UTC).isoformat(),
         "totalVideos": len(videos),
         "outlierStats": outlier_stats,
         "contentTypes": [

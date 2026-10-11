@@ -9,12 +9,10 @@ The recommender (functions/) reads from:
 This module converts per-content-type profiles into those 4 documents.
 """
 
-from typing import Dict, List, Optional
-from datetime import datetime, timezone
 from collections import defaultdict
+from datetime import UTC, datetime
 
 from .profiler import _get_nested, is_significant
-
 
 # Maps thumbnail analysis section prefixes to recommender categories
 THUMBNAIL_SECTION_MAP = {
@@ -32,9 +30,9 @@ THUMBNAIL_SECTION_MAP = {
 
 
 def generate_recommender_documents(
-    profiles: Dict[str, dict],
-    content_gaps: Optional[dict],
-) -> Dict[str, dict]:
+    profiles: dict[str, dict],
+    content_gaps: dict | None,
+) -> dict[str, dict]:
     """Generate the 4 documents the recommender expects.
 
     Args:
@@ -44,7 +42,7 @@ def generate_recommender_documents(
     Returns:
         Dict with keys 'thumbnails', 'titles', 'timing', and optionally 'contentGaps'.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
     total_videos = sum(p.get("summary", {}).get("totalVideos", 0) for p in profiles.values())
 
     docs = {}
@@ -61,7 +59,7 @@ def generate_recommender_documents(
 
 
 def _build_thumbnail_insights(
-    profiles: Dict[str, dict],
+    profiles: dict[str, dict],
     timestamp: str,
     total_videos: int,
 ) -> dict:
@@ -190,7 +188,7 @@ def _get_thumbnail_category(feature_path: str) -> str:
 
 
 def _build_title_insights(
-    profiles: Dict[str, dict],
+    profiles: dict[str, dict],
     timestamp: str,
     total_videos: int,
 ) -> dict:
@@ -360,7 +358,7 @@ def _build_title_insights(
 
 
 def _build_timing_insights(
-    profiles: Dict[str, dict],
+    profiles: dict[str, dict],
     timestamp: str,
     total_videos: int,
 ) -> dict:
@@ -515,7 +513,7 @@ def _build_content_gap_insights(
     }
 
 
-def _weighted_avg(entries: List[tuple]) -> float:
+def _weighted_avg(entries: list[tuple]) -> float:
     """Compute weighted average from (value, weight) tuples."""
     if not entries:
         return 0.0

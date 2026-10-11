@@ -4,10 +4,11 @@ Uses viewsPerSubscriber as the performance metric to normalize across
 channels of different sizes.
 """
 
-from typing import Dict, Any, List, Callable
 from collections import defaultdict
-import numpy as np
+from collections.abc import Callable
+from typing import Any
 
+import numpy as np
 
 # Configuration constants
 MIN_VIDEOS_FOR_TOPIC = 3
@@ -19,7 +20,7 @@ KEYWORD_OPPORTUNITY_THRESHOLD = 0.1  # Keywords in <10% of videos
 class GapAnalyzer:
     """Analyze content gaps and opportunities."""
 
-    def __init__(self, videos: List[Dict[str, Any]], get_vps: Callable[[Dict], float]):
+    def __init__(self, videos: list[dict[str, Any]], get_vps: Callable[[dict], float]):
         """
         Initialize analyzer.
 
@@ -30,7 +31,7 @@ class GapAnalyzer:
         self.videos = videos
         self.get_vps = get_vps
 
-    def find_content_gaps(self) -> Dict[str, Any]:
+    def find_content_gaps(self) -> dict[str, Any]:
         """Find underserved content areas with high potential."""
         topic_performance = defaultdict(list)
 
@@ -88,7 +89,7 @@ class GapAnalyzer:
             "avgViewsPerSubscriber": round(avg_all, 2),
         }
 
-    def analyze_keyword_gaps(self) -> Dict[str, Any]:
+    def analyze_keyword_gaps(self) -> dict[str, Any]:
         """Find high-performing keywords with low usage."""
         keyword_performance = defaultdict(list)
 
@@ -144,7 +145,7 @@ class GapAnalyzer:
             "totalKeywords": len(keyword_performance),
         }
 
-    def analyze_format_gaps(self) -> Dict[str, Any]:
+    def analyze_format_gaps(self) -> dict[str, Any]:
         """Find underused content formats with high potential."""
         format_performance = defaultdict(list)
 

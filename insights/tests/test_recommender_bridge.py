@@ -1,14 +1,14 @@
 """Tests for the recommender bridge module."""
 
 from insights.src.recommender_bridge import (
-    generate_recommender_documents,
-    _build_thumbnail_insights,
-    _build_title_insights,
-    _build_timing_insights,
     _build_content_gap_insights,
+    _build_thumbnail_insights,
+    _build_timing_insights,
+    _build_title_insights,
     _get_hour_label,
     _get_thumbnail_category,
     _weighted_avg,
+    generate_recommender_documents,
 )
 
 

@@ -1,7 +1,7 @@
 """Tests for the shared analysis-provenance metadata helper."""
 
 from analyzer.src.analysis_metadata import stamp_analysis_metadata
-from shared.constants import GEMINI_MODEL, BATCH_ANALYSIS_VERSION
+from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
 
 
 def test_stamps_single_sourced_provenance_fields():

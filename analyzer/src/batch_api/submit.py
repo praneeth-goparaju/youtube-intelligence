@@ -7,27 +7,27 @@ job metadata in the batch_jobs Firestore collection.
 import random
 import re
 from datetime import UTC, datetime
-from typing import Optional, Dict, Any
+from typing import Any
+
+from shared.constants import BATCH_ANALYSIS_VERSION, GEMINI_MODEL
 
 from ..config import config
-from ..firebase_client import save_batch_job, get_latest_batch_job, update_batch_job
+from ..firebase_client import get_latest_batch_job, save_batch_job, update_batch_job
 from .client import (
-    upload_jsonl_file,
-    create_batch_job,
-    poll_batch_job,
     COMPLETED_STATES,
     _state_str,
+    create_batch_job,
+    poll_batch_job,
+    upload_jsonl_file,
 )
-
-from shared.constants import GEMINI_MODEL, BATCH_ANALYSIS_VERSION
 
 
 def submit_batch(
     jsonl_path: str,
     analysis_type: str,
     request_count: int,
-    job_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    job_name: str | None = None,
+) -> dict[str, Any]:
     """Submit a JSONL file as a batch prediction job.
 
     Args:
@@ -107,9 +107,9 @@ def submit_batch(
 
 def poll_and_update(
     analysis_type: str,
-    poll_interval: Optional[int] = None,
-    job_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    poll_interval: int | None = None,
+    job_name: str | None = None,
+) -> dict[str, Any]:
     """Poll a batch job until completion and update Firestore.
 
     Finds the latest active job for the analysis type, or uses the
@@ -177,7 +177,7 @@ def poll_and_update(
     return {**updates, "jobName": batch_job_name, "jobId": job_id}
 
 
-def _find_active_job(analysis_type: str) -> Optional[Dict[str, Any]]:
+def _find_active_job(analysis_type: str) -> dict[str, Any] | None:
     """Find the latest non-terminal batch job for an analysis type."""
     # Check for running jobs first
     for state in ("JOB_STATE_RUNNING", "JOB_STATE_PENDING", "JOB_STATE_QUEUED"):
